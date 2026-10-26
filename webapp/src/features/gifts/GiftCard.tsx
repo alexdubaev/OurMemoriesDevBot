@@ -3,7 +3,7 @@ import type { GiftDto } from '@web-app-demo/contracts'
 import { Typography } from '@/components/typography'
 import { WebpIcon } from '@/components/WebpIcon'
 import type { AuthenticatedTransport } from '@/platform/api'
-import { usePrivateImageResource } from '@/platform/media/use-private-image-url'
+import { usePrivateImageResource, type PrivateImageResourceState } from '@/platform/media/use-private-image-url'
 
 import { giftPhotoPath } from './api'
 import { boughtSummary, giftActions, reservationStatus, shopName, type GiftViewer } from './model'
@@ -28,10 +28,19 @@ export type GiftCardProps = {
   viewer: GiftViewer
 }
 
+export type GiftCardPresentationProps = Pick<GiftCardProps, 'gift' | 'locked' | 'onAction' | 'onDelete' | 'onEdit' | 'onOpenLink' | 'pendingAction' | 'timeZone' | 'variant' | 'viewer'> & {
+  photo: PrivateImageResourceState
+}
+
 export function GiftCard({
   accountId, familyId, gift, locked, onAction, onDelete, onEdit, onOpenLink, pendingAction, scopeKey, timeZone, transport, variant, viewer,
 }: GiftCardProps) {
   const photo = usePrivateImageResource(accountId, giftPhotoPath(familyId, gift.photoMediaId), transport, true, undefined, scopeKey)
+  return <GiftCardPresentation gift={gift} locked={locked} onAction={onAction} onDelete={onDelete} onEdit={onEdit} onOpenLink={onOpenLink} pendingAction={pendingAction} photo={photo} timeZone={timeZone} variant={variant} viewer={viewer} />
+}
+
+/** Pure card markup shared by the live wishlist and synthetic walkthroughs. */
+export function GiftCardPresentation({ gift, locked, onAction, onDelete, onEdit, onOpenLink, pendingAction, photo, timeZone, variant, viewer }: GiftCardPresentationProps) {
   const actions = giftActions(gift, viewer)
   const status = reservationStatus(gift, viewer.currentUserId)
   const shop = shopName(gift.url)

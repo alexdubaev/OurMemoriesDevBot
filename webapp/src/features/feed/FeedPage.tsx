@@ -946,7 +946,7 @@ export function TelegramVideo({ attachment, familyId, hostBridge, memoryId, tran
   </div>
 }
 
-function MemoryList({ familyTimezone, items, renderCard }: {
+export function MemoryList({ familyTimezone, items, renderCard }: {
   familyTimezone: string
   items: MemoryDto[]
   renderCard: (memory: MemoryDto) => ReactNode
@@ -961,11 +961,11 @@ function MemoryList({ familyTimezone, items, renderCard }: {
   })}</>
 }
 
-function MemoryActions({ memory, onOpen }: { memory: MemoryDto; onOpen: (memory: MemoryDto, trigger: HTMLButtonElement) => void }) {
+export function MemoryActions({ memory, onOpen }: { memory: MemoryDto; onOpen: (memory: MemoryDto, trigger: HTMLButtonElement) => void }) {
   return <button aria-label="Действия с воспоминанием" className="flex size-11 items-center justify-center rounded-full text-muted-foreground" onClick={(event) => onOpen(memory, event.currentTarget)} type="button"><WebpIcon decorative name="more" size={24} /></button>
 }
 
-function MemoryActionsContent({ memory, onDelete, onDetails, onEdit, onEditChildTags, onChooseReaction }: { memory: MemoryDto; onDelete?: () => void; onDetails: () => void; onEdit?: () => void; onEditChildTags?: () => void; onChooseReaction: () => void }) {
+export function MemoryActionsContent({ memory, onDelete, onDetails, onEdit, onEditChildTags, onChooseReaction }: { memory: MemoryDto; onDelete?: () => void; onDetails: () => void; onEdit?: () => void; onEditChildTags?: () => void; onChooseReaction: () => void }) {
   return <div className="memoly-memory-actions" data-memory-actions-for={memory.id}>
     <DrawerTitle className="sr-only">Действия с воспоминанием</DrawerTitle>
     <DrawerDescription className="sr-only">Выберите действие для этого воспоминания.</DrawerDescription>

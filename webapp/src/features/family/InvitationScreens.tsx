@@ -6,6 +6,7 @@ import { WebpIcon } from '@/components/WebpIcon'
 import { BrandLogo } from '@/components/BrandLogo'
 import { InlineError } from '@/features/feed'
 import { inviteIssueMessage } from './model'
+import { FamilyGuide } from './FamilyGuide'
 import './invitation-screens.css'
 
 type Role = 'viewer' | 'full'
@@ -89,6 +90,10 @@ export function IncomingInvite({ preview, style, onAccept }: { preview: InvitePr
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   const accepting = useRef(false)
+  const [showGuide, setShowGuide] = useState(true)
+  const acceptButton = useRef<HTMLButtonElement>(null)
+  const closeGuide = () => { setShowGuide(false); requestAnimationFrame(() => acceptButton.current?.focus()) }
+  if (showGuide) return <FamilyGuide key={preview.role} role={preview.role} onClose={closeGuide} />
   return <main className="invitation-screen invitation-incoming" style={style}>
     <BrandLogo className="invitation-brand" />
     <div className="invitation-result-symbol" aria-hidden="true"><WebpIcon decorative name="family" size={40} /></div>
@@ -96,9 +101,10 @@ export function IncomingInvite({ preview, style, onAccept }: { preview: InvitePr
     <p className="invitation-incoming-summary">«{preview.family.name}» · доступ: <strong>{preview.role === 'full' ? 'Полный' : 'Просмотр'}</strong></p>
     <p className="invitation-role-explanation">{roleDescription(preview.role)}</p>
     <p className="invitation-incoming-privacy">До вступления семейные фотографии и другие закрытые материалы не показываются.</p>
+    <button className="invitation-secondary" disabled={busy} onClick={() => setShowGuide(true)} type="button">Посмотреть пример и инструкцию</button>
     <p className="invitation-expiry">Ссылка действует до {new Date(preview.expiresAt).toLocaleString('ru-RU')}</p>
     {failed ? <p className="invitation-alert" role="alert">Не удалось присоединиться. Проверьте приглашение и повторите.</p> : null}
-    <button className="invitation-primary" disabled={busy} onClick={() => { if (accepting.current) return; accepting.current = true; setBusy(true); setFailed(false); void onAccept().catch(() => setFailed(true)).finally(() => { accepting.current = false; setBusy(false) }) }} type="button">{busy ? 'Присоединяемся…' : 'Присоединиться'}</button>
+    <button ref={acceptButton} className="invitation-primary" disabled={busy} onClick={() => { if (accepting.current) return; accepting.current = true; setBusy(true); setFailed(false); void onAccept().catch(() => setFailed(true)).finally(() => { accepting.current = false; setBusy(false) }) }} type="button">{busy ? 'Присоединяемся…' : 'Присоединиться'}</button>
   </main>
 }
 

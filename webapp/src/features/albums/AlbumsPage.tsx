@@ -18,6 +18,7 @@ import { EntryEditor } from './EntryEditor'
 import { WorkshopGallery } from './WorkshopGallery'
 import { ComposerHost } from './ComposerHost'
 import { coverSource, dateLabel, filled, kindNames, categories, suggestions, monthAgeLabel, type AlbumSource } from './model'
+import { AlbumCatalogPresentation } from './AlbumCatalogPresentation'
 import { SourcePreview } from './SourcePreview'
 import './albums.css'
 
@@ -38,6 +39,8 @@ export type AlbumsPageProps = {
   /** Tapping a child in the family header opens that child's page in the feed. */
   onOpenChild?: (childId: string) => void
 }
+
+function Loading() { return <div aria-label="Загрузка альбомов" className="albums-loading" role="status"><span /><span /><span /><span /></div> }
 export function AlbumsPage(props: AlbumsPageProps) {
   const { accountId, familyId, membershipEpoch, active, role, transport, hostBridge } = props
   const scopeKey = `${accountId}:${familyId}:${membershipEpoch}`
@@ -287,7 +290,6 @@ export function AlbumsPage(props: AlbumsPageProps) {
   // A child's album belongs to that child, whichever child the header shows.
   const albumChild = (multiChild && album?.childId ? childList.find((item) => item.id === album.childId) : undefined) ?? props.child
   const albumGroups = multiChild ? groupAlbumsByChild(albums, childList) : null
-  const albumCard = (item: AlbumDto) => <button className="albums-card" key={item.id} onClick={() => void openAlbum(item)} type="button"><span className={`albums-cover albums-kind-${item.kind}`}>{item.cover ? image(item.cover) : <><WebpIcon decorative name={item.kind === 'workshop' ? 'photo' : 'archive-box'} size={42} /><span>{kindNames[item.kind]}</span></>}<span className="albums-book-spine" /></span><strong>{item.title}</strong><small>{item.entryCount}{item.kind === 'year' ? ' из 12 месяцев' : item.kind === 'workshop' ? ' работ' : ' историй'}</small></button>
   const years = [...new Set(groups.map((group) => group.year).filter((year): year is number => year !== null))].sort((a, b) => b - a)
   const showNav = !upload
   return <div className="albums-surface" data-albums-route={route}>
@@ -297,11 +299,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
         {offline ? <p className="albums-error" role="status">Нет соединения. Изменения не сохраняются без подтверждения сервера.</p> : null}
         {savedRefreshFailed ? <div className="albums-error" role="alert"><p>Изменение сохранено. Обновить список пока не удалось.</p><button onClick={retryRead} type="button">Обновить данные</button></div> : null}
         {error ? <div className="albums-error" role="alert"><p>{error}</p><button disabled={busy} onClick={retryRead} type="button">Обновить данные</button></div> : null}
-        {route === 'catalog' ? <><div className="albums-heading"><h1>Альбомы</h1>{role === 'full' ? <button aria-label="Создать альбом" className="albums-icon-button" onClick={() => navigate('create')} type="button"><WebpIcon decorative name="plus" size={24} /></button> : null}</div><p className="albums-muted">Истории, к которым хочется возвращаться</p><div aria-label="Фильтр альбомов" className="albums-chips">{(['all', 'template', 'custom'] as const).map((value, index) => <button aria-pressed={filter === value} key={value} onClick={() => changeCatalogFilter(value)} type="button">{['Все', 'По шаблону', 'Свои'][index]}</button>)}</div>
-          {loading ? <Loading /> : albumGroups ? <div className="albums-groups">{albumGroups.map((group) => <section aria-label={group.title} className="albums-group" data-albums-group={group.childId ?? 'family'} key={group.key}><h2 className="albums-group-title">{group.title}</h2><div className="albums-catalog">{group.albums.map(albumCard)}</div></section>)}</div> : <div className="albums-catalog">{albums.map(albumCard)}</div>}
-          {!loading && !error && !albums.length ? <div className="albums-empty"><WebpIcon decorative name="archive-box" size={48} /><h2>Соберите свою первую историю</h2><p>Здесь будут моменты первого года, открытия и маленькие творения.</p>{role === 'full' ? <button className="albums-primary" onClick={() => navigate('create')} type="button">Создать альбом</button> : <p>Альбомы появятся, когда семья их создаст.</p>}</div> : null}
-          {catalogCursor && !loading ? <button className="albums-secondary" disabled={loadingMore} onClick={() => void more()} type="button">Ещё альбомы</button> : null}
-        </> : null}
+        {route === 'catalog' ? <AlbumCatalogPresentation albums={albums} catalogCursor={catalogCursor} error={Boolean(error)} filter={filter} groups={albumGroups} loading={loading} loadingMore={loadingMore} onCreate={() => navigate('create')} onFilterChange={changeCatalogFilter} onLoadMore={() => void more()} onOpenAlbum={(item) => void openAlbum(item)} renderCover={(item) => item.cover ? image(item.cover) : null} role={role} /> : null}
         {route === 'create' ? <AlbumForm api={api} child={props.child} childProfiles={childList} defaultChildId={props.childFilter} onCancel={back} onSaved={(next) => { setAlbums((old) => [next, ...old]); void openAlbum(next) }} /> : null}
         {album && route === 'edit-album' ? <><AlbumForm album={album} api={api} child={props.child} onCancel={back} onSaved={(next) => { setAlbum(next); navigate('album') }} /><button className="albums-secondary" onClick={() => navigate('cover')} type="button">Выбрать обложку</button><button className="albums-danger" disabled={busy || conflict} onClick={askDeleteAlbum} type="button">Удалить альбом</button></> : null}
         {album && route === 'cover' ? <><header className="albums-toolbar"><button onClick={back} type="button">‹ Назад</button><h1>Обложка альбома</h1></header><p className="albums-muted">Выберите один из доступных кадров этого альбома.</p><button className="albums-secondary" disabled={busy || conflict} onClick={() => selectCover(null)} type="button">Автоматическая обложка</button><div className="albums-picker-grid">{entries.flatMap((entry) => entry.sources).filter((source) => source.available && (source.kind === 'photo' || source.kind === 'video')).map((source) => <button aria-label="Выбрать этот кадр обложкой" className="albums-picker-item" disabled={busy || conflict} key={source.id} onClick={() => selectCover(source.id)} type="button">{image(source)}</button>)}</div>{entryCursor ? <button onClick={() => void more()} type="button">Ещё кадры</button> : null}</> : null}
@@ -333,4 +331,3 @@ export function AlbumsPage(props: AlbumsPageProps) {
     {showNav ? <BottomNavigation active="albums" appearance="memoly" onAdd={props.child ? props.onAdd : undefined} onAlbums={() => undefined} onFamily={props.onFamily} onFeed={props.onFeed} onGifts={props.onGifts} role={role} /> : null}
   </div>
 }
-function Loading() { return <div aria-label="Загрузка альбомов" className="albums-loading" role="status"><span /><span /><span /><span /></div> }
