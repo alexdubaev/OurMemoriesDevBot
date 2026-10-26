@@ -2,7 +2,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import type { GiftDto } from '@web-app-demo/contracts'
 
-import { BottomNavigation } from '@/components/BottomNavigation'
 import { MemolyBottomSheet } from '@/components/MemolyBottomSheet'
 import { Typography } from '@/components/typography'
 import { WebpIcon } from '@/components/WebpIcon'
@@ -13,6 +12,7 @@ import { isActivePrivateCacheIdentity, privateCacheIdentityGeneration, privateFa
 
 import { cancelGiftReservation, deleteGift, markGiftBought, reserveGift, unmarkGiftBought } from './api'
 import { GiftCard, type GiftActionKind } from './GiftCard'
+import { GiftPagePresentation } from './GiftPagePresentation'
 import { GiftFormSheet, type GiftFormTarget } from './GiftForm'
 import { giftFailureMessage, isGiftStateConflict, reservationConflictMessage, splitGifts, type GiftViewer } from './model'
 import { giftsQueryKeys, useGiftList } from './queries'
@@ -184,16 +184,38 @@ export function GiftsPage({
   )
 
   return (
-    <section aria-label="Вишлист" className="gifts-page" data-slot="gifts-page">
-      <header className="gifts-header">
-        <Typography as="h1" className="gifts-title" variant="memoryScreen">Вишлист для {child.name}</Typography>
-        {role === 'full' && gifts && gifts.length > 0 ? (
-          <button className="gift-button gift-button--primary" onClick={() => setForm({ mode: 'create' })} type="button">
-            <WebpIcon decorative monochrome name="plus" size={18} />
-            <Typography as="span" variant="memoryButton">Добавить подарок</Typography>
-          </button>
+    <GiftPagePresentation childName={child.name} onAdd={onAdd} onAlbums={onAlbums} onCreate={() => setForm({ mode: 'create' })} onFamily={onFamily} onFeed={onFeed} role={role} showAddButton={Boolean(gifts?.length)} afterNavigation={<>
+      <GiftFormSheet
+        accountId={currentUserId}
+        familyId={familyId}
+        onClose={() => setForm(null)}
+        onSaved={afterFormSaved}
+        onStale={(message) => { setForm(null); setNotice(message); void refresh() }}
+        open={active}
+        scopeKey={scopeKey}
+        target={form}
+        transport={transport}
+      />
+
+      <MemolyBottomSheet onOpenChange={(next) => { if (!next && !deleting) setDeleteTarget(null) }} open={active && deleteTarget !== null}>
+        {deleteTarget ? (
+          <div className="gift-form" data-slot="gift-delete-confirm">
+            <DrawerTitle className="gift-form-title">Удалить подарок? Бронь тоже исчезнет.</DrawerTitle>
+            <DrawerDescription className="gift-form-subtitle">{deleteTarget.title}</DrawerDescription>
+            {deleteError ? <Typography as="p" className="gift-form-failure" role="alert" variant="memoryCaption">{deleteError}</Typography> : null}
+            <div className="gift-form-actions">
+              <button className="gift-button gift-button--danger gift-button--wide" disabled={deleting} onClick={() => void confirmDelete()} type="button">
+                <Typography as="span" variant="memoryButton">{deleting ? 'Удаляем…' : deleteError ? 'Повторить' : 'Удалить'}</Typography>
+              </button>
+              <button className="gift-button gift-button--wide" disabled={deleting} onClick={() => setDeleteTarget(null)} type="button">
+                <Typography as="span" variant="memoryButton">Отмена</Typography>
+              </button>
+            </div>
+          </div>
         ) : null}
-      </header>
+      </MemolyBottomSheet>
+    </>}>
+      <>
 
       {notice ? <Typography aria-live="polite" as="p" className="gifts-notice" role="status" variant="memoryCaption">{notice}</Typography> : null}
 
@@ -255,37 +277,7 @@ export function GiftsPage({
         </section>
       ) : null}
 
-      <BottomNavigation appearance="memoly" active="gifts" onAdd={onAdd} onAlbums={onAlbums} onFamily={onFamily} onFeed={onFeed} onGifts={() => undefined} role={role} />
-
-      <GiftFormSheet
-        accountId={currentUserId}
-        familyId={familyId}
-        onClose={() => setForm(null)}
-        onSaved={afterFormSaved}
-        onStale={(message) => { setForm(null); setNotice(message); void refresh() }}
-        open={active}
-        scopeKey={scopeKey}
-        target={form}
-        transport={transport}
-      />
-
-      <MemolyBottomSheet onOpenChange={(next) => { if (!next && !deleting) setDeleteTarget(null) }} open={active && deleteTarget !== null}>
-        {deleteTarget ? (
-          <div className="gift-form" data-slot="gift-delete-confirm">
-            <DrawerTitle className="gift-form-title">Удалить подарок? Бронь тоже исчезнет.</DrawerTitle>
-            <DrawerDescription className="gift-form-subtitle">{deleteTarget.title}</DrawerDescription>
-            {deleteError ? <Typography as="p" className="gift-form-failure" role="alert" variant="memoryCaption">{deleteError}</Typography> : null}
-            <div className="gift-form-actions">
-              <button className="gift-button gift-button--danger gift-button--wide" disabled={deleting} onClick={() => void confirmDelete()} type="button">
-                <Typography as="span" variant="memoryButton">{deleting ? 'Удаляем…' : deleteError ? 'Повторить' : 'Удалить'}</Typography>
-              </button>
-              <button className="gift-button gift-button--wide" disabled={deleting} onClick={() => setDeleteTarget(null)} type="button">
-                <Typography as="span" variant="memoryButton">Отмена</Typography>
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </MemolyBottomSheet>
-    </section>
+      </>
+    </GiftPagePresentation>
   )
 }
