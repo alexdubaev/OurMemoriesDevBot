@@ -77,6 +77,8 @@ async function boot() {
     CORS_ORIGINS: `http://127.0.0.1:${webPort}`,
     MULTI_FAMILY_ACTIVATION: 'on',
     AUTH_RATE_LIMIT_MAX: '10000',
+    // The browser catalog reuses one synthetic owner; dedicated integration tests cover limiter boundaries.
+    ADMIN_USERS_READ_RATE_LIMIT_MAX: '10000',
     PRIVATE_STORAGE_DRIVER: 'filesystem',
     PRIVATE_STORAGE_LOCAL_ROOT: resolve(`.scratch/control-e2e-storage-${runId}`),
     PRIVATE_STORAGE_LOCAL_PUBLIC_URL: `http://127.0.0.1:${port}`,
