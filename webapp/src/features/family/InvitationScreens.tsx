@@ -6,6 +6,7 @@ import { WebpIcon } from '@/components/WebpIcon'
 import { BrandLogo } from '@/components/BrandLogo'
 import { InlineError } from '@/features/feed'
 import { inviteIssueMessage } from './model'
+import type { HostBridge } from '@/platform/host-bridge'
 import { FamilyGuide } from './FamilyGuide'
 import './invitation-screens.css'
 
@@ -14,7 +15,7 @@ type Role = 'viewer' | 'full'
 function roleDescription(role: Role) {
   return role === 'full'
     ? 'Можно добавлять, редактировать и удалять воспоминания семьи.'
-    : 'Можно смотреть воспоминания и ставить лайки.'
+    : 'Можно смотреть воспоминания, выбирать реакции, писать комментарии и бронировать подарки.'
 }
 
 // eslint-disable-next-line react-refresh/only-export-components -- tested invitation payload contract.
@@ -86,14 +87,14 @@ export function InviteReady({ invite, busy, copyState, onBack, onClose, onCopy, 
   </section>
 }
 
-export function IncomingInvite({ preview, style, onAccept }: { preview: InvitePreviewResponse; style: CSSProperties; onAccept: () => Promise<void> }) {
+export function IncomingInvite({ hostBridge, preview, style, onAccept }: { hostBridge: HostBridge; preview: InvitePreviewResponse; style: CSSProperties; onAccept: () => Promise<void> }) {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   const accepting = useRef(false)
   const [showGuide, setShowGuide] = useState(true)
   const acceptButton = useRef<HTMLButtonElement>(null)
   const closeGuide = () => { setShowGuide(false); requestAnimationFrame(() => acceptButton.current?.focus()) }
-  if (showGuide) return <FamilyGuide key={preview.role} role={preview.role} onClose={closeGuide} />
+  if (showGuide) return <FamilyGuide hostBridge={hostBridge} key={preview.role} role={preview.role} onClose={closeGuide} />
   return <main className="invitation-screen invitation-incoming" style={style}>
     <BrandLogo className="invitation-brand" />
     <div className="invitation-result-symbol" aria-hidden="true"><WebpIcon decorative name="family" size={40} /></div>

@@ -37,3 +37,5 @@ export {
   uploadFamilyVideo,
 } from './api'
 export { createFamilyErrorMessage } from './bootstrap'
+
+export { FamilyGuide, FamilyGuideEntry } from './FamilyGuide'

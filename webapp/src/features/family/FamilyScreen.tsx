@@ -45,7 +45,7 @@ export function FamilyScreen({
   invites: FamilyInviteDto[]
   members: FamilyMemberDto[]
   transport: AuthenticatedTransport
-  hostBridge: Pick<HostBridge, 'onBack'>
+  hostBridge: HostBridge
   currentUserId: string
   onAdd: () => void
   onAllFamilies?: () => void

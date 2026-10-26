@@ -47,10 +47,11 @@ function DrawerContent({
   className,
   children,
   showHandle = true,
+  portalContainer,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Content> & { showHandle?: boolean }) {
+}: React.ComponentProps<typeof DrawerPrimitive.Content> & { showHandle?: boolean; portalContainer?: HTMLElement | null }) {
   return (
-    <DrawerPortal data-slot="drawer-portal">
+    <DrawerPortal container={portalContainer ?? undefined} data-slot="drawer-portal">
       <DrawerOverlay />
       <DrawerPrimitive.Content
         data-slot="drawer-content"
