@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 
 const maxBotToken = '987654:max-family-audit-synthetic'
-type MaxAuditWindow = Window & { __openedLinks: string[]; WebApp: { initData: string } }
+type MaxAuditWindow = Window & { __openedLinks: string[]; __pressMaxBackButton?: () => void; WebApp: { initData: string; BackButton?: { show(): void; hide(): void; onClick(callback: () => void): void; offClick(callback: () => void): void } } }
 type ApiFamily = { family: { id: string } }
 type ApiChild = { child: { id: string } }
 type ApiMemory = { id: string }
@@ -111,29 +111,88 @@ test('MAX invited viewer sees existing note, photo album and voice history after
   const guestPage = await guestContext.newPage()
   const guestId = ownerId + 1
   await guestContext.addInitScript((data: string) => {
-    Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1.0', platform: 'android', colorScheme: 'light', ready() {}, initDataUnsafe: {} } })
+    const callbacks = new Set<() => void>()
+    const BackButton = {
+      show() {}, hide() {}, onClick(callback: () => void) { callbacks.add(callback) }, offClick(callback: () => void) { callbacks.delete(callback) },
+    }
+    Object.defineProperty(window, '__pressMaxBackButton', { configurable: true, value: () => { for (const callback of [...callbacks]) callback() } })
+    Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1.0', platform: 'android', colorScheme: 'light', ready() {}, initDataUnsafe: {}, BackButton } })
   }, signedMaxInitData({ id: guestId, first_name: 'Feed viewer' }, randomUUID(), `invite_${rawInvite}`))
   let guideAcceptRequests = 0
-  guestPage.on('request', (request) => { if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/accept')) guideAcceptRequests += 1 })
+  const guideDataWrites: string[] = []
+  guestPage.on('request', (request) => {
+    const method = request.method()
+    const pathname = new URL(request.url()).pathname
+    if (method === 'POST' && pathname.endsWith('/accept')) guideAcceptRequests += 1
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && /^\/api\/v1\/(families|memories|albums|gifts|media)(\/|$)/.test(pathname)) guideDataWrites.push(`${method} ${pathname}`)
+  })
   const guestAuthPromise = guestPage.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.ok())
+  await guestPage.emulateMedia({ colorScheme: 'dark' })
   await guestPage.goto('/')
   await guestPage.getByRole('button', { name: 'Продолжить' }).click()
   await expect(guestPage.getByRole('heading', { name: 'Пример семейного альбома' })).toBeVisible({ timeout: 15_000 })
   await expect(guestPage.getByText('Prejoin feed note')).toHaveCount(0)
   await guestPage.screenshot({ path: testInfo.outputPath('invited-viewer-feed-intro.png'), fullPage: true })
+  await guestPage.getByRole('button', { name: 'Инструкция', exact: true }).click()
+  await expect(guestPage.locator('.family-guide-help')).toBeVisible()
+  await guestPage.evaluate(() => (window as unknown as MaxAuditWindow).__pressMaxBackButton?.())
+  await expect(guestPage.locator('.family-guide-help')).toHaveCount(0)
+  await expect(guestPage.getByRole('button', { name: 'Инструкция', exact: true })).toBeFocused()
+  await guestPage.evaluate(() => (window as unknown as MaxAuditWindow).__pressMaxBackButton?.())
+  await expect(guestPage.getByRole('heading', { name: 'Пример семейного альбома' })).toHaveCount(0)
+  await expect(guestPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible()
+  expect(guideAcceptRequests).toBe(0)
+  expect(guideDataWrites).toEqual([])
+  await guestPage.getByRole('button', { name: 'Посмотреть пример и инструкцию', exact: true }).click()
+  await expect(guestPage.locator('.family-guide-coach')).toContainText('Учебный пример · 1/7')
+  const coach = guestPage.locator('.family-guide-coach')
+  await expect(coach).toContainText('Учебный пример · 1/7')
+  await expect(coach.getByRole('heading', { name: 'Ваша семейная лента', exact: true })).toBeVisible()
+  expect(await guestPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await guestPage.getByRole('button', { name: 'Далее', exact: true }).click()
+  await expect(coach).toContainText('Учебный пример · 2/7')
+  await guestPage.getByRole('button', { name: 'Назад', exact: true }).click()
+  await expect(coach).toContainText('Учебный пример · 1/7')
+  await guestPage.getByRole('button', { name: 'Далее', exact: true }).click()
   await guestPage.getByRole('button', { name: 'Свернуть подсказку' }).click()
   await guestPage.getByRole('button', { name: 'Открыть фото', exact: true }).click()
   await expect(guestPage.getByRole('dialog', { name: 'Медиа воспоминания' })).toBeVisible()
-  await guestPage.getByRole('button', { name: 'Закрыть просмотр' }).click()
+  await guestPage.keyboard.press('Escape')
+  await expect(guestPage.getByRole('dialog', { name: 'Медиа воспоминания' })).toHaveCount(0)
   await expect(guestPage.getByRole('button', { name: 'Открыть фото', exact: true })).toBeFocused()
+  await guestPage.getByRole('button', { name: 'Открыть фото', exact: true }).click()
+  await expect(guestPage.getByRole('dialog', { name: 'Медиа воспоминания' })).toBeVisible()
+  await guestPage.goBack()
+  await expect(guestPage.getByRole('dialog', { name: 'Медиа воспоминания' })).toHaveCount(0)
+  await expect(guestPage.getByRole('button', { name: 'Открыть фото', exact: true })).toBeFocused()
+  await guestPage.getByRole('button', { name: 'Показать подсказку' }).click()
   const demoCard = guestPage.locator('.family-guide [data-memory-kind="photo"]')
   await demoCard.getByRole('button', { name: 'Действия с воспоминанием' }).click()
   await expect(guestPage.getByRole('button', { name: 'Редактировать', exact: true })).toHaveCount(0)
+  await guestPage.getByRole('button', { name: 'Выбрать или изменить реакцию' }).click()
+  const reactionOptions = guestPage.getByRole('group', { name: 'Реакции', exact: true })
+  await expect(reactionOptions).toBeVisible()
+  await guestPage.getByRole('button', { name: 'Сердце', exact: true }).focus()
+  await guestPage.keyboard.press('ArrowRight')
+  await expect(guestPage.getByRole('button', { name: 'Влюблённость', exact: true })).toBeFocused()
+  await guestPage.keyboard.press('Escape')
+  await expect(reactionOptions).toHaveCount(0)
+  await demoCard.getByRole('button', { name: 'Действия с воспоминанием' }).click()
   await guestPage.getByRole('button', { name: 'Выбрать или изменить реакцию' }).click()
   await guestPage.getByRole('button', { name: 'Сердце', exact: true }).click()
   await expect(demoCard.getByRole('group', { name: 'Реакции: Сердце 1, ваша реакция' })).toBeVisible()
   await guestPage.getByRole('button', { name: 'Альбомы', exact: true }).click()
   await expect(guestPage.locator('.family-guide-coach').getByRole('heading', { name: 'Альбомы', exact: true })).toBeVisible()
+  await expect(guestPage.getByRole('button', { name: /Наше лето/ })).toBeVisible()
+  const albumFilters = guestPage.locator('.albums-chips')
+  await expect(albumFilters.getByRole('button', { name: 'Все', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await albumFilters.getByRole('button', { name: 'По шаблону', exact: true }).click()
+  await expect(albumFilters.getByRole('button', { name: 'По шаблону', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(guestPage.getByRole('button', { name: /Наше лето/ })).toHaveCount(0)
+  await expect(guestPage.getByRole('heading', { name: 'Соберите свою первую историю' })).toBeVisible()
+  await albumFilters.getByRole('button', { name: 'Свои', exact: true }).click()
+  await expect(guestPage.getByRole('button', { name: /Наше лето/ })).toBeVisible()
+  await albumFilters.getByRole('button', { name: 'Все', exact: true }).click()
   await expect(guestPage.getByRole('button', { name: /Наше лето/ })).toBeVisible()
   await guestPage.getByRole('button', { name: 'Вишлист', exact: true }).click()
   await expect(guestPage.locator('.family-guide-coach').getByRole('heading', { name: 'Вишлист', exact: true })).toBeVisible()
@@ -143,18 +202,35 @@ test('MAX invited viewer sees existing note, photo album and voice history after
   await expect(guestPage.getByText('Свободен', { exact: true })).toBeVisible()
   await guestPage.screenshot({ path: testInfo.outputPath('invited-viewer-real-interface.png'), fullPage: true })
   await guestPage.getByRole('button', { name: 'Инструкция', exact: true }).click()
-  await guestPage.getByText('5. Почему нет кнопки добавления', { exact: true }).click()
+  const instructionSheet = guestPage.locator('.family-guide-help')
+  await expect(instructionSheet.locator('details')).toHaveCount(7)
+  await expect(instructionSheet).toContainText('Ваш доступ: просмотр')
+  await assertInstructionSections(guestPage, 'viewer')
   await expect(guestPage.getByText(/попросите владельца семьи изменить ваш доступ/)).toBeVisible()
   await guestPage.screenshot({ path: testInfo.outputPath('invited-viewer-instructions.png'), fullPage: true })
+  await guestPage.keyboard.press('Escape')
+  await expect(instructionSheet).toHaveCount(0)
+  await expect(guestPage.getByRole('button', { name: 'Инструкция', exact: true })).toBeFocused()
+  await guestPage.getByRole('button', { name: 'Инструкция', exact: true }).click()
+  await guestPage.locator('[data-slot="drawer-overlay"]').click({ position: { x: 8, y: 8 } })
+  await expect(instructionSheet).toHaveCount(0)
+  await guestPage.getByRole('button', { name: 'Инструкция', exact: true }).click()
   await guestPage.getByRole('button', { name: 'Вернуться к примеру' }).click()
   await finishInviteIntroduction(guestPage)
   await expect(guestPage.getByRole('button', { name: 'Присоединиться', exact: true })).toBeFocused()
   await expect(guestPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
+  await guestPage.getByRole('button', { name: 'Посмотреть пример и инструкцию', exact: true }).click()
+  await expect(coach).toContainText('Учебный пример · 1/7')
+  await guestPage.getByRole('button', { name: 'Далее', exact: true }).click()
+  await guestPage.getByRole('button', { name: 'Назад', exact: true }).click()
+  await expect(coach.getByRole('heading', { name: 'Ваша семейная лента', exact: true })).toBeVisible()
+  await guestPage.getByRole('button', { name: 'Вернуться к приглашению', exact: true }).click()
   const guestAuth = await guestAuthPromise
   const guestToken = ((await guestAuth.json()) as { accessToken: string }).accessToken
   const unpublished = await guestPage.request.get(`/api/v1/families/${family.family.id}/memories`, { headers: { Authorization: `Bearer ${guestToken}` } })
   expect(unpublished.status()).toBe(404)
   expect(guideAcceptRequests).toBe(0)
+  expect(guideDataWrites).toEqual([])
   await guestPage.getByRole('button', { name: 'Присоединиться' }).click()
   await expect(guestPage.getByText('Prejoin feed note')).toBeVisible({ timeout: 15_000 })
   await expect(guestPage.getByText('Prejoin photo album')).toBeVisible()
@@ -645,14 +721,15 @@ test('MAX owner retries a lost invite response with one idempotency key and invi
   await guestContext.close()
 })
 
-test('MAX voice handoff opens the supported MAX bot through hostBridge', async ({ page }, testInfo) => {
+test('MAX voice handoff opens the supported MAX bot through hostBridge', async ({ browser, page }, testInfo) => {
   const maxId = 7_600_000 + Math.floor(Math.random() * 100_000)
   const openedLinks: string[] = []
   const unsupportedRequests: string[] = []
-  page.on('request', (request) => {
+  const recordUnsupportedRequest = (request: import('@playwright/test').Request) => {
     const url = new URL(request.url())
     if (/^(?:t\.me|telegram\.me|api\.telegram\.org)$/i.test(url.hostname) || /\/api\/auth(?:\/|$)/.test(url.pathname)) unsupportedRequests.push(request.url())
-  })
+  }
+  page.on('request', recordUnsupportedRequest)
   const initData = signedMaxInitData({ id: maxId, first_name: 'MAX voice handoff' }, randomUUID(), '')
   await page.addInitScript((data: string) => {
     const testWindow = window as unknown as Window & { __openedLinks: string[] }
@@ -683,19 +760,34 @@ test('MAX voice handoff opens the supported MAX bot through hostBridge', async (
   })
   expect(childResponse.status()).toBe(200)
 
-  await page.evaluate((data) => { (window as unknown as MaxAuditWindow).WebApp.initData = data }, signedMaxInitData({ id: maxId, first_name: 'MAX voice handoff' }, randomUUID(), ''))
-  await page.reload()
-  await page.getByRole('button', { name: 'Продолжить' }).click()
-  await page.getByRole('button', { name: /MAX voice handoff family/ }).click()
-  await page.getByRole('button', { name: 'Добавить', exact: true }).click()
-  await page.getByRole('button', { name: 'Добавить голос или видео' }).click()
-  await expect(page.getByRole('button', { name: 'Открыть MAX' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Открыть бота' })).toHaveCount(0)
-  await page.screenshot({ path: testInfo.outputPath('max-family-audit-voice-handoff.png'), fullPage: true })
-  await page.getByRole('button', { name: 'Открыть MAX' }).click()
-  openedLinks.push(...await page.evaluate(() => (window as unknown as MaxAuditWindow).__openedLinks))
+  const voiceContext = await browser.newContext()
+  await voiceContext.addInitScript((data: string) => {
+    const testWindow = window as unknown as Window & { __openedLinks: string[] }
+    testWindow.__openedLinks = []
+    Object.defineProperty(testWindow, 'WebApp', { configurable: true, value: {
+      initData: data, version: '1.0', platform: 'android', colorScheme: 'light', ready() {},
+      openLink(url: string) { testWindow.__openedLinks.push(url) },
+      initDataUnsafe: {},
+    } })
+  }, signedMaxInitData({ id: maxId, first_name: 'MAX voice handoff' }, randomUUID(), ''))
+  const voicePage = await voiceContext.newPage()
+  voicePage.on('request', recordUnsupportedRequest)
+  const voiceAuthResponsePromise = voicePage.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.ok())
+  await voicePage.goto('/')
+  const voiceAuthResponse = await voiceAuthResponsePromise
+  expect(voiceAuthResponse.ok()).toBe(true)
+  await expect(voicePage.getByRole('heading', { name: 'Мои семьи', exact: true })).toBeVisible()
+  await voicePage.getByRole('button', { name: /MAX voice handoff family/ }).click()
+  await voicePage.getByRole('button', { name: 'Добавить', exact: true }).click()
+  await voicePage.getByRole('button', { name: 'Добавить голос или видео' }).click()
+  await expect(voicePage.getByRole('button', { name: 'Открыть MAX' })).toBeVisible()
+  await expect(voicePage.getByRole('link', { name: 'Открыть бота' })).toHaveCount(0)
+  await voicePage.screenshot({ path: testInfo.outputPath('max-family-audit-voice-handoff.png'), fullPage: true })
+  await voicePage.getByRole('button', { name: 'Открыть MAX' }).click()
+  openedLinks.push(...await voicePage.evaluate(() => (window as unknown as MaxAuditWindow).__openedLinks))
   expect(openedLinks).toEqual(['https://max.ru/OurMemoriesMaxBot'])
   expect(unsupportedRequests).toEqual([])
+  await voiceContext.close()
 })
 
 test('MAX user can leave a terminal unavailable invitation and continue to My Families without accepting it', async ({ page }) => {
@@ -1088,10 +1180,18 @@ test('MAX-FULL: revoked viewer loses family access and rejoins with retained his
   await usedInviteContext.close()
 })
 
-async function signInMax(page: import('@playwright/test').Page, user: { id: number; first_name: string }, startParam = '') {
-  await page.addInitScript((data: string) => {
-    Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1.0', platform: 'android', colorScheme: 'light', ready() {}, initDataUnsafe: {} } })
-  }, signedMaxInitData(user, randomUUID(), startParam))
+async function signInMax(page: import('@playwright/test').Page, user: { id: number; first_name: string }, startParam = '', withBackButton = false) {
+  await page.addInitScript(({ data, withBackButton: enableBack }) => {
+    let BackButton: MaxAuditWindow['WebApp']['BackButton']
+    if (enableBack) {
+      const callbacks = new Set<() => void>()
+      BackButton = {
+        show() {}, hide() {}, onClick(callback) { callbacks.add(callback) }, offClick(callback) { callbacks.delete(callback) },
+      }
+      Object.defineProperty(window, '__pressMaxBackButton', { configurable: true, value: () => { for (const callback of [...callbacks]) callback() } })
+    }
+    Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1.0', platform: 'android', colorScheme: 'light', ready() {}, initDataUnsafe: {}, BackButton } })
+  }, { data: signedMaxInitData(user, randomUUID(), startParam), withBackButton })
   const authResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max'))
   await page.goto('/')
   const continueButton = page.getByRole('button', { name: 'Продолжить' })
@@ -1281,6 +1381,27 @@ async function finishInviteIntroduction(page: Page) {
   await page.getByRole('button', { name: 'Вернуться к приглашению', exact: true }).first().click()
 }
 
+async function assertInstructionSections(page: Page, role: 'full' | 'viewer') {
+  const sections = page.locator('.family-guide-help details')
+  const expectedSummaries = [
+    '1. Как присоединиться к близким',
+    '2. Как смотреть фото, видео и слушать голос',
+    '3. Сердечки и комментарии',
+    '4. Как выбрать подарок',
+    role === 'full' ? '5. Как добавить воспоминание' : '5. Почему нет кнопки добавления',
+    '6. Если что-то не получилось',
+    '7. Кто видит семейные материалы',
+  ]
+  await expect(sections).toHaveCount(expectedSummaries.length)
+  for (let index = 0; index < expectedSummaries.length; index += 1) {
+    const section = sections.nth(index)
+    if (await section.getAttribute('open') === null) await section.getByText(expectedSummaries[index], { exact: true }).click()
+    await expect(section).toHaveAttribute('open', '')
+  }
+  if (role === 'full') await expect(sections.nth(4)).toContainText('Подтвердите добавление')
+  else await expect(sections.nth(4)).toContainText('доступ «Просмотр»')
+}
+
 
 test('MAX full invitee explores the real add menu and explicitly retries joining after failure', async ({ browser, page }, testInfo) => {
   const ownerId = 970000000 + Math.floor(Math.random() * 10000000)
@@ -1296,17 +1417,66 @@ test('MAX full invitee explores the real add menu and explicitly retries joining
   let attempts = 0
   await guest.route('**/api/v1/invites/accept', async (route) => {
     attempts += 1
-    if (attempts === 1) await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Synthetic retry' } }) })
+    if (attempts === 1) {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Synthetic retry' } }) })
+    }
     else await route.continue()
   })
-  await signInMax(guest, { id: ownerId + 1, first_name: 'Demo full relative' }, `invite_${rawToken}`)
+  await signInMax(guest, { id: ownerId + 1, first_name: 'Demo full relative' }, `invite_${rawToken}`, true)
   await guest.getByRole('button', { name: 'Продолжить', exact: true }).click()
   await expect(guest.getByRole('heading', { name: 'Пример семейного альбома' })).toBeVisible({ timeout: 15_000 })
+  await expect(guest.getByText('Real family history after consent', { exact: true })).toHaveCount(0)
+  const fullCoach = guest.locator('.family-guide-coach')
+  await guest.getByRole('button', { name: 'Добавить', exact: true }).click()
+  await expect(guest.getByRole('heading', { name: 'Добавить воспоминание' })).toBeVisible()
+  await guest.evaluate(() => (window as unknown as MaxAuditWindow).__pressMaxBackButton?.())
+  await expect(guest.getByRole('heading', { name: 'Добавить воспоминание' })).toHaveCount(0)
+  await expect(guest.getByRole('heading', { name: 'Пример семейного альбома' })).toBeVisible()
+  await guest.evaluate(() => (window as unknown as MaxAuditWindow).__pressMaxBackButton?.())
+  await expect(guest.getByRole('heading', { name: 'Пример семейного альбома' })).toHaveCount(0)
+  await expect(guest.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible()
+  expect(attempts).toBe(0)
+  await guest.getByRole('button', { name: 'Посмотреть пример и инструкцию', exact: true }).click()
+  await expect(fullCoach).toContainText('Учебный пример · 1/7')
+  const guidePhotoCard = guest.locator('.family-guide [data-memory-kind="photo"]')
+  await guidePhotoCard.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+  await guest.getByRole('button', { name: 'Выбрать или изменить реакцию' }).click()
+  const guideReactionOptions = guest.getByRole('group', { name: 'Реакции', exact: true })
+  await expect(guideReactionOptions).toBeVisible()
+  await guest.evaluate(() => (window as unknown as MaxAuditWindow).__pressMaxBackButton?.())
+  await expect(guideReactionOptions).toHaveCount(0)
+  await expect(guest.getByRole('heading', { name: 'Пример семейного альбома' })).toBeVisible()
+  await guest.getByRole('button', { name: 'Инструкция', exact: true }).click()
+  await expect(guest.locator('.family-guide-help')).toContainText('Ваш доступ: полный')
+  await assertInstructionSections(guest, 'full')
+  await guest.keyboard.press('Escape')
+  await expect(guest.getByRole('button', { name: 'Инструкция', exact: true })).toBeFocused()
+  await expect(fullCoach).toContainText('Учебный пример · 1/7')
+  await guest.getByRole('button', { name: 'Далее', exact: true }).click()
+  await expect(fullCoach).toContainText('Учебный пример · 2/7')
+  await guest.getByRole('button', { name: 'Назад', exact: true }).click()
+  await expect(fullCoach).toContainText('Учебный пример · 1/7')
+  for (let step = 1; step < 7; step += 1) await guest.getByRole('button', { name: 'Далее', exact: true }).click()
+  await expect(fullCoach).toContainText('Учебный пример · 7/7')
+  await expect(fullCoach.getByRole('heading', { name: 'Готовы к семейному альбому', exact: true })).toBeVisible()
+  await expect(guest.getByRole('button', { name: 'Далее', exact: true })).toHaveCount(0)
+  await guest.getByRole('button', { name: 'Назад', exact: true }).click()
+  await expect(fullCoach).toContainText('Учебный пример · 6/7')
   await guest.getByRole('button', { name: 'Добавить', exact: true }).click()
   await expect(guest.getByRole('heading', { name: 'Добавить воспоминание' })).toBeVisible()
   await guest.getByRole('button', { name: 'Добавить голос или видео' }).click()
   await expect(guest.getByText('Голосовые — через бот', { exact: true })).toBeVisible()
   await guest.getByRole('button', { name: 'Назад', exact: true }).click()
+  await guest.getByRole('button', { name: 'Добавить голос или видео' }).click()
+  await guest.evaluate(() => (window as unknown as MaxAuditWindow).__pressMaxBackButton?.())
+  await expect(guest.getByRole('heading', { name: 'Добавить голос или видео', exact: true })).toHaveCount(0)
+  await expect(guest.getByRole('heading', { name: 'Добавить воспоминание' })).toBeVisible()
+  await expect(guest.locator('.memoly-add-sheet-panel button').first()).toBeFocused()
+  await guest.evaluate(() => (window as unknown as MaxAuditWindow).__pressMaxBackButton?.())
+  await expect(guest.getByRole('heading', { name: 'Добавить воспоминание' })).toHaveCount(0)
+  await expect(guest.getByRole('button', { name: 'Добавить', exact: true })).toBeFocused()
+  await guest.getByRole('button', { name: 'Добавить', exact: true }).click()
   await guest.keyboard.press('Escape')
   await expect(guest.getByRole('button', { name: 'Добавить', exact: true })).toBeFocused()
   await guest.getByRole('button', { name: 'Добавить', exact: true }).click()
@@ -1318,8 +1488,10 @@ test('MAX full invitee explores the real add menu and explicitly retries joining
   await guest.getByRole('button', { name: 'Вернуться к приглашению', exact: true }).first().focus()
   await guest.keyboard.press('Enter')
   await expect(guest.getByRole('button', { name: 'Присоединиться', exact: true })).toBeFocused()
-  await guest.getByRole('button', { name: 'Присоединиться', exact: true }).click()
+  await guest.getByRole('button', { name: 'Присоединиться', exact: true }).dblclick({ delay: 50 })
   await expect(guest.getByRole('heading', { name: 'Приглашение недоступно' })).toBeVisible()
+  expect(attempts).toBe(1)
+  await expect(guest.getByRole('button', { name: 'Присоединиться', exact: true })).toHaveCount(0)
   await guest.getByRole('button', { name: 'Повторить', exact: true }).click()
   await finishInviteIntroduction(guest)
   await guest.getByRole('button', { name: 'Присоединиться', exact: true }).click()

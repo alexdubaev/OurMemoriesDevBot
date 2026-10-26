@@ -2781,31 +2781,53 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
   assert.doesNotMatch(unexpectedRunningBackend.events, /BACKEND_INTERNAL_READY|GATE|AUTH_ROUTE_CHECK|UP:/)
 })
 
-test('MAX video retirement recovery accepts only the measured filesystem executable profile', () => {
+slowTest('MAX video retirement recovery accepts only the measured filesystem executable profile', () => {
   const target = maxVideoRecoveryBackend
   const expectedCompatibility = '1a4ecd291b67f1f173db203370f1cdd270f0eb6f96365806658f6034dbf452b6'
+  // The accepted recovery source is immutable; later UI changes must not inherit its attestation.
+  const measuredSha = '6fe28159adef0b8abd854b8aaeca8fe678087864'
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const measuredDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-retirement-measured-'))
+  const measuredAdded = spawnSync('git', ['worktree', 'add', '--detach', measuredDirectory, measuredSha], { cwd: root, encoding: 'utf8' })
+  assert.equal(measuredAdded.status, 0, measuredAdded.stdout + measuredAdded.stderr)
+  fixtureWorktrees.push(measuredDirectory)
+  const measured = { root: measuredDirectory, sha: measuredSha }
+  const measuredHead = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: measured.root, encoding: 'utf8' })
+  assert.equal(measuredHead.status, 0, measuredHead.stdout + measuredHead.stderr)
+  assert.equal(measuredHead.stdout.trim(), measuredSha)
+  const measuredStatus = spawnSync('git', ['status', '--porcelain'], { cwd: measured.root, encoding: 'utf8' })
+  assert.equal(measuredStatus.status, 0, measuredStatus.stdout + measuredStatus.stderr)
+  assert.equal(measuredStatus.stdout.trim(), '')
   const currentShaResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
   assert.equal(currentShaResult.status, 0, currentShaResult.stdout + currentShaResult.stderr)
   const candidate = { root, sha: currentShaResult.stdout.trim() }
   assert.equal(productionRuntimeFingerprint(root, target), maxVideoRecoveryRuntime)
-  assert.equal(productionCompatibilityFingerprint(root), expectedCompatibility)
+  assert.equal(productionCompatibilityFingerprint(measured.root), expectedCompatibility)
 
   const profile = (source, storageDriver = 'filesystem') => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
     input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${source.sha}\ncompose() { [[ "$*" == *'loadEnv(process.env)'* && "$*" == *'PRIVATE_STORAGE_DRIVER'* ]] || return 63; [ "\${MOCK_EFFECTIVE_STORAGE_DRIVER:-}" = filesystem ]; }\nMOCK_EFFECTIVE_STORAGE_DRIVER=${storageDriver}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
     encoding: 'utf8', timeout: 30_000,
   })
-  const accepted = profile(candidate)
+  const accepted = profile(measured)
   assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
   assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
-  const s3Rejected = profile(candidate, 's3')
+  const s3Rejected = profile(measured, 's3')
   assert.notEqual(s3Rejected.status, 0, 'MAX retirement recovery must reject an effective S3 storage driver')
 
+  const currentProfile = profile(candidate)
+  if (productionCompatibilityFingerprint(root) !== expectedCompatibility) {
+    assert.notEqual(currentProfile.status, 0, 'Changed executable input must not inherit the historical recovery attestation')
+  } else {
+    assert.equal(currentProfile.status, 0, currentProfile.stdout + currentProfile.stderr)
+    assert.equal(currentProfile.stdout.trim().split('\n').at(-1), 'max-video-retirement')
+  }
+
   const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-retirement-drift-'))
-  const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, candidate.sha], { cwd: root, encoding: 'utf8' })
+  const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, measured.sha], { cwd: root, encoding: 'utf8' })
   if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
   fixtureWorktrees.push(driftDirectory)
-  const mutated = commitSourceChange({ root: driftDirectory, sha: candidate.sha },
+  const mutated = commitSourceChange({ root: driftDirectory, sha: measured.sha },
     'backend/src/modules/control/infrastructure/control-purge.ts', '\n// synthetic MAX retirement compatibility drift\n',
     'mutate control retirement recovery executable input')
   const rejected = profile(mutated)

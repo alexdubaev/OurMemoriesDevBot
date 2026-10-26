@@ -12,7 +12,7 @@ import { MemberAvatarImage } from '@/features/avatar'
 import { useMemolyTheme, type MemolyTheme } from '@/features/theme'
 import type { HostBridge } from '@/platform/host-bridge'
 import { SettingsSheet } from './SettingsSheet'
-import { FamilyGuideEntry } from '@/features/family/FamilyGuide'
+import { FamilyGuideEntry } from '@/features/family'
 import { MemberProfile } from './MemberProfile'
 import { FamilySettingsPage } from './FamilySettingsPage'
 import { FamilyArchivePage } from './FamilyArchivePage'
@@ -26,7 +26,7 @@ import './family-management.css'
 export type FamilyMemberActions = { canEditAlias: boolean; canManageRole: boolean; canRemove: boolean }
 export type FamilyPresentationProps = {
   active?: boolean
-  familyResponse: FamilyResponse; hostBridge: Pick<HostBridge, 'onBack'>; invites: FamilyInviteDto[]; members: FamilyMemberDto[]; childAvatarUrl: string | null; childAvatarStatus?: 'absent' | 'loading' | 'ready' | 'error'
+  familyResponse: FamilyResponse; hostBridge: HostBridge; invites: FamilyInviteDto[]; members: FamilyMemberDto[]; childAvatarUrl: string | null; childAvatarStatus?: 'absent' | 'loading' | 'ready' | 'error'
   currentUserId: string
   maxChannelStatus: import('@web-app-demo/contracts').FamilyMaxChannelStatus | null; maxChannelLoading: boolean; maxChannelError: boolean; canManageMaxChannel: boolean; onRetryMaxChannel: () => void
   usage: { usedBytes: number; quotaBytes: number | null } | null; usageFailed: boolean; inviteReady: { url: string; expiresAt: string; inviteeDisplayName?: string } | null
@@ -107,7 +107,7 @@ export function FamilyPresentation({ active = true, familyResponse, hostBridge, 
     {savedRefreshFailed ? <div className="family-error" role="alert"><p>Изменение сохранено, но данные семьи не удалось обновить. Повторите только обновление данных.</p><button onClick={onRefresh} type="button">Обновить данные</button></div> : null}
     <div className={view === 'overview' ? 'family-overview-host' : 'family-shell'}>
       {view === 'overview' ? <FamilyOverview canInvite={canInvite} canManageMaxChannel={canManageMaxChannel} currentUserId={currentUserId} maxChannelError={maxChannelError} maxChannelLoading={maxChannelLoading} maxChannelStatus={maxChannelStatus} onRetryMaxChannel={onRetryMaxChannel} child={child} childAvatarUrl={childAvatarUrl} childAvatarStatus={childAvatarStatus} family={familyResponse.family} childList={familyChildren(familyResponse)} canEditChild={canEditChild} hasError={hasError} invites={invites} members={presentedMembers} onAddChild={onAddChild} onAllFamilies={onAllFamilies} onEditChild={onEditChild} renderChildAvatar={renderChildAvatar} onOpenChild={canEditChild && child ? () => onEditChild(child.id) : undefined} onInvite={() => { setInviteReturnView('overview'); setView('invite') }} onOpenInvites={() => setView('invites')} onOpenMember={(member) => { setSelectedMember(member); setView('member') }} onOpenSettings={openSettings} onRefresh={onRefresh} onRefreshUsage={onRefreshUsage} theme={theme} usage={usage} usageFailed={usageFailed} /> : null}
-      {view === 'overview' ? <FamilyGuideEntry key={`${familyResponse.family.id}:${currentUserId}:${active}`} role={liveSelf?.role === 'full' ? 'full' : 'viewer'} /> : null}
+      {view === 'overview' ? <FamilyGuideEntry hostBridge={hostBridge} key={`${familyResponse.family.id}:${currentUserId}:${active}`} role={liveSelf?.role === 'full' ? 'full' : 'viewer'} /> : null}
       {view === 'member' && currentSelectedMember ? <MemberProfile key={`${currentSelectedMember.userId}:${currentSelectedMember.role}:${currentSelectedMember.familyDisplayName ?? ''}`} actions={memberActions[currentSelectedMember.userId] ?? { canEditAlias: false, canManageRole: false, canRemove: false }} busy={busy} currentUserId={currentUserId} member={currentSelectedMember} onAccountNameSaved={(name) => setSelfNameOverride({ value: name, baseline: liveSelf?.displayName ?? null })} onBack={goOverview} onRefresh={onRefresh} onRemove={onRemoveMember} onSave={onUpdateMember} /> : null}
       {view === 'family-settings' && canManageFamily ? <FamilySettingsPage key={`${familyResponse.family.name}:${familyResponse.family.timezone}`} busy={busy} family={familyResponse.family} onBack={() => { goOverview(); setSettingsOpen(true) }} onRefresh={onRefresh} onSave={onUpdateFamily} /> : null}
       {view === 'archive' ? <FamilyArchivePage onBack={() => { goOverview(); setSettingsOpen(true) }} onRefresh={onRefreshUsage} usage={usage} usageFailed={usageFailed} /> : null}

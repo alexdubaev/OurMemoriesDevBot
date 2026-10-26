@@ -68,6 +68,8 @@ export type MemoryCardPresentationProps = {
   commentCount?: number
   onComments?: (trigger: HTMLButtonElement) => void
   reactionPickerRequest?: number
+  /** Optional host back layer for an embedded walkthrough; the card owns picker state. */
+  subscribeReactionPickerBack?: (close: () => void) => () => void
 }
 
 export function MemoryCardPresentation({
@@ -99,6 +101,7 @@ export function MemoryCardPresentation({
   commentCount,
   onComments,
   reactionPickerRequest = 0,
+  subscribeReactionPickerBack,
 }: MemoryCardPresentationProps) {
   const hasCaption = body.trim().length > 0
   const interactive = mode === 'feed'
@@ -117,6 +120,10 @@ export function MemoryCardPresentation({
     pickerOpenRef.current = open
     setPickerState({ open, context: reactionContext })
   }, [reactionContext])
+  useEffect(() => {
+    if (!pickerOpen || !subscribeReactionPickerBack) return undefined
+    return subscribeReactionPickerBack(() => setPickerOpen(false))
+  }, [pickerOpen, setPickerOpen, subscribeReactionPickerBack])
   const [pickerPoint, setPickerPoint] = useState({ x: 0, y: 0 })
   const handledReactionRequest = useRef(reactionPickerRequest)
   useEffect(() => {

@@ -8,6 +8,9 @@ export type MemolyBottomSheetProps = {
   open: boolean
   returnFocusRef?: RefObject<HTMLElement | null>
   dismissible?: boolean
+  /** Keep a nested sheet within its parent modal’s focus scope when supplied. */
+  portalContainer?: HTMLElement | null
+  onCloseAutoFocus?: (event: Event) => void
 }
 
 /**
@@ -15,14 +18,17 @@ export type MemolyBottomSheetProps = {
  * state/content while this wrapper keeps a single modal layer with the required mobile
  * safe-area and tactile geometry.
  */
-export function MemolyBottomSheet({ children, onOpenChange, open, returnFocusRef, dismissible = true }: MemolyBottomSheetProps) {
+export function MemolyBottomSheet({ children, onOpenChange, open, returnFocusRef, dismissible = true, portalContainer, onCloseAutoFocus }: MemolyBottomSheetProps) {
   return (
     <Drawer autoFocus dismissible={dismissible} onOpenChange={onOpenChange} open={open} shouldScaleBackground={false}>
       <DrawerContent
+        portalContainer={portalContainer}
         className="mx-auto max-w-[var(--layout-max-width)] border-0 bg-[var(--memory-surface)] bg-[image:var(--memory-surface-raised)] shadow-[var(--memory-sheet-shadow)]"
         data-memoly-bottom-sheet="true"
         showHandle={false}
         onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event)
+          if (event.defaultPrevented) return
           if (!returnFocusRef?.current) return
           event.preventDefault()
           returnFocusRef.current.focus()

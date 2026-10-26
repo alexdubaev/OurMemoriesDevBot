@@ -1,22 +1,19 @@
 /* eslint-disable typographyPolicy/use-typography-component -- tutorial prose uses semantic headings and details with scoped typography. */
-import { useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import type { AlbumDto, GiftDto, MemoryDto, MemoryReaction } from '@web-app-demo/contracts'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { BottomNavigation } from '@/components/BottomNavigation'
 import { ChildHeader } from '@/components/ChildHeader'
 import { useMemolyTheme } from '@/features/theme'
-import { AlbumCatalogPresentation } from '@/features/albums/AlbumCatalogPresentation'
-import { GiftPagePresentation } from '@/features/gifts/GiftPagePresentation'
-import { GiftCardPresentation } from '@/features/gifts/GiftCard'
+import { AlbumCatalogPresentation } from '@/features/albums'
+import { GiftPagePresentation, GiftCardPresentation } from '@/features/gifts'
 import '@/features/albums/albums.css'
 import '@/features/gifts/gifts.css'
 import { MemolyBottomSheet } from '@/components/MemolyBottomSheet'
 import { DrawerTitle, DrawerDescription } from '@/components/ui/drawer'
-import { FeedPresentation } from '@/features/feed/presentation/FeedPresentation'
-import { MemoryCardPresentation } from '@/features/feed/presentation/MemoryCardPresentation'
-import { MemoryActions, MemoryActionsContent, MemoryList, MixedMediaViewer, PhotoImage } from '@/features/feed/FeedPage'
-import { AddSheetPanel, VoiceOrVideoPanel } from '@/features/memoly-ui/AddSheetPresentation'
-import { createHostBridge } from '@/platform/host-bridge'
+import { FeedPresentation, MemoryCardPresentation, MemoryActions, MemoryActionsContent, MemoryList, MixedMediaViewer, PhotoImage } from '@/features/feed'
+import { AddSheetPanel, VoiceOrVideoPanel } from '@/features/memoly-ui'
+import type { HostBridge } from '@/platform/host-bridge'
 import type { AuthenticatedTransport } from '@/platform/api/authenticated-transport'
 import beachPhoto from '../../../../assets/demo/beach.webp'
 import './family-guide.css'
@@ -51,10 +48,11 @@ const demoGift: GiftDto = {
 const demoRelativeId = '00000000-0000-4000-8000-000000000009'
 
 /** The production UI with synthetic data; only the tutorial controls have their own layout. */
-export function FamilyGuide({ role, onClose, closeLabel = 'Вернуться к приглашению' }: {
-  role: Role; onClose: () => void; closeLabel?: string
+export function FamilyGuide({ hostBridge, role, onClose, closeLabel = 'Вернуться к приглашению' }: {
+  hostBridge: HostBridge; role: Role; onClose: () => void; closeLabel?: string
 }) {
   const { theme } = useMemolyTheme()
+  const [guideContainer, setGuideContainer] = useState<HTMLDivElement | null>(null)
   const [screen, setScreen] = useState<'feed' | 'albums' | 'gifts'>('feed')
   const [albumFilter, setAlbumFilter] = useState<'all' | 'template' | 'custom'>('all')
   const [gift, setGift] = useState(demoGift)
@@ -67,14 +65,32 @@ export function FamilyGuide({ role, onClose, closeLabel = 'Вернуться к
   const [actionHint, setActionHint] = useState('')
   const [actionMemory, setActionMemory] = useState(demoMemory)
   const [reactionRequest, setReactionRequest] = useState({ memoryId: '', revision: 0 })
-  const [hostBridge] = useState(() => createHostBridge())
+  const pendingReaction = useRef<string | null>(null)
   const insets = hostBridge.getInsets()
   const insetStyle = Object.fromEntries(Object.entries(insets).map(([side, value]) => [`--host-inset-${side}`, `${value}px`])) as CSSProperties
   const photoButton = useRef<HTMLButtonElement>(null)
   const addButton = useRef<HTMLButtonElement>(null)
   const sheetTrigger = useRef<HTMLElement | null>(null)
-  const openSheet = (next: 'help' | 'add') => { sheetTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setSheet(next) }
-  const openActions = (memory: MemoryDto, trigger: HTMLButtonElement) => { sheetTrigger.current = trigger; setActionMemory(memory); setSheet('memory') }
+  const addPanel = useRef<HTMLDivElement>(null)
+  const focusAddOnReturn = useRef(false)
+  const returnToAdd = () => { focusAddOnReturn.current = true; setSheet('add') }
+  useLayoutEffect(() => {
+    if (sheet !== 'add' || !focusAddOnReturn.current) return
+    focusAddOnReturn.current = false
+    addPanel.current?.querySelector<HTMLButtonElement>('button')?.focus()
+  }, [sheet])
+  const onHostBack = useEffectEvent(() => {
+    if (pendingReaction.current) { pendingReaction.current = null; return }
+    if (photoOpen) setPhotoOpen(false)
+    else if (sheet === 'voice') returnToAdd()
+    else if (sheet !== null) setSheet(null)
+    else onClose()
+  })
+  // Share the app's LIFO back stack; the photo viewer registers above this fallback.
+  useEffect(() => hostBridge.onBack(() => onHostBack()), [hostBridge])
+  const openPhoto = () => { pendingReaction.current = null; setPhotoOpen(true) }
+  const openSheet = (next: 'help' | 'add') => { pendingReaction.current = null; sheetTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setSheet(next) }
+  const openActions = (memory: MemoryDto, trigger: HTMLButtonElement) => { pendingReaction.current = null; sheetTrigger.current = trigger; setActionMemory(memory); setSheet('memory') }
   const steps = [
     { title: 'Ваша семейная лента', text: 'Здесь близкие сохраняют фото, видео, голос и истории. Это настоящий интерфейс memoLy с примерными материалами. Ничего из примера не попадёт в вашу семью.' },
     { title: 'Откройте фотографию', text: 'Нажмите фото в карточке: откроется обычный просмотрщик memoLy. Рассмотрите снимок и закройте его крестиком. Подсказку можно свернуть, чтобы она не мешала.' },
@@ -84,11 +100,11 @@ export function FamilyGuide({ role, onClose, closeLabel = 'Вернуться к
     { title: role === 'full' ? 'Добавьте свой момент' : 'Ваш доступ: просмотр', text: role === 'full' ? 'Нажмите «Добавить» в нижнем меню. Вы увидите настоящее меню выбора формата. Здесь можно познакомиться с ним; загрузка материалов начнётся уже в вашей семье.' : 'Можно смотреть, реагировать, комментировать и бронировать подарки. Для добавления воспоминаний попросите владельца семьи выдать полный доступ.' },
     { title: 'Готовы к семейному альбому', text: 'Закройте знакомство, проверьте название семьи в приглашении и нажмите «Присоединиться». Повторная инструкция доступна в разделе «Семья» → «Как пользоваться memoLy».' },
   ]
-  const selectStep = (next: number) => { setScreen(next === 3 ? 'albums' : next === 4 ? 'gifts' : 'feed'); setStep(next); setCollapsed(false); setActionHint('') }
-  const explainAction = (text: string) => { setSheet(null); setActionHint(text); setCollapsed(false) }
+  const selectStep = (next: number) => { pendingReaction.current = null; setScreen(next === 3 ? 'albums' : next === 4 ? 'gifts' : 'feed'); setStep(next); setCollapsed(false); setActionHint('') }
+  const explainAction = (text: string) => { pendingReaction.current = null; setSheet(null); setActionHint(text); setCollapsed(false) }
   return <DialogPrimitive.Root open onOpenChange={(open) => { if (!open) onClose() }}>
     <DialogPrimitive.Portal container={typeof document === 'undefined' ? undefined : document.querySelector<HTMLElement>('.memoly-app-root')}>
-      <DialogPrimitive.Content aria-describedby={undefined} className="family-guide" style={insetStyle} onEscapeKeyDown={(event) => {
+      <DialogPrimitive.Content ref={setGuideContainer} aria-describedby={undefined} className="family-guide" style={insetStyle} onEscapeKeyDown={(event) => {
           // Vaul and radix-ui resolve separate dismissal stacks; dismiss only the inner layer.
           if (sheet !== null) { event.preventDefault(); setSheet(null) }
           else if (photoOpen) { event.preventDefault(); setPhotoOpen(false) }
@@ -97,10 +113,10 @@ export function FamilyGuide({ role, onClose, closeLabel = 'Вернуться к
         {screen === 'feed' ? <FeedPresentation activeFilter="all" childName="Аня" childSubtitle="3 года · Семья Соколовых" familyName="Семья Соколовых" insets={insets} role={role} addButtonRef={addButton}
           onAdd={() => openSheet('add')} onFeed={() => selectStep(0)} onAlbums={() => selectStep(3)} onGifts={() => selectStep(4)} onFamily={() => openSheet('help')} onFilterChange={noop}
           onOpenChild={() => explainAction('Нажмите имя ребёнка в своей семье, чтобы открыть его страницу и связанные воспоминания.')} onAllFamilies={() => explainAction('В «Моих семьях» можно выбрать другой семейный альбом.')} onOpenSettings={() => explainAction('В настройках можно изменить оформление и параметры приложения.')}>
-          <MemoryList familyTimezone="Europe/Moscow" items={[demoMemory, demoNote]} renderCard={(memory) => memory.kind === 'photo' ? <MemoryCardPresentation actions={<MemoryActions memory={demoMemory} onOpen={openActions} />} reactionPickerRequest={reactionRequest.memoryId === demoMemory.id ? reactionRequest.revision : 0} authorInitials="М" authorName="Мама" body={demoMemory.body} kind="photo" memoryId={demoMemory.id} occurredTime="12 июля · 12:00"
-            reactionCounts={reaction ? { [reaction]: 1 } : {}} currentUserReaction={reaction} onReaction={setReaction} onOpen={() => setPhotoOpen(true)} commentCount={0} onComments={() => { openSheet('help') }}
-            media={<button aria-label="Открыть фото" className="ml-media-button block w-full" ref={photoButton} onClick={() => setPhotoOpen(true)} type="button"><PhotoImage alt="Воспоминание" width={800} height={600} src={beachPhoto} onLoad={noop} onError={noop} /></button>} />
-          : <MemoryCardPresentation actions={<MemoryActions memory={demoNote} onOpen={openActions} />} reactionPickerRequest={reactionRequest.memoryId === demoNote.id ? reactionRequest.revision : 0} authorInitials="П" authorName="Папа" body="«А море умеет спать? Оно всё время шевелится!»" kind="note" memoryId={demoNote.id} occurredTime="12 июля · 18:00" media={null}
+          <MemoryList familyTimezone="Europe/Moscow" items={[demoMemory, demoNote]} renderCard={(memory) => memory.kind === 'photo' ? <MemoryCardPresentation subscribeReactionPickerBack={hostBridge.onBack} actions={<MemoryActions memory={demoMemory} onOpen={openActions} />} reactionPickerRequest={reactionRequest.memoryId === demoMemory.id ? reactionRequest.revision : 0} authorInitials="М" authorName="Мама" body={demoMemory.body} kind="photo" memoryId={demoMemory.id} occurredTime="12 июля · 12:00"
+            reactionCounts={reaction ? { [reaction]: 1 } : {}} currentUserReaction={reaction} onReaction={setReaction} onOpen={openPhoto} commentCount={0} onComments={() => { openSheet('help') }}
+            media={<button aria-label="Открыть фото" className="ml-media-button block w-full" ref={photoButton} onClick={openPhoto} type="button"><PhotoImage alt="Воспоминание" width={800} height={600} src={beachPhoto} onLoad={noop} onError={noop} /></button>} />
+          : <MemoryCardPresentation subscribeReactionPickerBack={hostBridge.onBack} actions={<MemoryActions memory={demoNote} onOpen={openActions} />} reactionPickerRequest={reactionRequest.memoryId === demoNote.id ? reactionRequest.revision : 0} authorInitials="П" authorName="Папа" body="«А море умеет спать? Оно всё время шевелится!»" kind="note" memoryId={demoNote.id} occurredTime="12 июля · 18:00" media={null}
             reactionCounts={noteReaction ? { [noteReaction]: 1 } : {}} currentUserReaction={noteReaction} onReaction={setNoteReaction} onOpen={() => explainAction('В заметках сохраняются слова, мысли и семейные истории.')} commentCount={0} onComments={() => openSheet('help')} />} />
         </FeedPresentation> : screen === 'albums' ? <div className="albums-surface" data-albums-route="catalog">
           <ChildHeader childName="Аня" childSubtitle="3 года · Семья Соколовых" mode="feed" onAllFamilies={() => explainAction('В «Моих семьях» можно выбрать другой семейный альбом.')} theme={theme} />
@@ -124,10 +140,19 @@ export function FamilyGuide({ role, onClose, closeLabel = 'Вернуться к
           <button className="family-guide-exit" onClick={onClose} type="button">{closeLabel}</button>
         </aside>
         {photoOpen ? <MixedMediaViewer childName="Аня" familyTimezone="Europe/Moscow" hostBridge={hostBridge} index={0} initialPhotoUrl={beachPhoto} memory={demoMemory} onClose={() => setPhotoOpen(false)} onIndexChange={noop} returnFocusRef={photoButton} transport={demoTransport} preferReturnFocus /> : null}
-        <MemolyBottomSheet open={sheet !== null} onOpenChange={(open) => { if (!open) setSheet(null) }} returnFocusRef={sheetTrigger}>
-          {sheet === 'add' ? <AddSheetPanel onClose={() => setSheet(null)} onNote={() => explainAction('Заметка сохраняет текст: первые слова, смешную фразу или небольшую историю. В своей семье введите текст и подтвердите сохранение.')} onPhoto={() => explainAction('В своей семье выберите фото или видео с устройства, добавьте подпись и подтвердите загрузку.')} onVoiceOrVideo={() => setSheet('voice')} />
-            : sheet === 'voice' ? <VoiceOrVideoPanel onBack={() => setSheet('add')} onClose={() => setSheet(null)} onOpenBot={() => explainAction('После вступления отправляйте голосовые боту MAX. Он поможет сохранить запись в нужную семью.')} onVideo={() => explainAction('В своей семье выберите готовый видеофайл с устройства и дождитесь окончания загрузки.')} />
-            : sheet === 'memory' ? <MemoryActionsContent memory={actionMemory} onChooseReaction={() => { setSheet(null); setReactionRequest((current) => ({ memoryId: actionMemory.id, revision: current.revision + 1 })) }}
+        <MemolyBottomSheet portalContainer={guideContainer} open={sheet !== null} onOpenChange={(open) => { if (!open) setSheet(null) }} returnFocusRef={sheetTrigger} onCloseAutoFocus={(event) => {
+          const memoryId = pendingReaction.current
+          if (!memoryId) return
+          event.preventDefault()
+          pendingReaction.current = null
+          if (!guideContainer?.isConnected) return
+          sheetTrigger.current?.focus({ preventScroll: true })
+          // Open after the drawer focus scope has closed, so it cannot dismiss the picker.
+          setReactionRequest((current) => ({ memoryId, revision: current.revision + 1 }))
+        }}>
+          {sheet === 'add' ? <div ref={addPanel}><AddSheetPanel onClose={() => setSheet(null)} onNote={() => explainAction('Заметка сохраняет текст: первые слова, смешную фразу или небольшую историю. В своей семье введите текст и подтвердите сохранение.')} onPhoto={() => explainAction('В своей семье выберите фото или видео с устройства, добавьте подпись и подтвердите загрузку.')} onVoiceOrVideo={() => setSheet('voice')} /></div>
+            : sheet === 'voice' ? <VoiceOrVideoPanel onBack={returnToAdd} onClose={() => setSheet(null)} onOpenBot={() => explainAction('После вступления отправляйте голосовые боту MAX. Он поможет сохранить запись в нужную семью.')} onVideo={() => explainAction('В своей семье выберите готовый видеофайл с устройства и дождитесь окончания загрузки.')} />
+            : sheet === 'memory' ? <MemoryActionsContent memory={actionMemory} onChooseReaction={() => { pendingReaction.current = actionMemory.id; setSheet(null) }}
               onDetails={() => explainAction('В своей семье «Подробнее» откроет всю публикацию. Фотографию в примере можно рассмотреть, нажав на сам снимок.')}
               onEdit={role === 'full' ? () => explainAction('В своей семье здесь можно изменить подпись и дату воспоминания.') : undefined}
               onDelete={role === 'full' ? () => explainAction('В своей семье удаление воспоминания потребует подтверждения. Учебные материалы не удаляются.') : undefined} />
@@ -155,11 +180,11 @@ function FamilyInstructions({ role }: { role: Role }) {
   </div>
 }
 
-export function FamilyGuideEntry({ role }: { role: Role }) {
+export function FamilyGuideEntry({ hostBridge, role }: { hostBridge: HostBridge; role: Role }) {
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   return <div className="family-guide-entry">
     <button className="family-guide-exit" ref={trigger} onClick={() => setOpen(true)} type="button">Как пользоваться memoLy</button>
-    {open ? <FamilyGuide key={role} role={role} closeLabel="Закрыть знакомство" onClose={() => { setOpen(false); requestAnimationFrame(() => trigger.current?.focus()) }} /> : null}
+    {open ? <FamilyGuide hostBridge={hostBridge} key={role} role={role} closeLabel="Закрыть знакомство" onClose={() => { setOpen(false); requestAnimationFrame(() => trigger.current?.focus()) }} /> : null}
   </div>
 }

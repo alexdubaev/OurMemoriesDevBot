@@ -4,6 +4,7 @@ import type { FamilyMaxChannelStatus, FamilyMemberDto, FamilyResponse } from '@w
 import { FamilyScreen } from '@/features/family'
 import { ThemeProvider } from '@/features/theme'
 import type { AuthenticatedTransport } from '@/platform/api'
+import { createBrowserDevHostBridge } from '@/platform/host-bridge'
 import { Typography } from '@/components/typography'
 
 const userIds = ['22222222-2222-4222-8222-222222222221', '22222222-2222-4222-8222-222222222222']
@@ -45,7 +46,7 @@ export function FamilyMaxChannelFixturePage() {
     userId: userIds[userIndex]!, avatarPath: null, displayName: `Синтетический участник ${userIndex + 1}`, familyDisplayName: null,
     role, isOwner: false, joinedAt: '2026-01-01T00:00:00.000Z', version: 1,
   }]
-  const hostBridge = { onBack: () => () => undefined }
+  const [hostBridge] = useState(() => createBrowserDevHostBridge())
 
   return <ThemeProvider>
     <div className="family-max-channel-fixture" data-testid="family-max-channel-fixture">

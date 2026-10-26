@@ -811,7 +811,7 @@ function FamilyController({ currentUserId, hostBridge, insets, insetsStyle, invi
     catch (reason) { setInviteIssue(inviteIssueCode(reason)) }
     finally { setInvitePending(false) }
   }} style={insetsStyle} />
-  if (invitePreview && inviteToken) return <IncomingInvite preview={invitePreview} style={insetsStyle} onAccept={async () => {
+  if (invitePreview && inviteToken) return <IncomingInvite hostBridge={hostBridge} preview={invitePreview} style={insetsStyle} onAccept={async () => {
     setInvitePending(true)
     try {
       await acceptInvite(transport, inviteToken)
