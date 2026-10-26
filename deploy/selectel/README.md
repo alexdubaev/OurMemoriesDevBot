@@ -572,7 +572,7 @@ image, migration, ancestry, lock, configuration and readiness guards still apply
 
 The Control account-deletion source has a separate `max-video-retirement` profile,
 bound to executable fingerprint
-`df407cf52c8fa4a495a11019d1917943b939177ccc813c10d1d5ddd6704f19c4`
+`1a4ecd291b67f1f173db203370f1cdd270f0eb6f96365806658f6034dbf452b6`
 and the unchanged d299 image pair above. It requires the effective storage driver
 to be `filesystem`. Its exact migration catalog extends d299's 59 entries with
 `20261025160000_control_user_lifecycle`, `20261025170000_control_durable_purge`

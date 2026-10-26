@@ -2807,7 +2807,7 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
 
 test('MAX video retirement recovery accepts only the measured filesystem executable profile', () => {
   const target = maxVideoRecoveryBackend
-  const expectedCompatibility = 'df407cf52c8fa4a495a11019d1917943b939177ccc813c10d1d5ddd6704f19c4'
+  const expectedCompatibility = '1a4ecd291b67f1f173db203370f1cdd270f0eb6f96365806658f6034dbf452b6'
   const currentShaResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
   assert.equal(currentShaResult.status, 0, currentShaResult.stdout + currentShaResult.stderr)
   const candidate = { root, sha: currentShaResult.stdout.trim() }
