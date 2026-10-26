@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { Client } from 'pg'
@@ -102,9 +102,15 @@ test('retention migration holds preexisting legacy videos without changing times
       expect(after.rows[0].updated_at).toEqual(insertedAt)
       expect(after.rows[0].storage_deleted_at).toBeNull()
       expect(after.rows[0].storage_used_bytes).toBe(quota.toString())
-      const ledger = await verify.query(`SELECT count(*)::text AS count FROM _prisma_migrations
+      const ledger = await verify.query(`SELECT migration_name FROM _prisma_migrations
         WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`)
-      expect(ledger.rows).toEqual([{ count: '59' }])
+      // This test checks today's candidate deploy and retention backfill, so its completed
+      // ledger must match the current migration directories, including later approved suffixes.
+      const currentMigrationNames = readdirSync(resolve(root, 'backend/prisma/migrations'), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort()
+      expect(ledger.rows.map((row) => row.migration_name).sort()).toEqual(currentMigrationNames)
     } finally { await verify.end() }
 
     process.env.DATABASE_URL = ownUrl.toString()
