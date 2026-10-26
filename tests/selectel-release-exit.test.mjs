@@ -962,30 +962,6 @@ function commitFrozenSourceFiles(source, files, message) {
   return { ...source, sha }
 }
 
-function commitFrozenSourceFilesFromHead(source, files, message) {
-  const paths = []
-  for (const [relativePath, expectedBlob] of files) {
-    const result = spawnSync('git', ['show', `HEAD:${relativePath}`], { cwd: root, encoding: null })
-    if (result.status !== 0) throw new Error(`frozen source ${relativePath} is unavailable: ${result.stderr.toString('utf8')}`)
-    const actualBlob = spawnSync('git', ['hash-object', '--stdin'], { cwd: root, input: result.stdout, encoding: 'utf8' })
-    if (actualBlob.status !== 0) throw new Error(`cannot hash frozen source ${relativePath}: ${actualBlob.stderr}`)
-    assert.equal(actualBlob.stdout.trim(), expectedBlob, `HEAD no longer contains the reviewed frozen blob for ${relativePath}`)
-    mkdirSync(dirname(resolve(source.root, relativePath)), { recursive: true })
-    writeFileSync(resolve(source.root, relativePath), result.stdout)
-    paths.push(relativePath)
-  }
-  const env = { ...process.env, GIT_AUTHOR_NAME: 'Rollback Test', GIT_AUTHOR_EMAIL: 'rollback-test@example.invalid',
-    GIT_COMMITTER_NAME: 'Rollback Test', GIT_COMMITTER_EMAIL: 'rollback-test@example.invalid' }
-  const add = spawnSync('git', ['add', '--', ...paths], { cwd: source.root, env, encoding: 'utf8' })
-  if (add.status !== 0) throw new Error(add.stdout + add.stderr)
-  const commit = spawnSync('git', ['-c', 'user.name=Rollback Test', '-c', 'user.email=rollback-test@example.invalid',
-    'commit', '--quiet', '-m', message], { cwd: source.root, env, encoding: 'utf8' })
-  if (commit.status !== 0) throw new Error(commit.stdout + commit.stderr)
-  const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: source.root, encoding: 'utf8' }).stdout.trim()
-  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: source.root, encoding: 'utf8' }).stdout.trim(), '')
-  return { ...source, sha }
-}
-
 function frozenGitBlob(hash, description) {
   const result = spawnSync('git', ['cat-file', 'blob', hash], { cwd: root, encoding: 'utf8' })
   if (result.status !== 0) throw new Error(`frozen ${description} fixture is unavailable: ${result.stderr}`)
@@ -2639,7 +2615,7 @@ test('MAX family invite entry retains only its measured d299 recovery pair', {
   fixtureWorktrees.push(sourceDirectory)
   const avatarSource = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedMemberAvatarProductionBlobs,
     'reconstruct exact member-avatar production inputs')
-  const source = commitFrozenSourceFilesFromHead(avatarSource, reviewedFamilyInviteEntryProductionBlobs,
+  const source = commitFrozenSourceFiles(avatarSource, reviewedFamilyInviteEntryProductionBlobs,
     'freeze exact family-invite production input blobs')
   const installed = commitSourceFile({ root: source.root, sha: source.sha }, 'deploy/selectel/ci-release.sh',
     readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8'),
