@@ -1,30 +1,57 @@
 import { Hono } from 'hono'
 import type { DbClient } from '../../db'
 import type { AppEnv } from '../../env'
+import type { PrivateStorage } from '../../storage'
 import type { AuthHttpEnv } from '../auth'
-import { AppError } from '../../http/errors'
+import { AppError, errorResponse, requestIdFrom } from '../../http/errors'
+import type { ApiErrorCode } from '@web-app-demo/contracts'
 import {
   controlCursorQuerySchema, controlEventSchema, controlFamilyDetailSchema, controlMeSchema,
   controlFamilyMemberSchema, controlInviteSchema, controlMembershipSchema, controlFamilyRowSchema, controlOverviewSchema, controlPageSchema,
   controlSampleSchema, controlSourceSchema, controlStorageSchema,
   controlSystemSchema, controlUserDetailSchema, controlUserRowSchema,
+  controlFamilyDeletionPreviewSchema, controlLifecycleResultSchema, controlUserDeletionPreviewSchema,
 } from '@web-app-demo/contracts'
-import { decodeEventCursor, eventCursor, exportCsv, familyCsvRow, notFound, parseListQuery, sample, userCsvRow, uuidParam, validateChildListQuery, validateUserSort } from './application/control-helpers'
+import { decodeEventCursor, eventCursor, exportCsv, familyCsvRow, notFound, parseListQuery, sample, userCsvRow, uuidParam, validateChildListQuery, validateFamilyListQuery, validateUserSort } from './application/control-helpers'
 import { familyWhere, listChildren, listFamilies, listUsers, queryEvents, queryFamilyById, queryOverview, queryStorage, queryUserById, queryFamilies, queryUsers, userWhere } from './infrastructure/control-read-repository'
 import { z } from 'zod'
+import { bodyLimit } from 'hono/body-limit'
 export { collectControlMetrics, createControlCollection, pruneControlTelemetry, readControlMetric, recordControlProgress, withControlReadTimeout } from './infrastructure/control-collection'
+export { runControlDeletionMaintenance } from './infrastructure/control-purge'
 import { CONTROL_STALE_AFTER_SECONDS, readControlMetric } from './infrastructure/control-collection'
 import { withControlReadTimeout } from './infrastructure/control-collection'
+import { ControlLifecycleFailure, previewFamilyDeletion, previewUserDeletion, purgeControlFamily, restoreControlUser, trashControlUser } from './infrastructure/control-lifecycle'
 
-export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }: {
+export function createControlModule({ db, env, storage, requireAuth, ownerReadRateLimit }: {
   db: DbClient
   env: AppEnv
+  storage?: PrivateStorage
   requireAuth: import('hono').MiddlewareHandler<AuthHttpEnv>
   ownerReadRateLimit: import('hono').MiddlewareHandler<AuthHttpEnv>
 }) {
+  const retirementSupported = typeof storage?.retireObject === 'function'
   const routes = new Hono<AuthHttpEnv>()
   const exportsByOwner = new Map<string, number[]>()
+  const mutationRequestsByOwner = new Map<string, number[]>()
   const ownerSet = new Set(env.CONTROL_OWNER_USER_IDS)
+  const protectedOwnerIds = [...ownerSet]
+  const mutationRateLimit: import('hono').MiddlewareHandler<AuthHttpEnv> = async (c, next) => {
+    const owner = c.var.user.id
+    const now = Date.now()
+    const recent = (mutationRequestsByOwner.get(owner) ?? []).filter((at) => now - at < 60_000)
+    if (recent.length >= 20) throw new AppError(429, 'RATE_LIMITED', 'Слишком много операций удаления. Попробуйте позже')
+    recent.push(now)
+    if (mutationRequestsByOwner.size >= 1_000 && !mutationRequestsByOwner.has(owner)) mutationRequestsByOwner.delete(mutationRequestsByOwner.keys().next().value!)
+    mutationRequestsByOwner.set(owner, recent)
+    await next()
+  }
+  const parseLifecycleBody = async <T extends z.ZodType>(c: import('hono').Context<AuthHttpEnv>, schema: T): Promise<z.infer<T>> => {
+    let body: unknown
+    try { body = await c.req.json() } catch { throw new AppError(400, 'INVALID_INPUT', 'Некорректное тело запроса') }
+    const parsed = schema.safeParse(body)
+    if (!parsed.success) throw new AppError(400, 'INVALID_INPUT', 'Некорректное тело запроса')
+    return parsed.data
+  }
 
   routes.post('/activity', requireAuth, async (c) => {
     if (c.var.user.externalIdentity?.provider !== 'max') {
@@ -91,6 +118,10 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
     }
     await next()
   })
+  routes.use('/control/*', bodyLimit({
+    maxSize: env.AUTH_BODY_LIMIT_BYTES,
+    onError: (c) => c.json(errorResponse('PAYLOAD_TOO_LARGE', 'Размер запроса превышает допустимый', requestIdFrom(c)), 413),
+  }))
   routes.use('/control/*', ownerReadRateLimit)
 
   routes.get('/control/me', (c) => c.json(controlMeSchema.parse({ allowed: true, serverNow: new Date().toISOString(), features: ['read', 'csv_export'] })))
@@ -104,12 +135,13 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
     const { activityRows, coverage, activeCount } = await withControlReadTimeout(db, async (tx) => {
       const [activityRows, coverage, activeCount] = await Promise.all([
       tx.$queryRaw<Array<{ day: Date; count: bigint }>>`
-        SELECT utc_day AS day, COUNT(DISTINCT user_id)::bigint AS count
-        FROM control_user_activity WHERE utc_day >= ${from}::date AND utc_day <= ${now}::date
+        SELECT a.utc_day AS day, COUNT(DISTINCT a.user_id)::bigint AS count
+        FROM control_user_activity a JOIN users u ON u.id=a.user_id
+        WHERE u.control_state <> 'purged' AND a.utc_day >= ${from}::date AND a.utc_day <= ${now}::date
         GROUP BY utc_day ORDER BY utc_day
       `,
       tx.controlCollectionState.findUnique({ where: { id: 'user_activity' }, select: { startedAt: true } }),
-      tx.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(DISTINCT user_id)::bigint AS count FROM control_user_activity WHERE utc_day >= ${from}::date AND utc_day <= ${now}::date AND last_observed_at >= coalesce((SELECT started_at FROM control_collection_state WHERE id='user_activity'),${now}::timestamptz)`,
+      tx.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(DISTINCT a.user_id)::bigint AS count FROM control_user_activity a JOIN users u ON u.id=a.user_id WHERE u.control_state <> 'purged' AND a.utc_day >= ${from}::date AND a.utc_day <= ${now}::date AND a.last_observed_at >= coalesce((SELECT started_at FROM control_collection_state WHERE id='user_activity'),${now}::timestamptz)`,
       ])
       return { activityRows, coverage, activeCount }
     })
@@ -127,9 +159,11 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
       : sample(null, 'not_configured', 'user_activity', 86_400, null)
     const result = {
       serverNow: now.toISOString(), days,
-      accountsTotal: Number(totals.accounts_total), accountsWithFamily: Number(totals.accounts_with_family),
+      accountsTotal: Number(totals.accounts_total), accountsActive: Number(totals.accounts_active),
+      accountsTrashed: Number(totals.accounts_trashed), accountsPurging: Number(totals.accounts_purging),
+      accountsWithFamily: Number(totals.accounts_with_family),
       familiesActive: Number(totals.families_active), activeMemberships: Number(totals.active_memberships),
-      invitePending: Number(totals.invite_pending), accountsWithoutFamily: Number(totals.accounts_total) - Number(totals.accounts_with_family),
+      invitePending: Number(totals.invite_pending), accountsWithoutFamily: Number(totals.accounts_active) - Number(totals.accounts_with_family),
       validSessions: Number(totals.valid_sessions),
       familyStorageUsedBytes: String(totals.storage_bytes), activeUsers,
       registrations: registrations.map(({ day, count }) => ({ day: day.toISOString().slice(0, 10), count: Number(count) })),
@@ -140,6 +174,7 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
 
   routes.get('/control/families', async (c) => {
     const query = parseListQuery(c.req.query())
+    validateFamilyListQuery(query)
     const page = await listFamilies(db, query, env.MEDIA_FAMILY_QUOTA_BYTES)
     return c.json(controlPageSchema(controlFamilyRowSchema).parse(page))
   })
@@ -148,6 +183,22 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
     const [row] = await queryFamilyById(db, id, env.MEDIA_FAMILY_QUOTA_BYTES)
     if (!row) throw notFound()
     return c.json(controlFamilyRowSchema.parse(row))
+  })
+  routes.get('/control/families/:familyId/deletion-preview', async (c) => {
+    const id = uuidParam(c.req.param('familyId')).toLowerCase()
+    try {
+      const preview = await previewFamilyDeletion(db, id)
+      return c.json(controlFamilyDeletionPreviewSchema.parse({ ...preview, retirementSupported, serverNow: new Date().toISOString() }))
+    } catch (error) { throw lifecycleAppError(error) }
+  })
+  routes.post('/control/families/:familyId/purge', mutationRateLimit, async (c) => {
+    if (!retirementSupported) throw new AppError(503, 'STORAGE_UNAVAILABLE', 'Не поддерживается безопасное окончательное удаление файлов')
+    const id = uuidParam(c.req.param('familyId')).toLowerCase()
+    const body = await parseLifecycleBody(c, z.object({ key: z.string().uuid(), fingerprint: z.string().regex(/^[0-9a-f]{64}$/), confirmation: z.string().uuid() }).strict())
+    try {
+      const result = await purgeControlFamily(db, { actorId: c.var.user.id, targetId: id, protectedIds: protectedOwnerIds, ...body })
+      return c.json(controlLifecycleResultSchema.parse(result))
+    } catch (error) { throw lifecycleAppError(error) }
   })
   routes.get('/control/families/:familyId/members', async (c) => {
     const id = uuidParam(c.req.param('familyId')); const query = parseListQuery(c.req.query())
@@ -171,6 +222,42 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
     const id = uuidParam(c.req.param('userId')); const [row] = await queryUserById(db, id)
     if (!row) throw notFound()
     return c.json(controlUserRowSchema.parse(row))
+  })
+  routes.get('/control/users/:userId/deletion-preview', async (c) => {
+    const id = uuidParam(c.req.param('userId')).toLowerCase()
+    try {
+      const preview = await previewUserDeletion(db, id, protectedOwnerIds)
+      const [lifecycle] = await queryUserById(db, id)
+      const protectedAccount = protectedOwnerIds.some((ownerId) => ownerId.toLowerCase() === id)
+      const serverNow = new Date().toISOString()
+      const lifecycleMatches = lifecycle?.lifecycleState === preview.state
+      return c.json(controlUserDeletionPreviewSchema.parse({
+        ...preview, deletionId: lifecycleMatches ? lifecycle.deletionId : null,
+        purgeAfter: lifecycleMatches ? lifecycle.purgeAfter : null,
+        operationStatus: lifecycleMatches ? lifecycle.operationStatus : null,
+        errorCode: lifecycleMatches ? lifecycle.errorCode : null,
+        protectedAccount, retirementSupported, canTrash: retirementSupported && preview.state === 'active' && !protectedAccount,
+        canRestore: lifecycleMatches && preview.state === 'trashed' && lifecycle.operationStatus === 'waiting' && Boolean(lifecycle.purgeAfter && Date.parse(lifecycle.purgeAfter) > Date.parse(serverNow)),
+        serverNow,
+      }))
+    } catch (error) { throw lifecycleAppError(error) }
+  })
+  routes.post('/control/users/:userId/trash', mutationRateLimit, async (c) => {
+    if (!retirementSupported) throw new AppError(503, 'STORAGE_UNAVAILABLE', 'Не поддерживается безопасное окончательное удаление файлов')
+    const id = uuidParam(c.req.param('userId')).toLowerCase()
+    const body = await parseLifecycleBody(c, z.object({ key: z.string().uuid(), fingerprint: z.string().regex(/^[0-9a-f]{64}$/), confirmation: z.string().uuid() }).strict())
+    try {
+      const result = await trashControlUser(db, { actorId: c.var.user.id, targetId: id, protectedIds: protectedOwnerIds, ...body })
+      return c.json(controlLifecycleResultSchema.parse(result))
+    } catch (error) { throw lifecycleAppError(error) }
+  })
+  routes.post('/control/users/:userId/restore', mutationRateLimit, async (c) => {
+    const id = uuidParam(c.req.param('userId')).toLowerCase()
+    const body = await parseLifecycleBody(c, z.object({ key: z.string().uuid(), deletionId: z.string().uuid() }).strict())
+    try {
+      const result = await restoreControlUser(db, { actorId: c.var.user.id, targetId: id, protectedIds: protectedOwnerIds, ...body })
+      return c.json(controlLifecycleResultSchema.parse(result))
+    } catch (error) { throw lifecycleAppError(error) }
   })
   routes.get('/control/users/:userId/memberships', async (c) => {
     const id = uuidParam(c.req.param('userId')); const query = parseListQuery(c.req.query())
@@ -235,7 +322,7 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
   })
   routes.get('/control/events', async (c) => {
     const query = parseListQuery(c.req.query(), { compositeCursor:true })
-    if (query.sort !== 'createdAt' || query.status || query.maxState) throw new AppError(400,'INVALID_INPUT','Недопустимый фильтр событий')
+    if (query.sort !== 'createdAt' || query.status || query.maxState || query.userState) throw new AppError(400,'INVALID_INPUT','Недопустимый фильтр событий')
     const cursor = query.cursor ? decodeEventCursor(query.cursor, query) : null
     const events = await queryEvents(db, query, cursor)
     const items = events.slice(0, query.limit).map((r) => ({ id: String(r.id), type: r.type, occurredAt: (r.occurred_at as Date).toISOString(), familyId: r.family_id, familyName: r.family_name }))
@@ -243,8 +330,27 @@ export function createControlModule({ db, env, requireAuth, ownerReadRateLimit }
     const nextCursor=events.length>query.limit && last ? eventCursor(query,String(last.id),(last.occurred_at as Date).toISOString()) : null
     return c.json({ items: items.map((item) => controlEventSchema.parse(item)), nextCursor })
   })
-  routes.get('/control/exports/families.csv', async (c) => { const query=parseListQuery(c.req.query()); return exportCsv(c, exportsByOwner, ['id','name','childName','ownerName','status','createdAt','activeMembers','storageUsedBytes','storageReservedBytes','quotaBytes','publishedMemories','mediaAttachments','maxState','lastObservedAt'], async () => (await queryFamilies(db, familyWhere(query), 10_001, env.MEDIA_FAMILY_QUOTA_BYTES, query.sort)).map(familyCsvRow)) })
-  routes.get('/control/exports/users.csv', async (c) => { const query=parseListQuery(c.req.query()); validateUserSort(query); return exportCsv(c, exportsByOwner, ['id','displayName','createdAt','activeFamilies','familyNames','moreFamilies','lastSessionCreatedAt','lastActivityAt','lastActivitySurface'], async () => (await queryUsers(db, userWhere(query), 10_001, query.sort)).map(userCsvRow)) })
+  routes.get('/control/exports/families.csv', async (c) => { const query=parseListQuery(c.req.query()); validateFamilyListQuery(query); return exportCsv(c, exportsByOwner, ['id','name','childName','ownerName','status','lifecycleState','deletionId','purgeAfter','operationStatus','errorCode','createdAt','activeMembers','storageUsedBytes','storageReservedBytes','quotaBytes','publishedMemories','mediaAttachments','maxState','lastObservedAt'], async () => (await queryFamilies(db, familyWhere(query), 10_001, env.MEDIA_FAMILY_QUOTA_BYTES, query.sort)).map(familyCsvRow)) })
+  routes.get('/control/exports/users.csv', async (c) => { const query=parseListQuery(c.req.query()); validateUserSort(query); return exportCsv(c, exportsByOwner, ['id','displayName','createdAt','lifecycleState','deletionId','purgeAfter','operationStatus','errorCode','activeFamilies','familyNames','moreFamilies','lastSessionCreatedAt','lastActivityAt','lastActivitySurface'], async () => (await queryUsers(db, userWhere(query), 10_001, query.sort)).map(userCsvRow)) })
 
   return { routes }
+}
+
+function lifecycleAppError(error: unknown): AppError {
+  if (!(error instanceof ControlLifecycleFailure)) throw error
+  const mappings: Record<string, { status: 400 | 404 | 409; code: ApiErrorCode; message: string }> = {
+    invalid_command: { status: 400, code: 'INVALID_INPUT', message: 'Некорректная команда удаления' },
+    confirmation_mismatch: { status: 400, code: 'INVALID_INPUT', message: 'Подтверждение не совпадает с выбранной записью' },
+    not_found: { status: 404, code: 'NOT_FOUND', message: 'Запись не найдена' },
+    protected_account: { status: 409, code: 'CONFLICT', message: 'Аккаунт владельца Control защищён от удаления' },
+    stale_preview: { status: 409, code: 'VERSION_CONFLICT', message: 'Данные изменились. Обновите предварительный просмотр' },
+    scope_changed: { status: 409, code: 'VERSION_CONFLICT', message: 'Состав данных изменился. Обновите предварительный просмотр' },
+    restore_expired: { status: 409, code: 'CONFLICT', message: 'Срок восстановления завершён' },
+    conflict: { status: 409, code: 'CONFLICT', message: 'Операция больше недоступна для этого состояния' },
+    already_purging: { status: 409, code: 'CONFLICT', message: 'Очистка этой семьи уже началась' },
+    stale_deletion_cycle: { status: 409, code: 'CONFLICT', message: 'Цикл удаления изменился. Обновите данные' },
+    idempotency_conflict: { status: 409, code: 'IDEMPOTENCY_CONFLICT', message: 'Ключ операции уже использован для другой команды' },
+  }
+  const mapped = mappings[error.code] ?? mappings.conflict!
+  return new AppError(mapped.status, mapped.code, mapped.message)
 }

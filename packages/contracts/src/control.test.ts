@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { controlCursorQuerySchema, controlFamilyRowSchema, controlSampleSchema, controlMeSchema, controlPageSchema } from './control'
+import { controlCursorQuerySchema, controlFamilyRowSchema, controlSampleSchema, controlMeSchema, controlPageSchema, controlUserDeletionPreviewSchema } from './control'
 import { z } from 'zod'
 
 describe('control contracts', () => {
@@ -8,14 +8,19 @@ describe('control contracts', () => {
     expect(controlCursorQuerySchema.safeParse({ limit: 101 }).success).toBe(false)
     expect(controlCursorQuerySchema.safeParse({ q: 'x'.repeat(101) }).success).toBe(false)
     expect(controlCursorQuerySchema.safeParse({ userId: '00000000-0000-4000-8000-000000000001' }).success).toBe(false)
+    expect(controlCursorQuerySchema.safeParse({ userState: 'trashed' }).success).toBe(true)
+    expect(controlCursorQuerySchema.safeParse({ userState: 'deleted' }).success).toBe(false)
+    expect(controlCursorQuerySchema.safeParse({ status: 'active', userState: 'trashed' }).success).toBe(true)
     const family = controlFamilyRowSchema.safeParse({
       id: '00000000-0000-4000-8000-000000000001', name: null, childName: null, ownerName: null,
       status: 'active', createdAt: new Date().toISOString(), activeMembers: 0,
+      lifecycleState: 'active', deletionId: null, purgeAfter: null, operationStatus: null, errorCode: null,
       storageUsedBytes: '9007199254740993', storageReservedBytes: '0', quotaBytes: null,
       publishedMemories: 0, mediaAttachments: 0, maxState: null, lastObservedAt: null,
       maxLastCheckedAt: null, maxVerificationAgeSeconds: null,
     })
     expect(family.success).toBe(true)
+    expect(controlFamilyRowSchema.safeParse({ ...(family.success ? family.data : {}), status: 'deleting', lifecycleState: 'inactive' }).success).toBe(true)
     expect(controlFamilyRowSchema.safeParse({ ...(family.success ? family.data : {}), storageUsedBytes: 9007199254740993 }).success).toBe(false)
     expect(controlFamilyRowSchema.safeParse({ ...(family.success ? family.data : {}), maxState: 'mystery' }).success).toBe(false)
     expect(controlPageSchema(controlMeSchema).safeParse({ items: [{ allowed: true, serverNow: new Date().toISOString(), features: ['read'], extra: true }], nextCursor: null }).success).toBe(false)
@@ -28,5 +33,18 @@ describe('control contracts', () => {
     expect(schema.safeParse({ ...base, value: 0 }).success).toBe(true)
     expect(schema.safeParse({ ...base, status: 'not_configured', value: null }).success).toBe(true)
     expect(schema.safeParse({ ...base, status: 'ok', value: null }).success).toBe(true)
+  })
+
+  test('keeps deletion previews bounded to safe lifecycle data', () => {
+    const preview = {
+      targetId: '00000000-0000-4000-8000-000000000001', targetVersion: 1, state: 'active',
+      deletionId: null, purgeAfter: null, operationStatus: null, errorCode: null,
+      families: 2, activeFamilies: 1, members: 4, memories: 5, storageUsedBytes: '9007199254740993',
+      fingerprint: 'a'.repeat(64), confirmation: '00000000-0000-4000-8000-000000000001',
+      protectedAccount: false, retirementSupported: true, canTrash: true, canRestore: false, serverNow: new Date().toISOString(),
+    }
+    expect(controlUserDeletionPreviewSchema.safeParse(preview).success).toBe(true)
+    expect(controlUserDeletionPreviewSchema.safeParse({ ...preview, providerSubject: 'private' }).success).toBe(false)
+    expect(controlUserDeletionPreviewSchema.safeParse({ ...preview, fingerprint: 'short' }).success).toBe(false)
   })
 })

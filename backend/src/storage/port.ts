@@ -100,6 +100,9 @@ export interface PrivateStorage {
   /** Idempotent: deleting a key that is not there succeeds. */
   deleteObject(key: string): Promise<void>
 
+  /** Optional durable no-resurrection barrier for irreversible private-object retirement. */
+  retireObject?(key: string): Promise<void>
+
   /** Bounded reconciliation inventory; callers scope it to a structural namespace prefix. */
   listObjects(prefix: string): Promise<ListedStorageObject[]>
 }

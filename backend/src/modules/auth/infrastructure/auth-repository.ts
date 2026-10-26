@@ -59,7 +59,7 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
         const user = await tx.user.findUnique({
           where: { id: input.userId },
         })
-        if (!user || !(await input.authorizeUser(user))) return null
+        if (!user || (user.controlState !== undefined && user.controlState !== 'active') || !(await input.authorizeUser(user))) return null
 
         const session = await tx.authSession.create({
           data: {
@@ -80,6 +80,7 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
       const family = await db.authSession.findFirst({
         where: {
           refreshTokenFamilyHash: input.refreshTokenFamilyHash,
+          user: { is: { controlState: 'active' } },
           revokedAt: null,
           expiresAt: { gt: input.now },
           createdAt: { gt: input.createdAfter },
@@ -107,6 +108,7 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
       const current = await db.authSession.findFirst({
         where: {
           refreshTokenHash: input.refreshTokenHash,
+          user: { is: { controlState: 'active' } },
           revokedAt: null,
           expiresAt: { gt: input.now },
           createdAt: { gt: input.createdAfter },
@@ -120,6 +122,7 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
       const previous = await db.authSession.findFirst({
         where: {
           previousRefreshTokenHash: input.refreshTokenHash,
+          user: { is: { controlState: 'active' } },
           revokedAt: null,
           expiresAt: { gt: input.now },
           createdAt: { gt: input.createdAfter },
@@ -170,6 +173,7 @@ export function createPrismaAuthRepository(db: DbClient): AuthRepository {
         where: {
           id: input.sessionId,
           userId: input.userId,
+          user: { is: { controlState: 'active' } },
           revokedAt: null,
           expiresAt: { gt: input.now },
           createdAt: { gt: input.createdAfter },
@@ -386,6 +390,7 @@ export function createPrismaTelegramAuthRepository(
           return { state: 'issued' as const, user: externalIdentity.user, session }
         }, userAuthenticationSessionTransactionOptions)
       } catch (error) {
+        if (isControlFenceError(error)) return { state: 'invalid_account' as const }
         const replay = await db.telegramAuthReplay.findUnique({
           where: { fingerprintHash: input.fingerprintHash },
           select: { sessionId: true },
@@ -489,6 +494,7 @@ export function createPrismaMaxAuthRepository(
           return { state: 'issued' as const, user: externalIdentity.user, session }
         }, userAuthenticationSessionTransactionOptions)
       } catch (error) {
+        if (isControlFenceError(error)) return { state: 'invalid_session' as const }
         const replay = await db.maxAuthReplay.findUnique({
           where: { fingerprintHash: input.fingerprintHash },
           select: { sessionId: true },
@@ -575,6 +581,12 @@ export function createPrismaBrowserLinkRepository(db: DbClient): BrowserLinkRepo
         })
         if (!identity) return 'missing' as const
 
+        await acquireUserAuthenticationAuthorityLock(tx, input.userId)
+        const [account] = await tx.$queryRaw<Array<{ state: string }>>`
+          SELECT control_state::text AS state FROM users WHERE id = ${input.userId}::uuid FOR UPDATE
+        `
+        if (!account || account.state !== 'active') return 'missing' as const
+
         const updated = await tx.browserLoginChallenge.updateMany({
           where: {
             id: input.id,
@@ -594,6 +606,12 @@ export function createPrismaBrowserLinkRepository(db: DbClient): BrowserLinkRepo
 
     async redeemBrowserLoginChallenge(input) {
       return db.$transaction(async (tx) => {
+        const candidate = await tx.browserLoginChallenge.findUnique({
+          where: { id: input.id, verifierHash: input.verifierHash },
+          select: { approvedUserId: true },
+        })
+        if (!candidate?.approvedUserId) return null
+        await acquireUserAuthenticationAuthorityLock(tx, candidate.approvedUserId)
         await tx.$queryRaw(Prisma.sql`
           SELECT id FROM browser_login_challenges WHERE id = ${input.id} FOR UPDATE
         `)
@@ -611,10 +629,13 @@ export function createPrismaBrowserLinkRepository(db: DbClient): BrowserLinkRepo
           challenge.state !== 'approved' ||
           challenge.expiresAt <= input.now ||
           !challenge.approvedUserId ||
-          !challenge.approvedExternalIdentityId
+          !challenge.approvedExternalIdentityId ||
+          challenge.approvedUserId !== candidate.approvedUserId
         ) return null
-
-        await acquireUserAuthenticationAuthorityLock(tx, challenge.approvedUserId)
+        const [account] = await tx.$queryRaw<Array<{ state: string }>>`
+          SELECT control_state::text AS state FROM users WHERE id = ${challenge.approvedUserId}::uuid
+        `
+        if (!account || account.state !== 'active') return null
 
         const predecessor = input.predecessor
           ? await lockBrowserSessionPredecessor(tx, input.predecessor)
@@ -717,4 +738,13 @@ async function lockBrowserSessionPredecessor(
 
 function isUniqueConstraintError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+}
+
+function isControlFenceError(error: unknown) {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false
+  if (error.code !== 'P2004' && error.code !== 'P2010' && error.code !== 'P2039') return false
+  const details = `${error.message} ${JSON.stringify(error.meta ?? {})}`.toLowerCase()
+  return details.includes('active_control_user') || details.includes('active_control_owner')
+    || details.includes('control_user') && details.includes('active')
+    || error.code === 'P2039' && error.meta?.modelName === 'AuthSession' && details.includes('active user')
 }

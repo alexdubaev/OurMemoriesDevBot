@@ -17,6 +17,8 @@ The point of the split is that moving from one to the other is a configuration c
 
 One suite proves it. `backend/src/storage/storage-contract.ts` defines the behaviour once and is executed twice: against the local disk in the fast unit run, and against a real S3 server in the live run. If the drivers ever diverge, one of the two runs fails.
 
+Control account and family deletion has a stricter storage requirement than ordinary object deletion. Its purge queue uses the optional `retireObject` capability: the filesystem driver persists a zero-byte marker named by a hash of the key and leaves an empty directory at the retired key, which blocks archived atomic-link writers from recreating that object. Ordinary reads treat it as missing, and repeated retirement safely clears later temporary upload remnants. The Control trash and permanent-purge commands and their maintenance worker fail closed when this capability is unavailable. The S3 driver does not implement durable retirement, so these Control deletion actions are unavailable on S3 until a separately verified no-resurrection capability exists; existing S3 reads and restore behavior remain available. The exact recovery release profile also requires `PRIVATE_STORAGE_DRIVER=filesystem`.
+
 ## Intake Before Building File Features
 
 The product-level questions live in [CHECKLIST.md](../CHECKLIST.md) under files, images, and media, and the answers are recorded there. Ask them before implementation; do not restate them here, so the intake keeps one source.
@@ -145,7 +147,7 @@ When optimized images are required, generate app-owned variants in the backend o
 - Validate content type, size, owner, and permissions before issuing any URL, and verify the stored object before publishing it.
 - Generate object keys server-side. Never trust a client-provided path.
 - Keep emails, names, customer ids, and other personal data out of bucket names, object keys, metadata, and tags.
-- Delete objects when the owning record is deleted. `user_avatars` cascades from `users`, but that removes only the rows — and a row is the only record of its object key, so deleting a user today orphans their avatar in the bucket. A product that adds account deletion must delete the objects first; see the limits noted under the upload contract.
+- Deleting a database row alone does not remove its objects. Control account deletion captures avatar/media keys in its independent durable queue before erasing source rows, and retires those keys before completing cleanup. Keep its empty filesystem barriers and technical markers: they contain no user content and prevent late uploads from recreating retired files. Generic database cascades remain insufficient for storage cleanup; see the upload-contract limits.
 
 ## Current Upstream Documentation
 

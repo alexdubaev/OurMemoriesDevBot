@@ -333,6 +333,30 @@ describe('MAX legacy video retention and recovery', () => {
     await memoryRepository.delete(scope, memory.id, edited.version, new Date())
     await expect(memoryRepository.get(scope, memory.id)).rejects.toThrow()
     expect(await fx.db.family.findUniqueOrThrow({ where: { id: family.id }, select: { storageUsedBytes: true } })).toEqual(originalFamily)
+    const invalidActivePurge = await fx.db.controlFamilyDeletion.create({ data: {
+      familyId: secondFamily.id, actorUserId: secondFamily.owner.id, requestedAt: new Date(),
+    } })
+    await expect(migration.recoveryReadiness()).rejects.toThrow('Invalid active or orphaned durable family deletion intent')
+    await fx.db.controlFamilyDeletion.delete({ where: { id: invalidActivePurge.id } })
+
+    function withLedgerState(ledgerLimit: number) {
+      let rawCall = 0
+      return new Proxy(fx.db, { get(target, property, receiver) {
+        if (property === '$queryRaw') return async (...args: unknown[]) => {
+          const call = rawCall++
+          if (call === 0) return [{ migrationLedger: true, familyDeletions: false, storageDeletes: false, purgeFences: false }]
+          const result = await Reflect.apply(Reflect.get(target, property, target) as (...items: unknown[]) => Promise<unknown[]>, target, args)
+          return call === 1 ? result.slice(0, ledgerLimit) : result
+        }
+        const value = Reflect.get(target, property, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
+      } }) as typeof fx.db
+    }
+    await expect(createMaxVideoLegacyMigration({ prisma: withLedgerState(62), storage, api }).recoveryReadiness())
+      .rejects.toThrow('Control lifecycle schema does not match the exact MAX recovery migration prefix')
+    expect(await createMaxVideoLegacyMigration({ prisma: withLedgerState(59), storage, api }).recoveryReadiness())
+      .toMatchObject({ total: 2, inspected: 2, ready: 2, missingObjects: 0, invalid: [] })
+
     expect(await migration.recoveryReadiness()).toMatchObject({ total: 2, inspected: 2, ready: 2, missingObjects: 0, invalid: [] })
     const cliReadiness = Bun.spawnSync(['bun', 'scripts/migrate-max-legacy-videos.ts', '--recover-all'], { cwd: process.cwd(), env: cliEnv })
     expect(cliReadiness.exitCode).toBe(0)
@@ -361,6 +385,38 @@ describe('MAX legacy video retention and recovery', () => {
     expect(await fx.db.mediaAsset.findUniqueOrThrow({ where: { id: mediaId } })).toMatchObject({ deletedAt: null, storageDeletedAt: null })
     expect((await fx.db.mediaAsset.deleteMany({ where: { id: mediaId } })).count).toBe(0)
     expect(await fx.db.mediaAsset.findUnique({ where: { id: mediaId } })).not.toBeNull()
+
+    const purgeIntent = await fx.db.controlFamilyDeletion.create({ data: {
+      familyId: family.id, actorUserId: family.owner.id, requestedAt: new Date(),
+    } })
+    await fx.db.maxVideoLegacyRetention.update({ where: { mediaId }, data: { recoveredAt: null } })
+    await fx.db.maxVideoReference.create({ data: {
+      id: mediaId, sourceId: source.id, memoryId: memory.id, familyId: family.id,
+      attachmentPosition: 1, providerAttachmentId: 'video-attachment-1',
+    } })
+    await fx.db.family.update({ where: { id: family.id }, data: { status: 'deleting' } })
+    await expect(migration.recoveryReadiness()).rejects.toThrow('Irreversible family media keys are not durably captured and fenced')
+    await fx.db.controlFamilyDeletion.update({ where: { id: purgeIntent.id }, data: { keysCapturedAt: new Date() } })
+    await fx.db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.control_family_purge_operation', ${purgeIntent.id}, true)`
+      // Recovery exclusion is safe only after the irreversible fence covers every asset in the
+      // deleting family, not just the retained MAX video used by this assertion.
+      await tx.mediaAsset.updateMany({ where: { familyId: family.id }, data: { deletedAt: new Date() } })
+    })
+    await storage.deleteObject(originalKey)
+    try {
+      expect(await migration.recoveryReadiness()).toMatchObject({ total: 0, excluded: 1, inspected: 0, ready: 0, missingObjects: 0, invalid: [] })
+      expect(await migration.recoverAll({ apply: true })).toMatchObject({ inspected: 0, excluded: 1, recovered: 0, refused: 0, remaining: 0 })
+      expect(await fx.db.maxVideoReference.findUnique({ where: { id: mediaId } })).not.toBeNull()
+      expect(await storage.headObject(secondOriginalKey)).not.toBeNull()
+    } finally {
+      await storage.writeObject({ key: originalKey, body: new Response(new Uint8Array([0, 1, 2])).body!, contentLength: 3, contentType: 'video/mp4' })
+      await fx.db.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.control_family_purge_operation', ${purgeIntent.id}, true)`
+        await tx.mediaAsset.update({ where: { id: mediaId }, data: { deletedAt: null } })
+        await tx.controlFamilyDeletion.delete({ where: { id: purgeIntent.id } })
+      })
+    }
     } finally {
       globalThis.fetch = originalFetch
     }

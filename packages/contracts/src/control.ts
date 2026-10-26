@@ -24,12 +24,16 @@ export const controlCursorQuerySchema = z.object({
   sort: z.enum(['createdAt','name','activeMembers','storageUsedBytes','lastObservedAt']).optional(),
   status: z.enum(['active','deleting','deleted']).optional(),
   maxState: z.enum(['configured','disconnected','unconfigured']).optional(),
+  userState: z.enum(['active','trashed','purging']).optional(),
 }).strict()
 
 export const controlOverviewSchema = z.object({
   serverNow: isoDate,
   days: z.union([z.literal(7), z.literal(30), z.literal(90)]),
   accountsTotal: count,
+  accountsActive: count,
+  accountsTrashed: count,
+  accountsPurging: count,
   accountsWithFamily: count,
   familiesActive: count,
   activeMemberships: count,
@@ -43,9 +47,17 @@ export const controlOverviewSchema = z.object({
 }).strict()
 export const controlMeSchema = z.object({ allowed: z.literal(true), serverNow: isoDate, features: z.array(z.enum(['read','csv_export'])) }).strict()
 
+export const controlLifecycleErrorCodeSchema = z.enum([
+  'profile_cleanup_failed', 'archive_cleanup_failed', 'storage_timeout', 'storage_not_found',
+  'storage_invalid_request', 'storage_forbidden', 'storage_unavailable',
+])
+
 export const controlFamilyRowSchema = z.object({
   id: z.string().uuid(), name: boundedText.nullable(), childName: boundedText.nullable(),
   ownerName: boundedText.nullable(), status: z.enum(['active','deleting','deleted']), createdAt: isoDate,
+  lifecycleState: z.enum(['active','trashed','purging','purged','inactive']), deletionId: z.string().uuid().nullable(),
+  purgeAfter: isoDate.nullable(), operationStatus: z.string().max(48).nullable(),
+  errorCode: controlLifecycleErrorCodeSchema.nullable(),
   activeMembers: count, storageUsedBytes: bytes, storageReservedBytes: bytes,
   quotaBytes: bytes.nullable(), publishedMemories: count, mediaAttachments: count,
   maxState: z.enum(['configured','disconnected','unconfigured']).nullable(), lastObservedAt: isoDate.nullable(),
@@ -54,9 +66,34 @@ export const controlFamilyRowSchema = z.object({
 
 export const controlUserRowSchema = z.object({
   id: z.string().uuid(), displayName: boundedText.nullable(), createdAt: isoDate,
+  lifecycleState: z.enum(['active','trashed','purging','purged']), deletionId: z.string().uuid().nullable(),
+  purgeAfter: isoDate.nullable(), operationStatus: z.string().max(48).nullable(),
+  errorCode: controlLifecycleErrorCodeSchema.nullable(),
   activeFamilies: count, familyNames: z.array(boundedText).max(5), moreFamilies: count,
   lastSessionCreatedAt: isoDate.nullable(), lastActivityAt: isoDate.nullable(),
   lastActivitySurface:z.enum(['max_mini_app','pwa','browser']).nullable(),
+}).strict()
+
+export const controlUserDeletionPreviewSchema = z.object({
+  targetId: z.string().uuid(), targetVersion: count,
+  state: z.enum(['active','trashed','purging','purged']),
+  deletionId: z.string().uuid().nullable(), purgeAfter: isoDate.nullable(),
+  operationStatus: z.string().max(48).nullable(), errorCode: controlLifecycleErrorCodeSchema.nullable(),
+  families: count, activeFamilies: count, members: count, memories: count, storageUsedBytes: bytes,
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/), confirmation: z.string().uuid(),
+  protectedAccount: z.boolean(), retirementSupported: z.boolean(), canTrash: z.boolean(), canRestore: z.boolean(), serverNow: isoDate,
+}).strict()
+
+export const controlFamilyDeletionPreviewSchema = z.object({
+  familyId: z.string().uuid(), targetVersion: count, state: z.enum(['active','deleting','deleted']),
+  members: count, memories: count, storageUsedBytes: bytes,
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/), confirmation: z.string().uuid(), retirementSupported: z.boolean(), serverNow: isoDate,
+}).strict()
+
+export const controlLifecycleResultSchema = z.object({
+  operation: z.enum(['user_trashed','user_restored','family_purge_started']),
+  targetId: z.string().uuid(), deletionId: z.string().uuid().optional(),
+  state: z.enum(['active','trashed','purging','purged','deleting']), purgeAfter: isoDate.optional(),
 }).strict()
 
 export const controlFamilyMemberSchema = z.object({ userId:z.string().uuid(), displayName:boundedText.nullable(), alias:boundedText.nullable(), role:z.enum(['full','viewer']), isOwner:z.boolean(), joinedAt:isoDate }).strict()

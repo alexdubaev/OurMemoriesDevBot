@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto'
+import { readdir, readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { Prisma } from '../../../generated/prisma/client'
 import type { DbClient } from '../../../db'
 import type { MaxApiPort } from '../application/ports'
@@ -8,6 +11,12 @@ import { enqueueMaxVideoPoster } from './video-poster'
 import { MaxProviderError } from './max-api'
 
 const MAX_BATCH_SIZE = 10
+const MAX_RECOVERY_BASELINE_CATALOG_SHA256 = 'f5f2033cdb89806b6741dc1037c92f2134ba96587a8b50df2c12334337a12eb8'
+const MAX_RECOVERY_LIFECYCLE_MIGRATIONS = [
+  ['20261025160000_control_user_lifecycle', '910ee6aeda44457ae611a69994cd7f11eb6c1e0936ac33874cdcb8bd59f5df57'],
+  ['20261025170000_control_durable_purge', 'f9ff69a061afefeceaeda618c4aeaf424563b2fed850d6e17808e23554b2fa8d'],
+  ['20261025180000_control_purge_fences', 'eee2bddedbd167b1de111b16e8c0a75e054c9cf9c555752d73b8f02e3f2c3655'],
+] as const
 
 export type MaxVideoLegacyCandidate = {
   mediaId: string
@@ -146,14 +155,15 @@ export function createMaxVideoLegacyMigration(options: { prisma: DbClient; api?:
     },
 
     async recoveryReadiness() {
-      const total = await options.prisma.maxVideoLegacyRetention.count({ where: { recoveredAt: null } })
+      const totalAll = await options.prisma.maxVideoLegacyRetention.count({ where: { recoveredAt: null } })
+      const familyDeletionTablePresent = await hasFamilyDeletionTable(options.prisma)
+      const total = await countRecoverableRetention(options.prisma, familyDeletionTablePresent)
       let ready = 0
       let missingObjects = 0
       const invalid: string[] = []
       let cursor: string | undefined
       while (true) {
-        const rows = await options.prisma.maxVideoLegacyRetention.findMany({ where: { recoveredAt: null, ...(cursor ? { mediaId: { gt: cursor } } : {}) }, orderBy: { mediaId: 'asc' }, take: MAX_BATCH_SIZE,
-          select: { mediaId: true, familyId: true, memoryId: true, referenceId: true, sourceId: true, position: true, providerMessageId: true, providerAttachmentId: true, providerRecipientId: true, providerChannelId: true, snapshot: true } })
+        const rows = await findRecoverableRetention(options.prisma, familyDeletionTablePresent, cursor, MAX_BATCH_SIZE, true)
         if (!rows.length) break
         for (const row of rows) {
           if (!await registeredLedgerMatches(options.prisma, row)) invalid.push(row.mediaId)
@@ -162,18 +172,20 @@ export function createMaxVideoLegacyMigration(options: { prisma: DbClient; api?:
         }
         cursor = rows.at(-1)!.mediaId
       }
-      return { total, inspected: total, ready, missingObjects, invalid, hasMore: false }
+      return { total, excluded: totalAll - total, inspected: total, ready, missingObjects, invalid, hasMore: false }
     },
 
     async recoverAll(input: { apply: boolean; batchSize?: number }) {
       const batchSize = boundedBatch(input.batchSize ?? 5)
-      const totalBefore = await options.prisma.maxVideoLegacyRetention.count({ where: { recoveredAt: null } })
+      const totalAll = await options.prisma.maxVideoLegacyRetention.count({ where: { recoveredAt: null } })
+      const familyDeletionTablePresent = await hasFamilyDeletionTable(options.prisma)
+      const totalBefore = await countRecoverableRetention(options.prisma, familyDeletionTablePresent)
       let recovered = 0
       let refused = 0
       let inspected = 0
       let cursor: string | undefined
       while (true) {
-        const rows = await options.prisma.maxVideoLegacyRetention.findMany({ where: { recoveredAt: null, ...(cursor ? { mediaId: { gt: cursor } } : {}) }, orderBy: { mediaId: 'asc' }, take: batchSize })
+        const rows = await findRecoverableRetention(options.prisma, familyDeletionTablePresent, cursor, batchSize, false)
         if (!rows.length) break
         cursor = rows.at(-1)!.mediaId
         for (const row of rows) {
@@ -182,6 +194,7 @@ export function createMaxVideoLegacyMigration(options: { prisma: DbClient; api?:
           await tx.$queryRaw(Prisma.sql`SELECT id FROM families WHERE id=${row.familyId}::uuid FOR UPDATE`)
           await tx.$queryRaw(Prisma.sql`SELECT id FROM memories WHERE id=${row.memoryId}::uuid AND family_id=${row.familyId}::uuid FOR UPDATE`)
           await tx.$queryRaw(Prisma.sql`SELECT id FROM media_assets WHERE id=${row.mediaId}::uuid AND family_id=${row.familyId}::uuid FOR UPDATE`)
+          if (await isFamilyEligibleForRecovery(tx as DbClient, row.familyId, familyDeletionTablePresent) === false) return false
           const currentLedger = await tx.maxVideoLegacyRetention.findUnique({ where: { mediaId: row.mediaId } })
           if (!currentLedger || currentLedger.recoveredAt) return false
           if (!await registeredLedgerMatches(tx as DbClient, currentLedger) || !await retainedObjectsReady(tx as DbClient, options.storage, row.mediaId)) return false
@@ -194,10 +207,143 @@ export function createMaxVideoLegacyMigration(options: { prisma: DbClient; api?:
         else if (input.apply) recovered++
         }
       }
-      const remaining = await options.prisma.maxVideoLegacyRetention.count({ where: { recoveredAt: null } })
-      return { inspected: input.apply ? inspected : totalBefore, recovered, refused, remaining, hasMore: false }
+      const remaining = await countRecoverableRetention(options.prisma, familyDeletionTablePresent)
+      return { inspected: input.apply ? inspected : totalBefore, excluded: totalAll - totalBefore, recovered, refused, remaining, hasMore: false }
     },
   }
+}
+
+async function hasFamilyDeletionTable(prisma: DbClient) {
+  const schemaRows = await prisma.$queryRaw<Array<{ migrationLedger: boolean; familyDeletions: boolean; storageDeletes: boolean; purgeFences: boolean }>>(Prisma.sql`
+    SELECT to_regclass('public._prisma_migrations') IS NOT NULL AS "migrationLedger",
+           to_regclass('public.control_family_deletions') IS NOT NULL AS "familyDeletions",
+           to_regclass('public.control_storage_deletes') IS NOT NULL AS "storageDeletes",
+           EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='max_sources_control_no_redacted_replay' AND NOT tgisinternal) AS "purgeFences"
+  `)
+  const schema = schemaRows[0]
+  if (!schema || Object.values(schema).some((value) => typeof value !== 'boolean') || !schema.migrationLedger) {
+    throw new Error('Cannot validate MAX recovery migration history')
+  }
+
+  const catalog = await reviewedMigrationCatalog()
+  const baselineCatalogHash = createHash('sha256').update(catalog.slice(0, 59).map(({ name, checksum }) => `${name}:${checksum}`).join('\n') + '\n').digest('hex')
+  if (catalog.length !== 62 || baselineCatalogHash !== MAX_RECOVERY_BASELINE_CATALOG_SHA256 ||
+      MAX_RECOVERY_LIFECYCLE_MIGRATIONS.some(([name, checksum], index) => catalog[59 + index]?.name !== name || catalog[59 + index]?.checksum !== checksum)) {
+    throw new Error('MAX recovery migration catalog is not the exact reviewed lifecycle extension')
+  }
+  const ledger = await prisma.$queryRaw<Array<{ migration_name: string; checksum: string; finished_at: Date | null; rolled_back_at: Date | null }>>(Prisma.sql`
+    SELECT migration_name, checksum, finished_at, rolled_back_at
+      FROM _prisma_migrations
+     ORDER BY migration_name, started_at, id
+  `)
+  if (ledger.length < 59 || ledger.length > 62 || ledger.some((row, index) => {
+    const expected = catalog[index]
+    return !row.finished_at || row.rolled_back_at !== null || row.migration_name !== expected?.name || row.checksum !== expected?.checksum
+  })) throw new Error('MAX recovery migration ledger is not an exact completed reviewed prefix')
+
+  const expectedFamilyDeletionTable = ledger.length >= 60
+  const expectedStorageDeleteTable = ledger.length >= 61
+  const expectedPurgeFences = ledger.length === 62
+  if (schema.familyDeletions !== expectedFamilyDeletionTable || schema.storageDeletes !== expectedStorageDeleteTable || schema.purgeFences !== expectedPurgeFences) {
+    throw new Error('Control lifecycle schema does not match the exact MAX recovery migration prefix')
+  }
+  return schema.familyDeletions
+}
+
+let migrationCatalogPromise: Promise<Array<{ name: string; checksum: string }>> | undefined
+
+function reviewedMigrationCatalog() {
+  migrationCatalogPromise ??= (async () => {
+    const root = resolve(import.meta.dir, '../../../../prisma/migrations')
+    const entries = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
+    const catalog: Array<{ name: string; checksum: string }> = []
+    for (const name of entries) {
+      const source = await readFile(resolve(root, name, 'migration.sql'))
+      catalog.push({ name, checksum: createHash('sha256').update(source).digest('hex') })
+    }
+    return catalog
+  })()
+  return migrationCatalogPromise
+}
+
+async function isFamilyEligibleForRecovery(prisma: DbClient, familyId: string, familyDeletionTablePresent: boolean) {
+  if (!familyDeletionTablePresent) return true
+  const rows = await prisma.$queryRaw<Array<{ eligible: boolean; familyExists: boolean }>>(Prisma.sql`
+    SELECT (deletion.family_id IS NULL) AS eligible,
+           (family.id IS NOT NULL AND family.status <> 'active'::family_status) AS "familyExists"
+      FROM (SELECT ${familyId}::uuid AS family_id) target
+      LEFT JOIN control_family_deletions deletion ON deletion.family_id=target.family_id
+      LEFT JOIN families family ON family.id=target.family_id
+  `)
+  if (typeof rows[0]?.eligible !== 'boolean' || typeof rows[0]?.familyExists !== 'boolean') throw new Error('Cannot determine durable family deletion intent')
+  if (!rows[0].eligible && !rows[0].familyExists) throw new Error('Invalid active or orphaned durable family deletion intent')
+  return rows[0].eligible
+}
+
+async function assertFamilyDeletionIntentsAreValid(prisma: DbClient, familyDeletionTablePresent: boolean) {
+  if (!familyDeletionTablePresent) return
+  const rows = await prisma.$queryRaw<Array<{ invalidIntents: number; unfencedFamilies: number }>>(Prisma.sql`
+    SELECT count(*) FILTER (WHERE family.id IS NULL OR family.status='active'::family_status)::integer AS "invalidIntents",
+           count(*) FILTER (WHERE family.id IS NOT NULL AND family.status <> 'active'::family_status AND deletion.purged_at IS NULL
+             AND (deletion.keys_captured_at IS NULL OR EXISTS (
+               SELECT 1 FROM media_assets asset WHERE asset.family_id=deletion.family_id AND asset.deleted_at IS NULL
+             )))::integer AS "unfencedFamilies"
+      FROM control_family_deletions deletion
+      LEFT JOIN families family ON family.id=deletion.family_id
+  `)
+  if (!Number.isSafeInteger(rows[0]?.invalidIntents) || rows[0]!.invalidIntents !== 0) throw new Error('Invalid active or orphaned durable family deletion intent')
+  if (!Number.isSafeInteger(rows[0]?.unfencedFamilies) || rows[0]!.unfencedFamilies !== 0) {
+    throw new Error('Irreversible family media keys are not durably captured and fenced')
+  }
+}
+
+async function countRecoverableRetention(prisma: DbClient, familyDeletionTablePresent: boolean) {
+  if (!familyDeletionTablePresent) return prisma.maxVideoLegacyRetention.count({ where: { recoveredAt: null } })
+  await assertFamilyDeletionIntentsAreValid(prisma, familyDeletionTablePresent)
+  const rows = await prisma.$queryRaw<Array<{ count: number }>>(Prisma.sql`
+    SELECT count(*)::integer AS count
+      FROM max_video_legacy_retention retention
+     WHERE recovered_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM control_family_deletions deletion
+          JOIN families family ON family.id=deletion.family_id
+          WHERE deletion.family_id=retention.family_id AND family.status <> 'active'::family_status
+       )
+  `)
+  if (!Number.isSafeInteger(rows[0]?.count) || rows[0]!.count < 0) throw new Error('Cannot count eligible MAX video recovery records')
+  return rows[0]!.count
+}
+
+async function findRecoverableRetention(prisma: DbClient, familyDeletionTablePresent: boolean, cursor: string | undefined, take: number, selectDetails: boolean) {
+  const where = { recoveredAt: null, ...(cursor ? { mediaId: { gt: cursor } } : {}) }
+  if (!familyDeletionTablePresent) return prisma.maxVideoLegacyRetention.findMany({ where, orderBy: { mediaId: 'asc' }, take,
+    ...(selectDetails ? { select: { mediaId: true, familyId: true, memoryId: true, referenceId: true, sourceId: true, position: true,
+      providerMessageId: true, providerAttachmentId: true, providerRecipientId: true, providerChannelId: true, snapshot: true } } : {}) })
+
+  const ids = await prisma.$queryRaw<Array<{ mediaId: string }>>(Prisma.sql`
+    SELECT media_id AS "mediaId"
+      FROM max_video_legacy_retention retention
+     WHERE recovered_at IS NULL
+       AND (${cursor ?? null}::uuid IS NULL OR media_id > ${cursor ?? null}::uuid)
+       AND NOT EXISTS (
+         SELECT 1 FROM control_family_deletions deletion
+          JOIN families family ON family.id=deletion.family_id
+          WHERE deletion.family_id=retention.family_id AND family.status <> 'active'::family_status
+       )
+     ORDER BY media_id ASC
+     LIMIT ${take}
+  `)
+  if (ids.some((row) => typeof row.mediaId !== 'string')) throw new Error('Cannot list eligible MAX video recovery records')
+  if (!ids.length) return []
+  const rows = await prisma.maxVideoLegacyRetention.findMany({ where: { mediaId: { in: ids.map(({ mediaId }) => mediaId) } },
+    ...(selectDetails ? { select: { mediaId: true, familyId: true, memoryId: true, referenceId: true, sourceId: true, position: true,
+      providerMessageId: true, providerAttachmentId: true, providerRecipientId: true, providerChannelId: true, snapshot: true } } : {}) })
+  const byId = new Map(rows.map((row) => [row.mediaId, row]))
+  return ids.map(({ mediaId }) => {
+    const row = byId.get(mediaId)
+    if (!row) throw new Error('Eligible MAX video recovery record disappeared while scanning')
+    return row
+  })
 }
 
 async function registeredLedgerMatches(prisma: DbClient, row: {

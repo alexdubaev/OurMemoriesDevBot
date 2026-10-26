@@ -200,6 +200,28 @@ printf 'PASS: changed bytes, writable mode, and symlink rejected\\n'
   assert.match(result.stdout, /changed bytes, writable mode, and symlink rejected/)
 })
 
+slowTest('MAX retirement profile requires the effective filesystem driver after loadEnv defaults', () => {
+  const script = linuxPath(resolve(root, 'deploy/selectel/redeploy.sh'))
+  const result = runLinuxRoot(`
+set -euo pipefail
+. '${script}'
+fixture=$(mktemp -d /root/max-retirement-driver.XXXXXX)
+trap 'rm -rf -- "$fixture"' EXIT
+rollback_max_video_host_inputs_match() { return 0; }
+compose() {
+  [[ "$*" == *'loadEnv(process.env)'* && "$*" == *'PRIVATE_STORAGE_DRIVER'* ]] || return 63
+  [ "$MOCK_EFFECTIVE_STORAGE_DRIVER" = filesystem ]
+}
+MOCK_EFFECTIVE_STORAGE_DRIVER=filesystem
+rollback_max_video_retirement_host_inputs_match HEAD
+MOCK_EFFECTIVE_STORAGE_DRIVER=s3
+if rollback_max_video_retirement_host_inputs_match HEAD; then exit 61; fi
+printf 'PASS: effective filesystem driver accepted; S3 rejected\\n'
+`)
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.match(result.stdout, /effective filesystem driver accepted/)
+})
+
 test('nonzero release exit preserves forward-only quiesce handling', () => {
   const result = runHandler({
     legacy: true,
@@ -926,30 +948,6 @@ function commitFrozenSourceFiles(source, files, message) {
   for (const [relativePath, blob] of files) {
     mkdirSync(dirname(resolve(source.root, relativePath)), { recursive: true })
     writeFileSync(resolve(source.root, relativePath), frozenGitBlobBytes(blob, relativePath))
-    paths.push(relativePath)
-  }
-  const env = { ...process.env, GIT_AUTHOR_NAME: 'Rollback Test', GIT_AUTHOR_EMAIL: 'rollback-test@example.invalid',
-    GIT_COMMITTER_NAME: 'Rollback Test', GIT_COMMITTER_EMAIL: 'rollback-test@example.invalid' }
-  const add = spawnSync('git', ['add', '--', ...paths], { cwd: source.root, env, encoding: 'utf8' })
-  if (add.status !== 0) throw new Error(add.stdout + add.stderr)
-  const commit = spawnSync('git', ['-c', 'user.name=Rollback Test', '-c', 'user.email=rollback-test@example.invalid',
-    'commit', '--quiet', '-m', message], { cwd: source.root, env, encoding: 'utf8' })
-  if (commit.status !== 0) throw new Error(commit.stdout + commit.stderr)
-  const sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: source.root, encoding: 'utf8' }).stdout.trim()
-  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: source.root, encoding: 'utf8' }).stdout.trim(), '')
-  return { ...source, sha }
-}
-
-function commitFrozenSourceFilesFromHead(source, files, message) {
-  const paths = []
-  for (const [relativePath, expectedBlob] of files) {
-    const result = spawnSync('git', ['show', `HEAD:${relativePath}`], { cwd: root, encoding: null })
-    if (result.status !== 0) throw new Error(`frozen source ${relativePath} is unavailable: ${result.stderr.toString('utf8')}`)
-    const actualBlob = spawnSync('git', ['hash-object', '--stdin'], { cwd: root, input: result.stdout, encoding: 'utf8' })
-    if (actualBlob.status !== 0) throw new Error(`cannot hash frozen source ${relativePath}: ${actualBlob.stderr}`)
-    assert.equal(actualBlob.stdout.trim(), expectedBlob, `HEAD no longer contains the reviewed frozen blob for ${relativePath}`)
-    mkdirSync(dirname(resolve(source.root, relativePath)), { recursive: true })
-    writeFileSync(resolve(source.root, relativePath), result.stdout)
     paths.push(relativePath)
   }
   const env = { ...process.env, GIT_AUTHOR_NAME: 'Rollback Test', GIT_AUTHOR_EMAIL: 'rollback-test@example.invalid',
@@ -2617,7 +2615,7 @@ test('MAX family invite entry retains only its measured d299 recovery pair', {
   fixtureWorktrees.push(sourceDirectory)
   const avatarSource = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedMemberAvatarProductionBlobs,
     'reconstruct exact member-avatar production inputs')
-  const source = commitFrozenSourceFilesFromHead(avatarSource, reviewedFamilyInviteEntryProductionBlobs,
+  const source = commitFrozenSourceFiles(avatarSource, reviewedFamilyInviteEntryProductionBlobs,
     'freeze exact family-invite production input blobs')
   const installed = commitSourceFile({ root: source.root, sha: source.sha }, 'deploy/selectel/ci-release.sh',
     readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8'),
@@ -2781,6 +2779,37 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
   assert.notEqual(unexpectedRunningBackend.status, 0, unexpectedRunningBackend.output)
   assert.match(unexpectedRunningBackend.output, /running backend image revision label does not match its tag/)
   assert.doesNotMatch(unexpectedRunningBackend.events, /BACKEND_INTERNAL_READY|GATE|AUTH_ROUTE_CHECK|UP:/)
+})
+
+test('MAX video retirement recovery accepts only the measured filesystem executable profile', () => {
+  const target = maxVideoRecoveryBackend
+  const expectedCompatibility = '1a4ecd291b67f1f173db203370f1cdd270f0eb6f96365806658f6034dbf452b6'
+  const currentShaResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
+  assert.equal(currentShaResult.status, 0, currentShaResult.stdout + currentShaResult.stderr)
+  const candidate = { root, sha: currentShaResult.stdout.trim() }
+  assert.equal(productionRuntimeFingerprint(root, target), maxVideoRecoveryRuntime)
+  assert.equal(productionCompatibilityFingerprint(root), expectedCompatibility)
+
+  const profile = (source, storageDriver = 'filesystem') => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(source.root)}\nMEMOLY_PRODUCT_SHA=${source.sha}\ncompose() { [[ "$*" == *'loadEnv(process.env)'* && "$*" == *'PRIVATE_STORAGE_DRIVER'* ]] || return 63; [ "\${MOCK_EFFECTIVE_STORAGE_DRIVER:-}" = filesystem ]; }\nMOCK_EFFECTIVE_STORAGE_DRIVER=${storageDriver}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+  const accepted = profile(candidate)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
+  const s3Rejected = profile(candidate, 's3')
+  assert.notEqual(s3Rejected.status, 0, 'MAX retirement recovery must reject an effective S3 storage driver')
+
+  const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-retirement-drift-'))
+  const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, candidate.sha], { cwd: root, encoding: 'utf8' })
+  if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+  fixtureWorktrees.push(driftDirectory)
+  const mutated = commitSourceChange({ root: driftDirectory, sha: candidate.sha },
+    'backend/src/modules/control/infrastructure/control-purge.ts', '\n// synthetic MAX retirement compatibility drift\n',
+    'mutate control retirement recovery executable input')
+  const rejected = profile(mutated)
+  assert.notEqual(rejected.status, 0, 'MAX retirement recovery must reject changed executable input')
 })
 
 test('MAX video readiness is read-only and blocks unsafe held tombstones before service changes', () => {
@@ -2949,7 +2978,7 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
       const rows = candidate.slice(0, count).map(([migration_name, checksum]) => ({ migration_name, checksum, finished_at: '2026-10-25T10:00:00.000Z', rolled_back_at: null }))
       if (process.env.FIXTURE_LEDGER_VARIANT === 'wrong' && rows.length > 56) rows[56].migration_name = '20990101000000_unreviewed'
       if (sql.startsWith('SELECT migration_name,checksum')) return { rows }
-      if (sql.includes('to_regclass')) return { rows: [{ present: count === 59 }] }
+      if (sql.includes('to_regclass')) return { rows: [{ retention: count === 59, family_deletions: false, storage_deletes: false, purge_fences: false }] }
       if (sql.includes('SELECT EXISTS')) return { rows: [{ unread: false, multiple: false, unfinished: false }] }
       throw new Error('unexpected release-verification SQL')
     }
@@ -2958,8 +2987,8 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
   const checksum = 'a'.repeat(64)
   const fixtureBaselineCatalog = Array.from({ length: 56 }, (_, index) =>
     `20200101000000_fixture_${String(index).padStart(2, '0')}:${checksum}:${checksum}`).join('\n')
-  const fixtureCandidateCatalog = `${fixtureBaselineCatalog}\n20261025100000_control_observability:${checksum}:${checksum}\n20261025110000_max_multivideo_references:${checksum}:${checksum}\n20261025120000_max_video_legacy_retention:${checksum}:${checksum}`
-  const run = (phase, variant = 'exact') => spawnSync(bashExecutable, ['-s'], {
+  const fixtureCandidateCatalog = `${fixtureBaselineCatalog}\n20261025100000_control_observability:479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557:479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557\n20261025110000_max_multivideo_references:9e505de99d8e7a65b9c5652ebd213d20f93c845ae9ebf6615d6d35d460fcdb90:9e505de99d8e7a65b9c5652ebd213d20f93c845ae9ebf6615d6d35d460fcdb90\n20261025120000_max_video_legacy_retention:7de7987b54a79e13fde70a1604ebc41f19fc49ac953bfd48f03a90353cfca1f0:7de7987b54a79e13fde70a1604ebc41f19fc49ac953bfd48f03a90353cfca1f0`
+  const run = (phase, variant = 'exact', ledgerCount = 57) => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
     input: [
       'set -euo pipefail', redeployDefinitions,
@@ -2971,7 +3000,7 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
       'git() { case "$*" in *"status --porcelain"*) : ;; *) command git "$@" ;; esac; }',
       `FIXTURE_BASELINE_CATALOG=${shellQuote(fixtureBaselineCatalog)}`,
       `FIXTURE_CANDIDATE_CATALOG=${shellQuote(fixtureCandidateCatalog)}`,
-      'rollback_migration_catalog_checksums() { if [ "$1" = ccd3b911222d00769a099b998d8eef2665acd9d4 ]; then printf "%s\\n" "$FIXTURE_BASELINE_CATALOG"; else printf "%s\\n" "$FIXTURE_CANDIDATE_CATALOG"; fi; }',
+      'rollback_migration_catalog_checksums() { if [ "$1" = ccd3b911222d00769a099b998d8eef2665acd9d4 ]; then printf "%s\\n" "$FIXTURE_BASELINE_CATALOG"; else local catalog="$FIXTURE_CANDIDATE_CATALOG"; [ "$FIXTURE_LEDGER_VARIANT" != bad-catalog ] || catalog="${catalog//479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff}"; printf "%s\\n" "$catalog"; fi; }',
       'rollback_source_compatibility_profile() { printf "max-video\\n"; }',
       `rollback_runtime_fingerprint() { printf "%s\\n" "${maxVideoRecoveryRuntime}"; }`,
       'rollback_control_host_inputs_match() { return 0; }',
@@ -2988,18 +3017,29 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
       `FIXTURE_EVENTS=${shellQuote(events)}`,
       `FIXTURE_PG_DIR=${shellQuote(gitBashPath(serverRoot))}`,
       `FIXTURE_LEDGER_VARIANT=${shellQuote(variant)}`,
-      'FIXTURE_LEDGER_COUNT=57',
+      `FIXTURE_LEDGER_COUNT=${ledgerCount}`,
       'if verify_application_rollback "$FIXTURE_PHASE"; then printf "accepted\\n"; else status=$?; printf "rejected:%s\\n" "$status"; fi',
     ].join('\n'),
-    encoding: 'utf8', env: { ...process.env, FIXTURE_PHASE: phase, FIXTURE_EVENTS: gitBashPath(events), FIXTURE_PG_DIR: gitBashPath(serverRoot), FIXTURE_LEDGER_COUNT: '57', FIXTURE_LEDGER_VARIANT: variant }, timeout: 30_000,
+    encoding: 'utf8', env: { ...process.env, FIXTURE_PHASE: phase, FIXTURE_EVENTS: gitBashPath(events), FIXTURE_PG_DIR: gitBashPath(serverRoot), FIXTURE_LEDGER_COUNT: String(ledgerCount), FIXTURE_LEDGER_VARIANT: variant }, timeout: 30_000,
   })
   try {
     const preSql = run('pre-sql')
     assert.equal(preSql.status, 0, preSql.stdout + preSql.stderr)
-    assert.match(preSql.stdout, /accepted/)
     const preEvents = existsSync(events) ? readFileSync(events, 'utf8') : ''
+    assert.match(preSql.stdout, /accepted/, `${preSql.stdout}${preSql.stderr}\nevents=${preEvents}`)
     assert.match(preEvents, /ledger-check/)
     assert.doesNotMatch(preEvents, /migration-status/)
+
+    writeFileSync(events, '')
+    const completeLegacy = run('complete', 'exact', 59)
+    assert.equal(completeLegacy.status, 0, completeLegacy.stdout + completeLegacy.stderr)
+    assert.match(completeLegacy.stdout, /accepted/)
+
+    writeFileSync(events, '')
+    const badCatalog = run('pre-sql', 'bad-catalog')
+    assert.equal(badCatalog.status, 0, badCatalog.stdout + badCatalog.stderr)
+    assert.match(badCatalog.stdout, /rejected:1/)
+    assert.doesNotMatch(existsSync(events) ? readFileSync(events, 'utf8') : '', /migration-status/)
 
     writeFileSync(events, '')
     const unreviewed = run('pre-sql', 'wrong')

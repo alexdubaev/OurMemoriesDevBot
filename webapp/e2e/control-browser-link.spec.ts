@@ -59,7 +59,7 @@ test('Control preserves its browser-link challenge across MAX and enforces the r
     expect(approval.status()).toBe(200)
     await expect(page.getByRole('heading', { name: 'Обзор' })).toBeVisible()
     expect((await approved).status()).toBe(200)
-    await expect(page.getByText('Уникальные учётные записи')).toBeVisible()
+    await expect(page.getByText('Учётные записи', { exact: true })).toBeVisible()
     await mkdir('e2e/.artifacts', { recursive: true })
     await page.setViewportSize({ width: 1440, height: 1000 })
     await page.screenshot({ path: 'e2e/.artifacts/control-owner-1440-light.png', fullPage: true })
@@ -88,8 +88,9 @@ test('Control preserves its browser-link challenge across MAX and enforces the r
     await expect(page.getByRole('heading', { name: 'Control E2E Garden' })).toBeVisible()
     const familyDetails = page.locator('.control-detail-sheet').first()
     await expect(familyDetails.locator('.control-detail-grid dd').nth(0)).toHaveText('Активна')
-    await expect(familyDetails.locator('.control-detail-grid dd').nth(6)).toHaveText('Не настроен')
-    const memberSection = page.locator('.control-detail-sheet').first().locator('.control-detail-body > [data-slot="card"]').first()
+    const maxConnection = familyDetails.locator('.control-detail-grid > div').filter({ has: page.getByText('Подключение MAX', { exact: true }) })
+    await expect(maxConnection.locator('dd')).toHaveText('Не настроен')
+    const memberSection = familyDetails.locator('.control-detail-body > [data-slot="card"]').filter({ has: page.getByText('Участники', { exact: true }) })
     await expect(memberSection.locator('button.control-detail-row')).toHaveCount(25)
     await expect(page.getByRole('button', { name: 'Закрыть' })).toBeVisible()
     await page.getByRole('button', { name: 'Закрыть' }).click()
@@ -144,7 +145,7 @@ test('Control preserves its browser-link challenge across MAX and enforces the r
 
     await page.getByRole('button', { name: 'Выйти' }).click()
     await expect(page.getByRole('heading', { name: 'Войдите через MAX' })).toBeVisible()
-    await expect(page.getByText('Уникальные учётные записи')).toHaveCount(0)
+    await expect(page.getByText('Учётные записи', { exact: true })).toHaveCount(0)
 
     const nonOwnerContext = await browser.newContext()
     try {
@@ -168,7 +169,7 @@ test('Control preserves its browser-link challenge across MAX and enforces the r
       expect(nonOwnerApproval.status()).toBe(200)
       expect((await nonOwnerApproved).status()).toBe(200)
       await expect(nonOwnerPage.getByRole('heading', { name: 'У этой учётной записи нет доступа' })).toBeVisible()
-      await expect(nonOwnerPage.getByText('Уникальные учётные записи')).toHaveCount(0)
+      await expect(nonOwnerPage.getByText('Учётные записи', { exact: true })).toHaveCount(0)
       await expect(nonOwnerPage.getByRole('heading', { name: 'Войдите через MAX' })).toHaveCount(0)
     } finally {
       await nonOwnerContext.close()
@@ -255,7 +256,7 @@ test('Control fails closed on access loss, restores an owner session, and revali
   })
   await expect(page.getByText('Проверяем доступ к панели…')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Семьи' })).toHaveCount(0)
-  await expect(page.getByText('Уникальные учётные записи')).toHaveCount(0)
+  await expect(page.getByText('Учётные записи', { exact: true })).toHaveCount(0)
   releaseLateMe()
   await lateMeSettled
   await expect(page.getByText('Проверяем доступ к панели…')).toBeVisible()
@@ -266,7 +267,7 @@ test('Control fails closed on access loss, restores an owner session, and revali
   await visibleMeStarted
   await expect(page.getByText('Проверяем доступ к панели…')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Семьи' })).toHaveCount(0)
-  await expect(page.getByText('Уникальные учётные записи')).toHaveCount(0)
+  await expect(page.getByText('Учётные записи', { exact: true })).toHaveCount(0)
   const visibleMeResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/control/me') && response.status() === 200)
   releaseVisibleMe()
   expect((await visibleMeResponse).status()).toBe(200)
@@ -276,7 +277,7 @@ test('Control fails closed on access loss, restores an owner session, and revali
   await page.route('**/api/v1/control/me', (route) => route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ code: 'FORBIDDEN', message: 'Synthetic owner access loss' }) }))
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })))
   await expect(page.getByRole('heading', { name: 'У этой учётной записи нет доступа' })).toBeVisible()
-  await expect(page.getByText('Уникальные учётные записи')).toHaveCount(0)
+  await expect(page.getByText('Учётные записи', { exact: true })).toHaveCount(0)
   await page.unroute('**/api/v1/control/me')
   await page.getByRole('button', { name: 'Повторить' }).click()
   await expect(page.getByRole('heading', { name: 'Семьи' })).toBeVisible()
@@ -284,7 +285,7 @@ test('Control fails closed on access loss, restores an owner session, and revali
   await page.route('**/api/v1/control/me', (route) => route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ code: 'UNAUTHORIZED', message: 'Synthetic session expiry' }) }))
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })))
   await expect(page.getByRole('heading', { name: 'Войдите через MAX' })).toBeVisible()
-  await expect(page.getByText('Уникальные учётные записи')).toHaveCount(0)
+  await expect(page.getByText('Учётные записи', { exact: true })).toHaveCount(0)
 })
 
 test('Control retries cookie refresh after a startup network failure', async ({ page }) => {
@@ -301,6 +302,81 @@ test('Control retries cookie refresh after a startup network failure', async ({ 
   expect(refreshAttempts).toBeGreaterThanOrEqual(2)
 })
 
+test('Control owner trashes and restores a synthetic account, then confirms only a separate family purge', async ({ browser, page, browserName }) => {
+  await authenticateOwner(page, browser)
+  const apiOrigin = new URL(process.env.VITE_API_URL ?? 'http://127.0.0.1:56701').origin
+  const maxContext = await browser.newContext()
+  const targetSubject = browserName === 'webkit' ? 987655002 : 987655001
+  const targetName = `Control Delete Target ${browserName}`
+  const familyName = `${targetName} Family`
+  try {
+    const targetLogin = await maxContext.request.post(`${apiOrigin}/api/v1/auth/max`, {
+      headers: { Origin: new URL(page.url()).origin },
+      data: { initData: signedMaxInitDataFor(targetSubject, '', targetName) },
+    })
+    expect(targetLogin.status()).toBe(200)
+    const targetSession = await targetLogin.json() as { accessToken: string }
+    const targetFamily = await maxContext.request.post(`${apiOrigin}/api/v1/families`, {
+      headers: { Origin: new URL(page.url()).origin, Authorization: `Bearer ${targetSession.accessToken}`, 'idempotency-key': randomUUID() },
+      data: { name: familyName, timezone: 'UTC' },
+    })
+    expect(targetFamily.status()).toBe(201)
+    expect((await maxContext.request.get(`${apiOrigin}/api/v1/me/families`, { headers: { Authorization: `Bearer ${targetSession.accessToken}` } })).status()).toBe(200)
+
+    await page.getByRole('button', { name: 'Пользователи', exact: true }).click()
+    const usersSearch = page.getByPlaceholder('Поиск по имени')
+    await usersSearch.fill(targetName)
+    const targetRow = page.getByRole('row').filter({ hasText: targetName })
+    await expect(targetRow).toBeVisible()
+    await targetRow.click()
+    await expect(page.getByRole('heading', { name: targetName })).toBeVisible()
+    await page.getByRole('button', { name: 'Удалить пользователя' }).click()
+    const trashDialog = page.getByRole('dialog', { name: 'Удалить пользователя', exact: true })
+    await expect(trashDialog.getByText('Доступ участников изменится сразу')).toBeVisible()
+    await trashDialog.getByLabel('Введите УДАЛИТЬ ПОЛЬЗОВАТЕЛЯ').fill('УДАЛИТЬ ПОЛЬЗОВАТЕЛЯ')
+    await mkdir('e2e/.artifacts', { recursive: true })
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await expect(trashDialog.getByRole('button', { name: 'Переместить в корзину' })).toBeEnabled()
+    await page.screenshot({ path: `e2e/.artifacts/control-deletion-${browserName}-desktop-light.png`, fullPage: false })
+    await trashDialog.getByRole('button', { name: 'Переместить в корзину' }).click()
+    await expect(page.getByText(/В корзине до/)).toBeVisible()
+    expect((await maxContext.request.get(`${apiOrigin}/api/v1/me/families`, { headers: { Authorization: `Bearer ${targetSession.accessToken}` } })).status()).toBe(401)
+    await page.getByRole('button', { name: 'Восстановить', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Восстановить пользователя', exact: true }).getByRole('button', { name: 'Восстановить', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Удалить пользователя' })).toBeVisible()
+    await page.getByRole('button', { name: 'Закрыть' }).click()
+
+    await page.getByRole('button', { name: 'Семьи', exact: true }).click()
+    const familiesSearch = page.getByPlaceholder('Поиск по названию семьи')
+    await familiesSearch.fill(familyName)
+    const familyRow = page.getByRole('row').filter({ hasText: familyName })
+    await expect(familyRow).toBeVisible()
+    await familyRow.click()
+    await expect(page.getByRole('heading', { name: familyName })).toBeVisible()
+    await page.getByRole('button', { name: 'Удалить семью навсегда' }).click()
+    const purgeDialog = page.getByRole('dialog', { name: 'Удалить семью навсегда', exact: true })
+    await expect(purgeDialog.getByText('Действие необратимо')).toBeVisible()
+    await purgeDialog.getByRole('button', { name: 'Отмена' }).click()
+    await expect(purgeDialog).toHaveCount(0)
+    await page.getByRole('button', { name: 'Закрыть' }).click()
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.getByRole('button', { name: 'Переключить тему' }).click()
+    await expect(page.locator('.memoly-control-root')).toHaveAttribute('data-theme', 'dark')
+    await familyRow.click()
+    await expect(page.getByRole('heading', { name: familyName })).toBeVisible()
+    await page.getByRole('button', { name: 'Удалить семью навсегда' }).click()
+    const confirmedPurgeDialog = page.getByRole('dialog', { name: 'Удалить семью навсегда', exact: true })
+    await confirmedPurgeDialog.getByLabel('Введите УДАЛИТЬ НАВСЕГДА').fill('УДАЛИТЬ НАВСЕГДА')
+    await expect(confirmedPurgeDialog.getByRole('button', { name: 'Удалить навсегда' })).toBeEnabled()
+    await page.screenshot({ path: `e2e/.artifacts/control-deletion-${browserName}-mobile-dark.png`, fullPage: false })
+    await confirmedPurgeDialog.getByRole('button', { name: 'Удалить навсегда' }).click()
+    await expect(page.getByText('Доступ уже закрыт; физическая очистка продолжается.')).toBeVisible()
+  } finally {
+    await maxContext.close()
+  }
+})
+
 test('Control static entry stays standalone and includes its no-JavaScript message', async ({ request }) => {
   const entry = await request.get('/control/')
   expect(entry.status()).toBe(200)
@@ -313,7 +389,7 @@ test('Control static entry stays standalone and includes its no-JavaScript messa
   expect(html).toContain('Для работы панели требуется JavaScript.')
 })
 
-async function authenticateOwner(page: import('@playwright/test').Page, browser: import('@playwright/test').Browser) {
+async function authenticateOwner(page: import('@playwright/test').Page, browser: import('@playwright/test').Browser): Promise<string> {
   await page.goto('/control/')
   await expect(page.getByRole('heading', { name: 'Войдите через MAX' })).toBeVisible()
   const started = page.waitForResponse((response) => response.url().includes('/api/v1/auth/browser-link/start'))
@@ -336,17 +412,18 @@ async function authenticateOwner(page: import('@playwright/test').Page, browser:
     expect(approval.status()).toBe(200)
     expect((await status).status()).toBe(200)
     await expect(page.getByRole('heading', { name: 'Обзор' })).toBeVisible()
+    return session.accessToken
   } finally {
     await maxContext.close()
   }
 }
 
-function signedMaxInitDataFor(userId: number, startParam = '') {
+function signedMaxInitDataFor(userId: number, startParam = '', firstName = 'Control E2E Viewer') {
   const fields = new Map([
     ['auth_date', String(Math.floor(Date.now() / 1000))],
     ['query_id', `control-e2e-${randomUUID()}`],
     ['start_param', startParam],
-    ['user', JSON.stringify({ id: userId, first_name: 'Control E2E Viewer' })],
+    ['user', JSON.stringify({ id: userId, first_name: firstName })],
   ])
   const checkString = [...fields]
     .sort(([left], [right]) => Buffer.from(left).compare(Buffer.from(right)))

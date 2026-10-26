@@ -14,6 +14,8 @@ model User {
   displayName         String?              @map("display_name")
   uiTheme             String               @default("mint") @map("ui_theme") @db.VarChar(16)
   role                UserRole             @default(user)
+  controlState        ControlUserState     @default(active) @map("control_state")
+  controlVersion      Int                  @default(1) @map("control_version")
   createdAt           DateTime             @default(now()) @map("created_at")
   updatedAt           DateTime             @updatedAt @map("updated_at")
   welcomeShownAt      DateTime?            @map("welcome_shown_at")
@@ -36,6 +38,7 @@ model User {
   maxChannelDecisions        MaxChannelDecision[]
   controlActivity            ControlUserActivity[]
   controlFamilyActivity      ControlFamilyActivity[]
+  controlAccessSnapshots     ControlAccessSnapshot[]
 
   @@index([role], map: "users_role_idx")
   @@map("users")
@@ -110,6 +113,7 @@ model MaxInbox {
   status            MaxInboxStatus     @default(accepted)
   receivedAt        DateTime           @default(now()) @map("received_at") @db.Timestamptz(6)
   processedAt       DateTime?          @map("processed_at") @db.Timestamptz(6)
+  controlRedactedAt DateTime?          @map("control_redacted_at") @db.Timestamptz(6)
   source            MaxSource?
   responses         MaxOutgoingResponse[]
   channelDecision   MaxChannelDecision?
@@ -309,6 +313,7 @@ model TelegramInbox {
   encryptionAuthTag Bytes               @map("encryption_auth_tag")
   receivedAt        DateTime            @default(now()) @map("received_at") @db.Timestamptz(6)
   processedAt       DateTime?           @map("processed_at") @db.Timestamptz(6)
+  controlRedactedAt DateTime?            @map("control_redacted_at") @db.Timestamptz(6)
   source            TelegramSource?
 
   @@unique([botId, updateId], map: "telegram_inbox_bot_update_key")
@@ -415,6 +420,7 @@ model Family {
   name                 String
   timezone             String
   status               FamilyStatus        @default(active)
+  controlVersion       Int                 @default(1) @map("control_version")
   storageUsedBytes     BigInt              @default(0) @map("storage_used_bytes")
   storageReservedBytes BigInt              @default(0) @map("storage_reserved_bytes")
   publicationOrdinal   BigInt              @default(0) @map("publication_ordinal")
@@ -445,6 +451,8 @@ model Family {
   albumPhotos          AlbumPhoto[]
   albumSourceOperations AlbumSourceOperation[]
   controlActivity       ControlFamilyActivity[]
+  controlAccessSnapshots ControlAccessSnapshot[]
+  controlDeletionFamilies ControlUserDeletionFamily[]
 
   @@unique([id, ownerUserId], map: "families_owner_pair_key")
   @@index([ownerUserId], map: "families_owner_user_id_idx")
@@ -463,6 +471,110 @@ model ControlUserActivity {
   @@index([utcDay], map: "control_user_activity_utc_day_idx")
   @@index([lastObservedAt], map: "control_user_activity_last_observed_at_idx")
   @@map("control_user_activity")
+}
+
+model ControlUserDeletion {
+  id           String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  targetUserId String    @map("target_user_id") @db.Uuid
+  actorUserId  String    @map("actor_user_id") @db.Uuid
+  deletedAt    DateTime  @map("deleted_at") @db.Timestamptz(6)
+  purgeAfter   DateTime  @map("purge_after") @db.Timestamptz(6)
+  restoredAt   DateTime? @map("restored_at") @db.Timestamptz(6)
+  purgeStage   String    @default("waiting") @map("purge_stage") @db.VarChar(24)
+  purgeCursor  String?   @map("purge_cursor") @db.VarChar(128)
+  purgedAt     DateTime? @map("purged_at") @db.Timestamptz(6)
+  lastErrorCode String?  @map("last_error_code") @db.VarChar(48)
+  lastAttemptAt DateTime? @map("last_attempt_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  families     ControlUserDeletionFamily[]
+
+  @@index([targetUserId, deletedAt(sort: Desc)], map: "control_user_deletions_target_deleted_idx")
+  @@index([purgeAfter, restoredAt], map: "control_user_deletions_purge_idx")
+  @@index([lastAttemptAt, purgeAfter, id], map: "control_user_deletions_attempt_idx")
+  @@map("control_user_deletions")
+}
+
+model ControlUserDeletionFamily {
+  deletionId      String             @map("deletion_id") @db.Uuid
+  familyId        String             @map("family_id") @db.Uuid
+  originalStatus  FamilyStatus       @map("original_status")
+  restoreEligible Boolean            @default(false) @map("restore_eligible")
+  deletion   ControlUserDeletion @relation(fields: [deletionId], references: [id], onDelete: Cascade, map: "control_user_deletion_families_deletion_id_fkey")
+  family     Family             @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "control_user_deletion_families_family_id_fkey")
+
+  @@id([deletionId, familyId], map: "control_user_deletion_families_pkey")
+  @@index([familyId], map: "control_user_deletion_families_family_id_idx")
+  @@map("control_user_deletion_families")
+}
+
+model ControlFamilyDeletion {
+  id           String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId     String   @unique(map: "control_family_deletions_family_id_key") @map("family_id") @db.Uuid
+  actorUserId  String   @map("actor_user_id") @db.Uuid
+  requestedAt  DateTime @map("requested_at") @db.Timestamptz(6)
+  purgeStage   String   @default("capture_media") @map("purge_stage") @db.VarChar(24)
+  purgeCursor  String?  @map("purge_cursor") @db.VarChar(128)
+  notBefore    DateTime @default(now()) @map("not_before") @db.Timestamptz(6)
+  keysCapturedAt DateTime? @map("keys_captured_at") @db.Timestamptz(6)
+  purgedAt     DateTime? @map("purged_at") @db.Timestamptz(6)
+  lastErrorCode String? @map("last_error_code") @db.VarChar(48)
+  lastAttemptAt DateTime? @map("last_attempt_at") @db.Timestamptz(6)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([lastAttemptAt, requestedAt, id], map: "control_family_deletions_attempt_idx")
+  @@map("control_family_deletions")
+}
+
+/// Durable server-only object keys. No source-table FK by design: the source may be erased only
+/// after every key is confirmed absent, and this queue survives source deletion and restarts.
+model ControlStorageDelete {
+  id             String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  operationId    String    @map("operation_id") @db.Uuid
+  familyId       String?   @map("family_id") @db.Uuid
+  userId         String?   @map("user_id") @db.Uuid
+  objectKey      String    @unique(map: "control_storage_deletes_object_key_key") @map("object_key")
+  notBefore      DateTime  @default(now()) @map("not_before") @db.Timestamptz(6)
+  nextAttemptAt  DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  attempts       Int       @default(0)
+  lastErrorCode  String?   @map("last_error_code") @db.VarChar(48)
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([operationId, objectKey], map: "control_storage_deletes_operation_object_key_key")
+  @@index([operationId, completedAt, nextAttemptAt], map: "control_storage_deletes_due_idx")
+  @@map("control_storage_deletes")
+}
+
+model ControlLifecycleCommand {
+  id          String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  actorUserId String   @map("actor_user_id") @db.Uuid
+  key         String   @db.Uuid
+  operation   String   @db.VarChar(32)
+  targetId    String   @map("target_id") @db.Uuid
+  payloadHash String   @map("payload_hash") @db.Char(64)
+  response    Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([actorUserId, key], map: "control_lifecycle_commands_actor_key_key")
+  @@index([targetId, createdAt], map: "control_lifecycle_commands_target_created_idx")
+  @@map("control_lifecycle_commands")
+}
+
+model ControlAccessSnapshot {
+  familyId                  String     @map("family_id") @db.Uuid
+  userId                    String     @map("user_id") @db.Uuid
+  deletionId                String     @map("deletion_id") @db.Uuid
+  role                      FamilyRole
+  expectedRevokedVersion    Int        @map("expected_revoked_version")
+  expectedRevokedEpoch      Int        @map("expected_revoked_epoch")
+  cancelledAt               DateTime?  @map("cancelled_at") @db.Timestamptz(6)
+  createdAt                 DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  family                    Family     @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "control_access_snapshots_family_id_fkey")
+  user                      User       @relation(fields: [userId], references: [id], onDelete: Cascade, map: "control_access_snapshots_user_id_fkey")
+
+  @@id([familyId, userId], map: "control_access_snapshots_pkey")
+  @@index([deletionId], map: "control_access_snapshots_deletion_id_idx")
+  @@map("control_access_snapshots")
 }
 
 model ControlFamilyActivity {
@@ -1155,6 +1267,15 @@ enum FamilyStatus {
   deleted
 
   @@map("family_status")
+}
+
+enum ControlUserState {
+  active
+  trashed
+  purging
+  purged
+
+  @@map("control_user_state")
 }
 
 enum MemoryKind {
