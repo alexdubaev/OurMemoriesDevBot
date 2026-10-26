@@ -1,16 +1,16 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
-import { createPrisma } from '../../db'
-import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
-import { createPrismaAuthRepository, createPrismaBrowserLinkRepository, createPrismaMaxAuthRepository } from '../auth/infrastructure/auth-repository'
-import { FamilyService } from '../families/application/family-service'
-import { createPrismaIdempotencyExecutor } from '../../idempotency'
+import { createPrisma } from '../src/db'
+import { requireIntegrationDatabaseUrl } from '../src/test-support/integration-database'
+import { createPrismaAuthRepository, createPrismaBrowserLinkRepository, createPrismaMaxAuthRepository } from '../src/modules/auth/infrastructure/auth-repository'
+import { FamilyService } from '../src/modules/families/application/family-service'
+import { createPrismaIdempotencyExecutor } from '../src/idempotency'
 import {
   previewFamilyDeletion,
   previewUserDeletion,
   purgeControlFamily,
   restoreControlUser,
   trashControlUser,
-} from './infrastructure/control-lifecycle'
+} from '../src/modules/control/infrastructure/control-lifecycle'
 
 const databaseUrl = requireIntegrationDatabaseUrl()
 const prisma = createPrisma(databaseUrl)

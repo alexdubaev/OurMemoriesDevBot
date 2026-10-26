@@ -35,7 +35,7 @@
 
 **Files:**
 - Modify `backend/prisma/schema.prisma`; create one new additive migration in `backend/prisma/migrations/`.
-- Create `backend/src/modules/control/infrastructure/control-lifecycle.ts` and `control-lifecycle.integration.test.ts`.
+- Create `backend/src/modules/control/infrastructure/control-lifecycle.ts` and `backend/scripts/control-lifecycle.integration.test.ts`.
 - Modify `backend/src/modules/auth/infrastructure/auth-repository.ts` and auth service as necessary for safe error mapping.
 - Modify `backend/src/modules/families/application/family-service.ts` only for user-state check and explicit snapshot cancellation.
 
