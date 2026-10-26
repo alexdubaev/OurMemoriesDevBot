@@ -51,7 +51,7 @@ Files: `AGENTS.md`, `docs/TESTING.md`, `docs/mvp/07_DELIVERY.md`, `docs/mvp/08_C
 
 - [x] Align default command, terminology, manual reason, unknown-path stop, scoped E2E and out-of-scope failure handling; retain critical FULL and release rules.
 - [x] Verifier suite and actual original-range plan check: original 16 paths select STANDARD with dedicated family E2E. Final counts/commit are recorded in the task PR.
-- [ ] One Luna review, bounded corrections, commit candidate and execute required gate once. Record baseline failures without repairing unrelated application modules.
+- [x] One Luna review with bounded Git-path corrections; source `fe38561`. Required automatic FULL attempted once: stages 1–2 PASS, stage 3 architecture FAIL in unchanged application files, 4–19 NOT RUN. See `docs/reviews/2026-10-26-verification-profile-policy.md`.
 - [ ] Push task branch and PR; merge only with actual required gates PASS. No production deploy for this tooling task.
 
 ## Execution ledger
@@ -62,3 +62,4 @@ Files: `AGENTS.md`, `docs/TESTING.md`, `docs/mvp/07_DELIVERY.md`, `docs/mvp/08_C
 - Ruling: FULL also appends changed journeys and validates their config mapping — the existing MAX portfolio filters family cases; explicit escalation must not omit the changed scenario. Existing mandatory FULL stages remain intact. Two additional regressions were observed red before this correction.
 - Independent review reproduced an existing downgrade on a staged/committed rename from `backend/src/modules/auth/session.ts` to `docs/session.md`. Bounded fix reuses the existing NUL/name-status path parser, preserving both sides and rejecting ambiguous names. The same parser hashes untracked Unicode filenames correctly. Rename and Unicode CLI tests were observed red before the fix; the reviewer's initial newline-only hypothesis was not treated as a reproduced bug.
 - The same boundary also preserves literal backslashes returned by Git (which already uses slash separators). A real CLI regression reproduced `docs\\outside.bin` being normalized into documentation; normalization was removed and the invalid-path guard now blocks it.
+- Final verifier suite: 26 passed, 0 failed, 217 assertions, exit 0. Independent review bound to `fe38561`; two actual findings closed. Application architecture blocker retained; no broader repair was started.
