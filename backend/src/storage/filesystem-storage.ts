@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { createReadStream, type WriteStream } from 'node:fs'
 import { link, lstat, mkdir, open, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { Readable, Transform } from 'node:stream'
@@ -115,6 +115,8 @@ export class FilesystemPrivateStorage implements PrivateStorage {
     await mkdir(dirname(objectPath), { recursive: true })
     const temporaryPath = `${objectPath}.${randomUUID()}.part`
     let temporaryHandle: Awaited<ReturnType<typeof open>> | undefined
+    let temporaryWriteStream: WriteStream | undefined
+    let temporaryHandleClosed = false
     let retirementPollTimer: ReturnType<typeof setTimeout> | undefined
     let wakeRetirementMonitor: (() => void) | undefined
     let retirementMonitorFinished = false
@@ -168,10 +170,12 @@ export class FilesystemPrivateStorage implements PrivateStorage {
       })()
 
       try {
+        temporaryWriteStream = temporaryHandle.createWriteStream()
+        temporaryWriteStream.once('close', () => { temporaryHandleClosed = true })
         await pipeline(
           Readable.fromWeb(input.body as never, { signal: retirementAbort.signal }),
           meter,
-          temporaryHandle.createWriteStream({ autoClose: false }),
+          temporaryWriteStream,
         )
       } catch (error) {
         if (retirementError) throw retirementError
@@ -184,7 +188,6 @@ export class FilesystemPrivateStorage implements PrivateStorage {
       if (written !== contentLength) {
         throw new StorageError('invalid_request', 'Stream does not match its declared length')
       }
-      await temporaryHandle.sync()
       try {
         await link(temporaryPath, objectPath)
       } catch (error) {
@@ -212,7 +215,7 @@ export class FilesystemPrivateStorage implements PrivateStorage {
         await retirementMonitor
       } finally {
         try {
-          await temporaryHandle?.close()
+          if (temporaryHandle && !temporaryHandleClosed) await temporaryHandle.close()
         } finally {
           await unlinkIfPresent(temporaryPath)
         }
