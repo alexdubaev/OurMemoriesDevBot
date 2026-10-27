@@ -50,7 +50,6 @@ export function createMaxResponseDelivery(options: {
       const browserApproval = response.kind === 'welcome'
         ? readBrowserApprovalContext(response.inbox, response.destinationUserId.toString(), response.buttons, options) : null
       const inviteWelcome = readInviteWelcomeMarker(response.buttons)
-      const guidePreview = response.kind === 'welcome' && isWelcomeMarker(response.buttons, 'guide_preview')
       const openButton = options.maxBotUsername && /^[A-Za-z0-9_]{5,32}$/.test(options.maxBotUsername)
         ? { type: 'open_app' as const, text: 'Открыть memoLy', webApp: options.maxBotUsername } : null
       if (browserApproval && openButton) {
@@ -66,9 +65,6 @@ export function createMaxResponseDelivery(options: {
           text: state.status === 'valid' ? inviteWelcome ? inviteStartText(state, inviteWelcome.returning) : response.text : inviteStartText(state),
           ...(button ? { buttons: [button] } : {}),
         }, signal)
-      } else if (guidePreview && openButton) {
-        await options.api.sendMessage({ userId: response.destinationUserId.toString(), text: response.text,
-          buttons: [{ ...openButton, payload: 'guide_preview' }] }, signal)
       } else if (response.kind === 'welcome' && openButton) {
         await options.api.sendMessage({ userId: response.destinationUserId.toString(), text: response.text, buttons: [openButton] }, signal)
       } else {

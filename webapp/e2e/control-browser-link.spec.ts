@@ -179,17 +179,17 @@ test('Control preserves its browser-link challenge across MAX and enforces the r
   }
 })
 
-test('MAX Control owner can close and replay the synthetic guide on reload and WebView return', async ({ page }) => {
+test('MAX Control owner does not enter the synthetic guide on startup, WebView return or reload', async ({ page }) => {
   await page.addInitScript((initData) => {
     Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData, version: '1', platform: 'web', ready() {} } })
   }, signedMaxInitData())
   await page.goto('/')
   const continueWelcome = page.getByRole('button', { name: 'Продолжить' })
   const guide = page.getByRole('heading', { name: 'Пример семейного альбома' })
-  await expect.poll(async () => await guide.isVisible() || await continueWelcome.isVisible()).toBe(true)
+  const normalApp = page.locator('[data-slot="family-hub"]')
+  await expect.poll(async () => await normalApp.isVisible() || await continueWelcome.isVisible()).toBe(true)
   if (await continueWelcome.isVisible().catch(() => false)) await continueWelcome.click()
-  await expect(guide).toBeVisible()
-  await page.getByRole('button', { name: 'Закрыть знакомство' }).click()
+  await expect(normalApp).toBeVisible()
   await expect(guide).toHaveCount(0)
 
   await page.evaluate(() => {
@@ -198,10 +198,12 @@ test('MAX Control owner can close and replay the synthetic guide on reload and W
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
     document.dispatchEvent(new Event('visibilitychange'))
   })
-  await expect(guide).toBeVisible()
-  await page.getByRole('button', { name: 'Закрыть знакомство' }).click()
+  await expect(guide).toHaveCount(0)
   await page.reload()
-  await expect(guide).toBeVisible()
+  await expect.poll(async () => await normalApp.isVisible() || await continueWelcome.isVisible()).toBe(true)
+  if (await continueWelcome.isVisible().catch(() => false)) await continueWelcome.click()
+  await expect(normalApp).toBeVisible()
+  await expect(guide).toHaveCount(0)
 })
 
 test('Control fails closed on access loss, restores an owner session, and revalidates BFCache returns', async ({ browser, page }) => {
