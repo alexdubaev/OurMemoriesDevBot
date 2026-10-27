@@ -246,22 +246,22 @@ describe('risk based verification', () => {
     expect(classifyChanges(['deploy/selectel/README.md'])).toBe('fast')
     expect(classifyChanges(['webapp/src/assets/family-icon.webp'])).toBe('fast')
     expect(classifyChanges(['website/public/assets/brand-mark.png'])).toBe('fast')
-    expect(classifyChanges(['unknown/icon.webp'])).toBe('full')
+    expect(classifyChanges(['unknown/icon.webp'])).toBe('review-required')
   })
 
-  test('ordinary UI selects STANDARD while auth and unknown paths select FULL', () => {
+  test('ordinary UI selects STANDARD, auth requires FULL, and unknown paths require review', () => {
     expect(classifyChanges(['webapp/src/components/FamilyCard.tsx'])).toBe('standard')
     expect(classifyChanges(['webapp/src/features/feed/FeedPage.tsx'])).toBe('standard')
     expect(classifyChanges(['webapp/src/features/family/FamilyHubPage.tsx'])).toBe('standard')
     expect(classifyChanges(['webapp/src/App.tsx'])).toBe('standard')
     expect(classifyChanges(['backend/src/modules/auth/session.ts'])).toBe('full')
-    expect(classifyChanges(['unclassified/build-input.bin'])).toBe('full')
+    expect(classifyChanges(['unclassified/build-input.bin'])).toBe('review-required')
     expect(classifyChanges(['deploy/selectel/frontend-safe-paths.txt'])).toBe('full')
     expect(classifyChanges(['deploy/selectel/frontend-scope.sh'])).toBe('full')
   })
 
   test('unknown paths mixed with known paths and auth-like CSS keep the conservative boundaries', () => {
-    expect(classifyChanges(['docs/change.md', 'unknown/new-format.bin'])).toBe('full')
+    expect(classifyChanges(['docs/change.md', 'unknown/new-format.bin'])).toBe('review-required')
     expect(classifyChanges(['webapp/src/auth.css'])).toBe('fast')
     expect(classifyChanges(['webapp/src/features/auth/provider.tsx'])).toBe('full')
     expect(classifyChanges(['backend/src/modules/memories/delete.ts'])).toBe('full')
@@ -276,7 +276,69 @@ describe('risk based verification', () => {
   test('a requested profile cannot lower the inferred minimum', () => {
     expect(() => selectProfile({ paths: ['backend/src/modules/auth/login.ts'], requested: 'fast' }))
       .toThrow('Profile downgrade refused')
-    expect(selectProfile({ paths: ['webapp/src/ui.css'], requested: 'full' }).profile).toBe('full')
+    expect(() => selectProfile({ paths: ['webapp/src/ui.css'], requested: 'full' })).toThrow('--reason')
+    expect(selectProfile({ paths: ['webapp/src/ui.css'], requested: 'full', reason: 'Owner explicitly requested the FULL profile' }).profile).toBe('full')
+    expect(selectProfile({ paths: ['backend/src/modules/auth/login.ts'], requested: 'full' }).profile).toBe('full')
+  })
+
+  test('journal stays FAST and the invited-family UI range stays STANDARD with explained paths', () => {
+    expect(classifyChanges(['.autopilot/PROGRESS.md'])).toBe('fast')
+    const paths = ['.autopilot/PROGRESS.md', 'webapp/src/features/family/FamilyGuide.tsx', 'webapp/src/App.tsx', 'webapp/e2e/max-family-audit.max-e2e.ts']
+    const selected = selectProfile({ paths })
+    expect(selected.profile).toBe('standard')
+    expect(selected.reasons.find((item) => item.path === '.autopilot/PROGRESS.md')?.profile).toBe('fast')
+    expect(selected.reasons.find((item) => item.path === 'webapp/src/App.tsx')?.profile).toBe('standard')
+    const critical = selectProfile({ paths: [...paths, 'tests/selectel-release-exit.test.mjs'] })
+    expect(critical.required).toBe('full')
+    expect(critical.reasons.find((item) => item.path === 'tests/selectel-release-exit.test.mjs')?.rule).toBe('critical-path')
+  })
+
+  test('unknown scope blocks every explicit profile and mixed critical changes before a plan can execute', () => {
+    for (const paths of [[], ['unknown/build.bin'], ['webapp/src/new-format.bin'], ['.autopilot/new-runner.js'], ['unknown/build.bin', 'backend/src/modules/auth/session.ts']]) {
+      expect(classifyChanges(paths)).toBe('review-required')
+      for (const requested of [undefined, 'fast', 'standard', 'full']) {
+        expect(() => selectProfile({ paths, requested, reason: 'Explicit full request' })).toThrow('REVIEW_REQUIRED')
+      }
+    }
+    expect(() => planFor('review-required', ['unknown/build.bin'])).toThrow('REVIEW_REQUIRED')
+  })
+
+  test('STANDARD runs exact changed browser specs using their real configs without portfolio filtering', () => {
+    const paths = ['.autopilot/PROGRESS.md', 'webapp/src/features/family/FamilyGuide.tsx', 'webapp/e2e/max-family-audit.max-e2e.ts', 'webapp/e2e/control-browser-link.spec.ts', 'webapp/e2e/children.spec.ts', 'webapp/e2e/comments.spec.ts']
+    const commands = planFor('standard', paths).filter(([name]) => name.startsWith('Browser journey'))
+    expect(commands.map(([, [, args]]) => args)).toEqual([
+      ['run', '--cwd', 'webapp', 'e2e', '--config=e2e/comments.playwright.config.ts', 'e2e/comments.spec.ts'],
+      ['run', '--cwd', 'webapp', 'e2e', '--config=playwright.control.config.ts', 'e2e/control-browser-link.spec.ts'],
+      ['run', '--cwd', 'webapp', 'e2e', '--config=playwright.max.config.ts', 'e2e/children.spec.ts'],
+      ['run', '--cwd', 'webapp', 'e2e', '--config=e2e/max-family-audit.playwright.config.ts', 'e2e/max-family-audit.max-e2e.ts'],
+    ].sort((a, b) => a.at(-1).localeCompare(b.at(-1))))
+    expect(commands.flatMap(([, [, args]]) => args).some((arg) => arg.includes('--grep') || arg === 'e2e:webapp:max')).toBe(false)
+  })
+
+  test('STANDARD ignores deleted specs, runs renamed specs once and blocks unmapped browser configs', () => {
+    const fixture = mkdtempSync(resolve(tmpdir(), 'memoly-browser-plan-'))
+    const put = (path) => { mkdirSync(dirname(resolve(fixture, path)), { recursive: true }); writeFileSync(resolve(fixture, path), '// fixture\n') }
+    try {
+      put('webapp/e2e/new-name.spec.ts')
+      expect(() => planFor('standard', ['webapp/e2e/new-name.spec.ts'], undefined, fixture)).toThrow('REVIEW_REQUIRED')
+      expect(() => planFor('full', ['webapp/e2e/new-name.spec.ts'], undefined, fixture)).toThrow('REVIEW_REQUIRED')
+      put('webapp/e2e/new-name.playwright.config.ts')
+      const plan = planFor('standard', ['webapp/e2e/old-name.spec.ts', 'webapp/e2e/new-name.spec.ts', 'webapp/e2e/new-name.spec.ts'], undefined, fixture)
+      const journeys = plan.filter(([name]) => name.startsWith('Browser journey'))
+      expect(journeys).toHaveLength(1)
+      expect(journeys[0][1][1]).toContain('e2e/new-name.spec.ts')
+      expect(journeys[0][1][1]).not.toContain('e2e/old-name.spec.ts')
+      rmSync(resolve(fixture, 'webapp/e2e/new-name.spec.ts'))
+      expect(planFor('standard', ['webapp/e2e/new-name.spec.ts'], undefined, fixture).some(([name]) => name.startsWith('Browser journey'))).toBe(false)
+    } finally { rmSync(fixture, { recursive: true, force: true }) }
+  })
+
+  test('FULL retains its portfolio and includes the complete changed family spec outside MAX-FULL grep', () => {
+    const commands = planFor('full', ['webapp/e2e/max-family-audit.max-e2e.ts'])
+    expect(commands.some(([, [, args]]) => args.includes('e2e:webapp:max'))).toBe(true)
+    expect(commands.find(([name]) => name === 'Browser journey webapp/e2e/max-family-audit.max-e2e.ts')?.[1][1]).toEqual([
+      'run', '--cwd', 'webapp', 'e2e', '--config=e2e/max-family-audit.playwright.config.ts', 'e2e/max-family-audit.max-e2e.ts',
+    ])
   })
 
   test('FAST builds production UI when CSS changes but docs-only checks stay lightweight', () => {
@@ -424,6 +486,51 @@ describe('risk based verification', () => {
     expect(result?.error).toContain('did not report a recognized Bun test summary')
   })
 
+  test('the real CLI preserves sensitive rename sources and rejects ambiguous filenames', () => {
+    const root = mkdtempSync(resolve(tmpdir(), 'memoly-verify-renames-'))
+    const git = (...args) => {
+      const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
+      expect(result.status).toBe(0, result.stderr)
+      return result.stdout.trim()
+    }
+    const script = resolve(repositoryRoot, 'scripts/verify-local.mjs')
+    const cli = (...args) => spawnSync('bun', [script, ...args], { cwd: root, encoding: 'utf8' })
+    try {
+      git('init', '-b', 'main')
+      git('config', 'user.name', 'Rename Scope Fixture')
+      git('config', 'user.email', 'rename-scope@example.invalid')
+      mkdirSync(resolve(root, 'backend/src/modules/auth'), { recursive: true })
+      mkdirSync(resolve(root, 'docs'), { recursive: true })
+      writeFileSync(resolve(root, 'backend/src/modules/auth/session.ts'), 'export const session = true\n')
+      git('add', '.')
+      git('commit', '-m', 'sensitive base')
+      git('update-ref', 'refs/remotes/origin/main', git('rev-parse', 'HEAD'))
+      git('mv', 'backend/src/modules/auth/session.ts', 'docs/session.md')
+      for (const committed of [false, true]) {
+        if (committed) git('commit', '-m', 'rename sensitive source')
+        const result = cli('--dry-run')
+        expect(result.status).toBe(2)
+        expect(result.stdout).toContain('Profile: full (minimum required: full)')
+        expect(result.stdout).toContain('REASON full backend/src/modules/auth/session.ts')
+        const downgrade = cli('--profile', 'fast', '--dry-run')
+        expect(downgrade.status).toBe(1)
+        expect(downgrade.stderr).toContain('Profile downgrade refused')
+      }
+      if (process.platform !== 'win32') {
+        for (const name of ['README.md\nREADME.md', 'docs\\outside.bin']) {
+          const file = resolve(root, name)
+          writeFileSync(file, 'ambiguous filename\n')
+          const result = cli('--dry-run')
+          expect(result.status).toBe(1)
+          expect(result.stderr).toContain('REVIEW_REQUIRED')
+          expect(result.stderr.toLowerCase()).toContain('ambiguous')
+          expect(result.stdout).not.toContain('PLAN ')
+          rmSync(file)
+        }
+      }
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
   test('the real CLI classifies a temporary Git fixture and rejects downgrades/prototype profiles', () => {
     const root = mkdtempSync(resolve(tmpdir(), 'memoly-verify-cli-'))
     const runGit = (...args) => {
@@ -454,10 +561,55 @@ describe('risk based verification', () => {
       expect(fast.stdout).toContain('DRY RUN: plan only')
       expect(fast.stdout).not.toContain('verification passed')
 
+      const unicodeFile = resolve(root, 'заметка.md')
+      writeFileSync(unicodeFile, 'first contents\n')
+      const beforeUnicodeEdit = spawnSync('bun', [script, '--dry-run'], { cwd: root, encoding: 'utf8' })
+      expect(beforeUnicodeEdit.status).toBe(2)
+      expect(beforeUnicodeEdit.stdout).toContain('REASON fast заметка.md')
+      writeFileSync(unicodeFile, 'changed contents\n')
+      const afterUnicodeEdit = spawnSync('bun', [script, '--dry-run'], { cwd: root, encoding: 'utf8' })
+      expect(afterUnicodeEdit.status).toBe(2)
+      const fingerprint = (result) => result.stdout.match(/Working tree: dirty; SHA256 ([a-f0-9]{64})/)?.[1]
+      expect(fingerprint(beforeUnicodeEdit)).toBeDefined()
+      expect(fingerprint(beforeUnicodeEdit)).not.toBe(fingerprint(afterUnicodeEdit))
+      rmSync(unicodeFile)
+
       writeFileSync(resolve(root, 'webapp/src/FamilyCard.tsx'), 'export const FamilyCard = () => null\n')
       const standard = spawnSync('bun', [script, '--dry-run'], { cwd: root, encoding: 'utf8' })
       expect(standard.status).toBe(2)
       expect(standard.stdout).toContain('Profile: standard (minimum required: standard)')
+      expect(standard.stdout).toContain('REASON standard webapp/src/FamilyCard.tsx')
+
+      const manualFull = spawnSync('bun', [script, '--profile', 'full', '--dry-run'], { cwd: root, encoding: 'utf8' })
+      expect(manualFull.status).toBe(1)
+      expect(manualFull.stderr).toContain('--reason')
+      expect(manualFull.stdout).not.toContain('PLAN ')
+      const explainedFull = spawnSync('bun', [script, '--profile', 'full', '--reason', 'Owner explicitly requested the FULL profile', '--dry-run'], { cwd: root, encoding: 'utf8' })
+      expect(explainedFull.status).toBe(2)
+      expect(explainedFull.stdout).toContain('Requested profile reason: Owner explicitly requested the FULL profile')
+      for (const badArgs of [['--reason', ' '], ['--reason', 'line one\nline two'], ['--reason', 'first', '--reason', 'second']]) {
+        const invalidReason = spawnSync('bun', [script, '--profile', 'full', ...badArgs, '--dry-run'], { cwd: root, encoding: 'utf8' })
+        expect(invalidReason.status).toBe(1)
+        expect(invalidReason.stdout).not.toContain('PLAN ')
+      }
+
+      writeFileSync(resolve(root, 'unknown.bin'), 'unknown scope\n')
+      for (const extra of [[], ['--profile', 'full', '--reason', 'Explicit full request']]) {
+        const unknown = spawnSync('bun', [script, ...extra], { cwd: root, encoding: 'utf8' })
+        expect(unknown.status).toBe(1)
+        expect(unknown.stderr).toContain('REVIEW_REQUIRED')
+        expect(unknown.stderr).toContain('unknown.bin')
+        expect(unknown.stdout).not.toContain('PLAN ')
+        expect(unknown.stdout).not.toContain('==>')
+      }
+      rmSync(resolve(root, 'unknown.bin'))
+
+      const policyPath = resolve(root, 'deploy/selectel/frontend-safe-paths.txt')
+      rmSync(policyPath)
+      const missingPolicy = spawnSync('bun', [script, '--dry-run'], { cwd: root, encoding: 'utf8' })
+      expect(missingPolicy.status).toBe(1)
+      expect(missingPolicy.stderr).toContain('REVIEW_REQUIRED')
+      copyFileSync(resolve(repositoryRoot, 'deploy/selectel/frontend-safe-paths.txt'), policyPath)
 
       runGit('add', '.')
       runGit('commit', '-m', 'ordinary module fixture')

@@ -846,7 +846,9 @@ rollback_source_compatibility_profile() {
 				# Control user-deletion recovery: only the measured filesystem-retirement
 				# executable tree can return to d299; the retirement profile also pins
 				# its effective storage driver through loadEnv below.
-				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:1a4ecd291b67f1f173db203370f1cdd270f0eb6f96365806658f6034dbf452b6:max-video-retirement") ;;
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:1a4ecd291b67f1f173db203370f1cdd270f0eb6f96365806658f6034dbf452b6:max-video-retirement"
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:4e1ba54ea6c8f0df481d8adfc5d75378c0545d21922170cb3184551b96d4c02d:max-video-retirement"
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:ca18410eb5ba4bfaf124251863c4167e68b44549cd013bf39cd73ff5a3daabcc:max-video-retirement") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do

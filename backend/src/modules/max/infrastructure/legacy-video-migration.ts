@@ -238,7 +238,8 @@ async function hasFamilyDeletionTable(prisma: DbClient) {
   `)
   if (ledger.length < 59 || ledger.length > 62 || ledger.some((row, index) => {
     const expected = catalog[index]
-    return !row.finished_at || row.rolled_back_at !== null || row.migration_name !== expected?.name || row.checksum !== expected?.checksum
+    return !row.finished_at || row.rolled_back_at !== null || row.migration_name !== expected?.name ||
+      (row.checksum !== expected?.checksum && row.checksum !== expected?.crlfChecksum)
   })) throw new Error('MAX recovery migration ledger is not an exact completed reviewed prefix')
 
   const expectedFamilyDeletionTable = ledger.length >= 60
@@ -250,16 +251,22 @@ async function hasFamilyDeletionTable(prisma: DbClient) {
   return schema.familyDeletions
 }
 
-let migrationCatalogPromise: Promise<Array<{ name: string; checksum: string }>> | undefined
+let migrationCatalogPromise: Promise<Array<{ name: string; checksum: string; crlfChecksum: string }>> | undefined
 
 function reviewedMigrationCatalog() {
   migrationCatalogPromise ??= (async () => {
     const root = resolve(import.meta.dir, '../../../../prisma/migrations')
     const entries = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
-    const catalog: Array<{ name: string; checksum: string }> = []
+    const catalog: Array<{ name: string; checksum: string; crlfChecksum: string }> = []
     for (const name of entries) {
       const source = await readFile(resolve(root, name, 'migration.sql'))
-      catalog.push({ name, checksum: createHash('sha256').update(source).digest('hex') })
+      const lfSource = Buffer.from(source.toString('utf8').replace(/\r\n/g, '\n'))
+      const crlfSource = Buffer.from(lfSource.toString('utf8').replace(/\n/g, '\r\n'))
+      catalog.push({
+        name,
+        checksum: createHash('sha256').update(lfSource).digest('hex'),
+        crlfChecksum: createHash('sha256').update(crlfSource).digest('hex'),
+      })
     }
     return catalog
   })()

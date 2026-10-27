@@ -6,33 +6,72 @@ private helpers or SQL call order. Preserve distinct negative and concurrent cas
 
 ## Local verification profiles
 
-The supported release/audit command is:
+The default command for development and review is:
 
 ```bash
-bun run verify:full
+bun run verify:local --dry-run
+bun run verify:local
 ```
 
-Run from the repository root with Bun 1.4.0, Node, Git, installed dependencies, Chromium and
-local PostgreSQL infrastructure. The runner records the source SHA and working-tree fingerprint
+Read the profile, per-path `REASON` lines and commands before execution. Dry-run exits 2 and
+never establishes a PASS. “Full review” or “complete verification cycle” means the complete
+cycle for the assigned change: the automatic profile, relevant scenarios and independent
+review. Those phrases do not request the named FULL profile.
+
+Run from the repository root with Bun 1.4.0, Node and Git. Install the dependencies and
+browser/PostgreSQL infrastructure required by the selected plan. The runner records the source SHA and working-tree fingerprint
 before and after execution. Evidence belongs to that source. There is no hosted CI or deploy step.
 
 | Command | Scope |
 | --- | --- |
 | `bun run verify:local` | Classifies changes against origin/main and selects the required profile. |
 | `bun run verify:fast` | Documentation, styles and raster assets; patch checks and affected frontend builds. |
-| `bun run verify:standard` | Scoped source changes; affected packages, nearby tests and architecture boundaries. |
+| `bun run verify:standard` | Scoped source changes; affected packages, nearby tests, changed browser specs and architecture boundaries. |
 | `bun run verify:full` | Cross-cutting, auth/ACL/private-data, release and test-infrastructure changes. |
 
-A requested profile cannot downgrade the risk classification. FULL runs architecture/dependency
+A requested profile cannot downgrade the risk classification. A manual FULL upgrade above the
+automatic minimum requires a concrete single-line `--reason` (at most 240 characters): an explicit
+request for the named FULL profile or a sensitive risk established by review of the diff. It is
+recorded in the command output and PR. Automatic FULL for known sensitive paths needs no extra
+argument. Example of an explicitly requested upgrade:
+
+```bash
+bun run verify:full --reason "Owner explicitly requested the FULL profile for this change"
+```
+
+Unknown paths, unavailable classification and an empty comparison scope return `REVIEW_REQUIRED`
+before any verification stage starts. Even an explicit FULL cannot bypass this state. Review the
+file's role and risk, then add a narrow tested classification rule; for an empty scope choose the
+intended comparison base. Unresolved scope remains a blocker. Do not whitelist a whole directory.
+The progress journal `.autopilot/PROGRESS.md` is already FAST metadata; adding it to an ordinary
+UI change does not raise STANDARD to FULL.
+
+ FULL runs architecture/dependency
 checks, typechecks, lint, production builds, repository/Selectel tools, MAX/neutral contracts and
 backend units, frontend/website units, PostgreSQL integrations and configured MAX/PWA browser
 journeys. Each command appears once. The tools suite already owns verification-runner tests.
-See [the actual plans](../scripts/verify-local.mjs).
+See [the actual plans](../scripts/verify-local.mjs). Verification/release tooling remains a
+critical FULL boundary. Production FRONTEND scope/receipts and deployment guards are separate
+from merge verification and are unchanged by this policy.
+
+STANDARD runs each existing changed `webapp/e2e/*.spec.ts` or `*.max-e2e.ts` through its dedicated
+basename config, the Control config, or a recognized MAX config. The exact file is passed to
+Playwright; the dedicated family-audit config avoids the portfolio's `MAX-FULL:` filter. Deleted
+specs are omitted and renamed specs use their existing new path. An unmapped spec/config blocks
+planning with `REVIEW_REQUIRED`; zero/skipped journeys cannot pass. FULL retains its existing
+portfolio and also includes these changed journeys, so requesting more checks cannot omit the
+changed scenario. Relevant scenarios not represented by changed specs remain the task author's
+explicit responsibility.
 
 Missing infrastructure, zero selected files, skipped required tests, unrecognized summaries and
 failed child processes are failures. Declared historical Telegram exclusions are checked
 explicitly. Optional provider contracts and inactive hosting plans are separate signals.
 A dry run or syntax-only check does not replace required execution.
+
+When a check fails, first establish its relation to the diff and task. Record an out-of-scope
+failure, evidence and its effect on the gate without automatically expanding the task to repair
+another module. Mandatory failures remain FAIL/BLOCKED; do not skip stages or weaken assertions
+to make a result green. Repeat checks when changes or findings justify them.
 
 ## Focused tests and discovery
 

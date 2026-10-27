@@ -47,7 +47,8 @@ function changedNames(base) {
   const staged = parseNameStatus(nulPaths(['diff', '--cached', '--name-status', '-z', '--find-renames', 'HEAD', '--']))
   const local = parseNameStatus(nulPaths(['diff', '--name-status', '-z', '--find-renames', 'HEAD', '--']))
   const untracked = nulPaths(['ls-files', '--others', '--exclude-standard', '-z'])
-  return [...new Set([...committed, ...staged, ...local, ...untracked].map((path) => path.replaceAll('\\', '/')))].sort()
+  // Git already uses '/' separators; a literal backslash must reach the invalid-path guard.
+  return [...new Set([...committed, ...staged, ...local, ...untracked])].sort()
 }
 
 function parseNameStatus(values) {
@@ -206,20 +207,36 @@ function bunSummary(output) {
   }
 }
 
+export function explainChanges(paths, { repositoryRoot = process.cwd() } = {}) {
+  const reasons = [...new Set(paths)].sort().map((path) => {
+    const result = (profile, rule, message) => ({ path, profile, rule, message })
+    if (!path || /[\\\r\n\t]/.test(path) || path.startsWith('/') || path.split('/').some((part) => !part || part === '.' || part === '..')) {
+      return result('review-required', 'invalid-path', 'Ambiguous changed path; establish its repository-relative identity.')
+    }
+    if (CRITICAL.test(path) && !DOCS.test(path)) {
+      return result('full', 'critical-path', 'Sensitive source, contracts, configuration or verification/release tooling.')
+    }
+    if (path.startsWith('webapp/')) {
+      const scoped = spawnSync(BASH_EXECUTABLE, [resolve(repositoryRoot, FRONTEND_SCOPE_CLI), 'classify', path], { encoding: 'utf8', cwd: repositoryRoot })
+      const classification = scoped.stdout?.trim().split('\t')
+      if (scoped.status !== 0 || classification?.[0] !== path || !['A', 'R', 'D'].includes(classification?.[1])) {
+        return result('review-required', 'unresolved-frontend-path', 'Frontend policy did not classify this path; inspect the path and policy before running checks.')
+      }
+      if (classification[1] === 'D') return result('full', 'sensitive-frontend-path', 'Frontend policy marks this boundary sensitive (D).')
+    }
+    if (DOCS.test(path) || isFastSafe(path)) return result('fast', 'documentation-or-cosmetic', 'Documentation, stylesheet or recognized raster asset.')
+    if (STANDARD.test(path)) return result('standard', 'scoped-package-source', 'Scoped package source/test; run affected checks and independent review.')
+    return result('review-required', 'unknown-path', 'No scope rule matches; classify the file through a bounded review and a tested policy rule.')
+  })
+  if (!reasons.length) reasons.push({ path: '(no changed paths)', profile: 'review-required', rule: 'empty-scope', message: 'Select the intended comparison base before verification.' })
+  const required = reasons.some((item) => item.profile === 'review-required') ? 'review-required'
+    : reasons.some((item) => item.profile === 'full') ? 'full'
+      : reasons.some((item) => item.profile === 'standard') ? 'standard' : 'fast'
+  return { required, reasons }
+}
+
 export function classifyChanges(paths) {
-  if (!paths.length) return 'full'
-  const frontendPaths = paths.filter((path) => path.startsWith('webapp/'))
-  const scoped = frontendPaths.length
-    ? spawnSync(BASH_EXECUTABLE, [resolve(process.cwd(), FRONTEND_SCOPE_CLI), 'classify', ...frontendPaths], { encoding: 'utf8', cwd: process.cwd() })
-    : { status: 0, stdout: '' }
-  if (scoped.status === 0) {
-    const classes = scoped.stdout.split(/\r?\n/).filter(Boolean).map((line) => line.split('\t').at(-1))
-    if (classes.includes('D')) return 'full'
-  } else if (frontendPaths.length) return 'full'
-  if (paths.some((path) => CRITICAL.test(path) && !DOCS.test(path))) return 'full'
-  if (paths.every((path) => DOCS.test(path) || isFastSafe(path))) return 'fast'
-  if (paths.every((path) => DOCS.test(path) || isFastSafe(path) || STANDARD.test(path))) return 'standard'
-  return 'full'
+  return explainChanges(paths).required
 }
 
 const rank = { fast: 0, standard: 1, full: 2 }
@@ -231,7 +248,7 @@ function assertProfile(value) {
 function sourceSnapshot() {
   const sha = git(['rev-parse', 'HEAD'])
   const diff = git(['diff', '--binary', 'HEAD', '--'])
-  const untracked = git(['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean).sort()
+  const untracked = nulPaths(['ls-files', '--others', '--exclude-standard', '-z']).sort()
   const hash = createHash('sha256').update(diff)
   for (const file of untracked) {
     hash.update(`\0${file}\0`)
@@ -241,16 +258,38 @@ function sourceSnapshot() {
   return { sha, dirty, treeHash: hash.digest('hex') }
 }
 
-export function selectProfile({ paths, requested }) {
-  const required = classifyChanges(paths)
+function formatReasons(reasons) {
+  return reasons.map(({ path, profile, rule, message }) => `REASON ${profile} ${path}: ${rule} — ${message}`).join('\n')
+}
+
+function validateReason(reason) {
+  if (typeof reason !== 'string' || !reason.trim() || reason.length > 240 || /[\r\n]/.test(reason)) {
+    throw new Error('--reason must be a non-empty single-line explanation of at most 240 characters.')
+  }
+  return reason.trim()
+}
+
+export function selectProfile({ paths, requested, reason }) {
+  if (requested !== undefined) assertProfile(requested)
+  if (reason !== undefined) reason = validateReason(reason)
+  const { required, reasons } = explainChanges(paths)
+  if (required === 'review-required') {
+    throw new Error(`REVIEW_REQUIRED: verification scope is unresolved. No checks were started.\n${formatReasons(reasons)}\nReview the listed paths and add a narrow tested classification rule; --profile cannot bypass unresolved scope.`)
+  }
   const selected = requested ? assertProfile(requested) : required
   if (rank[selected] < rank[required]) {
-    throw new Error(`Profile downgrade refused: ${selected} was requested but changes require ${required}.`)
+    throw new Error(`Profile downgrade refused: ${selected} was requested but changes require ${required}.\n${formatReasons(reasons)}`)
   }
-  return { profile: selected, required, paths }
+  if (selected === 'full' && required !== 'full' && !reason) {
+    throw new Error(`Manual FULL escalation requires --reason naming an explicit FULL request or a concrete reviewed risk. A complete task review uses the automatic profile.\n${formatReasons(reasons)}`)
+  }
+  return { profile: selected, required, paths, reasons, reason }
 }
 
 export function planFor(profile, paths = [], base = 'refs/remotes/origin/main', repositoryRoot = process.cwd()) {
+  if (profile === 'review-required') throw new Error('REVIEW_REQUIRED: resolve the changed-path scope before planning checks.')
+  assertProfile(profile)
+  const browserJourneys = profile === 'fast' ? [] : changedBrowserJourneys(paths, repositoryRoot)
   const commands = [['Git whitespace and patch validation', ['git', ['diff', '--check', `${base}...HEAD`]]], ['Working tree whitespace validation', ['git', ['diff', '--check', 'HEAD']]]]
   if (profile === 'fast') {
     if (paths.some((path) => /^(webapp\/(?:public\/assets|src\/assets)\/|assets\/)/i.test(path) && RASTER_ASSET.test(path))) {
@@ -285,6 +324,7 @@ export function planFor(profile, paths = [], base = 'refs/remotes/origin/main', 
     const tests = relatedWebappTests(paths, repositoryRoot)
     if (tests.length) commands.push(['Changed web app unit tests', ['bun', ['test', ...tests]]])
     else console.log('No targeted Web app unit test maps to these paths; typecheck, lint, and production build remain required.')
+    if (profile === 'standard') commands.push(...browserJourneys)
   }
   if (paths.some((path) => path.startsWith('website/'))) {
     commands.push(['Website typecheck and build', ['bun', ['run', 'typecheck:website']]])
@@ -330,7 +370,7 @@ export function planFor(profile, paths = [], base = 'refs/remotes/origin/main', 
       const python = process.platform === 'win32' ? 'python' : 'python3'
       full.splice(full.length - 1, 0, ['Control host-sampler Python tests', [python, ['-B', '-m', 'unittest', 'discover', '-s', 'deploy/selectel/control', '-p', '*test*.py']]])
     }
-    return full
+    return dedupeCommands([...full, ...browserJourneys])
   }
   if (commands.length === 1) throw new Error(`No mandatory STANDARD checks mapped for changed paths: ${paths.join(', ') || '(none)'}`)
   return dedupeCommands(commands)
@@ -351,6 +391,25 @@ function relatedBackendTests(paths, repositoryRoot) {
     collectBackendTests(resolve(repositoryRoot, testRoot), files, repositoryRoot)
   }
   return [...files].sort()
+}
+
+const MAX_BROWSER_SPECS = new Set([
+  'max-browser-link.spec.ts', 'albums.spec.ts', 'children.spec.ts', 'gifts.spec.ts',
+  'comments.spec.ts', 'comments-state.spec.ts', 'memoly-v4.spec.ts', 'voice-player.spec.ts',
+  'video-lifecycle.spec.ts', 'shared-author-avatar.spec.ts',
+])
+
+function changedBrowserJourneys(paths, repositoryRoot) {
+  return [...new Set(paths)].sort().filter((path) => /^webapp\/e2e\/[^/]+\.(?:spec|max-e2e)\.ts$/.test(path) && existsSync(resolve(repositoryRoot, path))).map((path) => {
+    const dedicated = path.replace(/\.(?:spec|max-e2e)\.ts$/, '.playwright.config.ts')
+    const config = existsSync(resolve(repositoryRoot, dedicated)) ? dedicated
+      : path === 'webapp/e2e/control-browser-link.spec.ts' ? 'webapp/playwright.control.config.ts'
+        : MAX_BROWSER_SPECS.has(path.split('/').at(-1)) ? 'webapp/playwright.max.config.ts' : null
+    if (!config || !existsSync(resolve(repositoryRoot, config))) {
+      throw new Error(`REVIEW_REQUIRED: no supported Playwright config for changed spec ${path}. Add a dedicated config or a tested route before running verification.`)
+    }
+    return [`Browser journey ${path}`, ['bun', ['run', '--cwd', 'webapp', 'e2e', `--config=${config.replace(/^webapp\//, '')}`, path.replace(/^webapp\//, '')]]]
+  })
 }
 
 function relatedWebappTests(paths, repositoryRoot) {
@@ -380,7 +439,7 @@ function collectBackendTests(directory, files, repositoryRoot) {
 }
 
 function parseArgs(args) {
-  const out = { profile: undefined, base: undefined, frontendBase: undefined, frontendReview: undefined, journey: [], journeyGrep: [], dryRun: false }
+  const out = { profile: undefined, reason: undefined, base: undefined, frontendBase: undefined, frontendReview: undefined, journey: [], journeyGrep: [], dryRun: false }
   const seen = new Set()
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === '--dry-run') {
@@ -407,18 +466,20 @@ function parseArgs(args) {
       if (flag === 'frontend-base') out.frontendBase = value
       else out.frontendReview = value
     }
-    else if (args[i] === '--profile' || args[i] === '--base') {
+    else if (args[i] === '--profile' || args[i] === '--base' || args[i] === '--reason') {
       const flag = args[i].slice(2)
       if (seen.has(flag)) throw new Error(`${args[i]} may only be provided once.`)
       seen.add(flag)
       const value = args[++i]
       if (!value || value.startsWith('--')) throw new Error(`${args[i - 1]} requires a value.`)
       if (flag === 'profile') out.profile = value
-      else out.base = value
+      else if (flag === 'base') out.base = value
+      else out.reason = validateReason(value)
     }
     else throw new Error(`Unknown argument: ${args[i]}`)
   }
   if (seen.has('profile') && out.profile !== 'frontend') assertProfile(out.profile)
+  if (out.reason && out.profile === 'frontend') throw new Error('--reason does not replace the guarded FRONTEND release review receipts.')
   if (out.journey.length && out.profile !== 'frontend') throw new Error('--journey is only valid with --profile frontend.')
   if (out.journeyGrep.length && (out.profile !== 'frontend' || out.journeyGrep.length !== out.journey.length)) {
     throw new Error('Provide one --journey-grep title per --journey, only with --profile frontend.')
@@ -437,11 +498,12 @@ function changedPaths(requestedBase) {
     const expandsTrustedRange = spawnSync('git', ['merge-base', '--is-ancestor', resolved, trustedBase])
     if (expandsTrustedRange.status === 0) base = resolved
   }
-  const committed = git(['diff', '--name-only', `${base}...HEAD`]).split('\n').filter(Boolean)
-  const local = git(['diff', '--name-only', 'HEAD']).split('\n').filter(Boolean)
-  const staged = git(['diff', '--cached', '--name-only']).split('\n').filter(Boolean)
-  const untracked = git(['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean)
-  return { base, paths: [...new Set([...committed, ...local, ...staged, ...untracked].map((p) => p.replaceAll('\\', '/')))].sort() }
+  try {
+    // Preserve both sides of renames and use the existing unambiguous Git path parser.
+    return { base, paths: changedNames(base) }
+  } catch (error) {
+    throw new Error(`REVIEW_REQUIRED: cannot determine changed paths: ${error.message}`)
+  }
 }
 
 async function main() {
@@ -501,10 +563,12 @@ async function main() {
     return
   }
   const { base, paths } = changedPaths(options.base)
-  const selection = selectProfile({ paths, requested: options.profile })
+  const selection = selectProfile({ paths, requested: options.profile, reason: options.reason })
   const snapshot = sourceSnapshot()
   const plan = planFor(selection.profile, paths, base)
   console.log(`Profile: ${selection.profile} (minimum required: ${selection.required})`)
+  console.log(formatReasons(selection.reasons))
+  if (selection.reason) console.log(`Requested profile reason: ${selection.reason}`)
   console.log(`Source SHA: ${snapshot.sha}`)
   console.log(`Comparison base SHA: ${base}`)
   console.log(`Working tree: ${snapshot.dirty ? `dirty; SHA256 ${snapshot.treeHash}` : `clean; tree ${git(['rev-parse', 'HEAD^{tree}'])}`}`)

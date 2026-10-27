@@ -8,9 +8,9 @@ export {
   InlineError,
   MemoryCardFrame,
 } from './components'
-export { FeedPresentation, type FeedFilter } from './presentation'
+export { FeedPresentation, MemoryCardPresentation, type FeedFilter } from './presentation'
 export { FeedPage } from './FeedPage'
-export { MixedMediaViewer, MemoryMediaScope } from './FeedPage'
+export { MemoryActions, MemoryActionsContent, MemoryList, MixedMediaViewer, MemoryMediaScope, PhotoImage } from './FeedPage'
 export { loadMemory } from './api'
 export { feedQueryKeys } from './queries'
 export { SeenBatchQueue } from './seen-batch-queue'

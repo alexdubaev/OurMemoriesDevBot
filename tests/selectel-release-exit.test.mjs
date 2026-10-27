@@ -810,6 +810,23 @@ const reviewedFamilyInviteEntryProductionBlobs = [
   ['webapp/src/platform/host-bridge.ts', '10e0e6c1d8ce4e3c8bc9adf17d6c0d372ddfd3f5'],
   ['webapp/src/platform/max/host-bridge.ts', '0fa5b4297712c17685413cb6bd041bb6d245b168'],
 ]
+const reviewedControlDeletionRecoveryProductionBlobs = [
+  ['webapp/src/features/albums/AlbumCatalogPresentation.tsx', 'dfee553d93afc13cc6f2b45a9ed961f0b3e1e9a6'],
+  ['webapp/src/features/albums/AlbumsPage.tsx', '4e3130cf56d3b6b8276a6b329b311132b2b5422e'],
+  ['webapp/src/features/albums/index.ts', '7950b7f3ee5144a3aa806c7d157929280a5f80ca'],
+  ['webapp/src/features/family/FamilyGuide.tsx', '96029adc85af70c2a10bd4d2b087e94ea91da339'],
+  ['webapp/src/features/family/InvitationScreens.tsx', '6dbf8aa5f29f1547e2a0c6339a1c5a979bc822bb'],
+  ['webapp/src/features/family/family-guide.css', '3ea59db2db49347d5a8400f67c7e9b12e1b6a666'],
+  ['webapp/src/features/family/index.ts', '7bdfb9359ef3d42bce1174b487f4b8f8ab8fcecb'],
+  ['webapp/src/features/feed/FeedPage.tsx', 'da0d095d84642f931e6ef6d5507849f1417e34aa'],
+  ['webapp/src/features/feed/index.ts', '3355252b30e6d93746705f9a36c7c227446fd923'],
+  ['webapp/src/features/gifts/GiftCard.tsx', 'a657d4c4532a917c704045694d9ca6da266ae195'],
+  ['webapp/src/features/gifts/GiftPagePresentation.tsx', '898613fc489edf2ebaa70eb1d26eeaf6c9e5dc6e'],
+  ['webapp/src/features/gifts/GiftsPage.tsx', '981593202919fb32d35b486f33290d0ac7a8160a'],
+  ['webapp/src/features/gifts/index.ts', '570205f053b90ade19f63e734d7d67c5335f2d88'],
+  ['webapp/src/features/memoly-ui/FamilyPresentation.tsx', '1c7658b0e78ad37b1544938bc0c158d04f4937fe'],
+  ['webapp/src/features/memoly-ui/index.ts', 'ea5ed560b03b02590ceb06404eeea3eac4a2a15b'],
+]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
@@ -2781,14 +2798,19 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
   assert.doesNotMatch(unexpectedRunningBackend.events, /BACKEND_INTERNAL_READY|GATE|AUTH_ROUTE_CHECK|UP:/)
 })
 
-test('MAX video retirement recovery accepts only the measured filesystem executable profile', () => {
+test('MAX video retirement historical source remains frozen and accepts only its measured filesystem profile', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
   const target = maxVideoRecoveryBackend
+  const baseline = '6160b5ac6cc5d5c9661d90b7328c4f78e0361141'
   const expectedCompatibility = '1a4ecd291b67f1f173db203370f1cdd270f0eb6f96365806658f6034dbf452b6'
-  const currentShaResult = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
-  assert.equal(currentShaResult.status, 0, currentShaResult.stdout + currentShaResult.stderr)
-  const candidate = { root, sha: currentShaResult.stdout.trim() }
   assert.equal(productionRuntimeFingerprint(root, target), maxVideoRecoveryRuntime)
-  assert.equal(productionCompatibilityFingerprint(root), expectedCompatibility)
+  const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-retirement-historical-'))
+  const sourceAdded = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+  if (sourceAdded.status !== 0) throw new Error(sourceAdded.stdout + sourceAdded.stderr)
+  fixtureWorktrees.push(sourceDirectory)
+  const candidate = { root: sourceDirectory, sha: baseline }
+  assert.equal(productionCompatibilityFingerprint(candidate.root), expectedCompatibility)
 
   const profile = (source, storageDriver = 'filesystem') => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
@@ -2810,6 +2832,62 @@ test('MAX video retirement recovery accepts only the measured filesystem executa
     'mutate control retirement recovery executable input')
   const rejected = profile(mutated)
   assert.notEqual(rejected.status, 0, 'MAX retirement recovery must reject changed executable input')
+})
+
+test('MAX video retirement accepts only frozen current filesystem profiles and rejects backend or UI drift', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
+  const target = maxVideoRecoveryBackend
+  const baseline = '6160b5ac6cc5d5c9661d90b7328c4f78e0361141'
+  assert.equal(productionRuntimeFingerprint(root, target), maxVideoRecoveryRuntime)
+  const profile = (candidate, storageDriver = 'filesystem') => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\ncompose() { [[ "$*" == *'loadEnv(process.env)'* && "$*" == *'PRIVATE_STORAGE_DRIVER'* ]] || return 63; [ "\${MOCK_EFFECTIVE_STORAGE_DRIVER:-}" = filesystem ]; }\nMOCK_EFFECTIVE_STORAGE_DRIVER=${storageDriver}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+
+  const profiles = [
+    {
+      expectedCompatibility: '4e1ba54ea6c8f0df481d8adfc5d75378c0545d21922170cb3184551b96d4c02d',
+      blobs: reviewedControlDeletionRecoveryProductionBlobs,
+      label: 'historical frozen Control retirement inputs',
+    },
+    {
+      expectedCompatibility: 'ca18410eb5ba4bfaf124251863c4167e68b44549cd013bf39cd73ff5a3daabcc',
+      blobs: [...reviewedControlDeletionRecoveryProductionBlobs,
+        ['backend/src/modules/max/infrastructure/legacy-video-migration.ts', '69273f6e615df48ac3e0968ff8e7d7e8191f4902']],
+      label: 'LF/CRLF-compatible recovery inputs',
+    },
+  ]
+
+  for (const { expectedCompatibility, blobs, label } of profiles) {
+    const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-retirement-current-'))
+    const sourceAdded = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+    if (sourceAdded.status !== 0) throw new Error(sourceAdded.stdout + sourceAdded.stderr)
+    fixtureWorktrees.push(sourceDirectory)
+    const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, blobs, `freeze ${label}`)
+    assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility, label)
+
+    const accepted = profile(source)
+    assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+    assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
+    const s3Rejected = profile(source, 's3')
+    assert.notEqual(s3Rejected.status, 0, 'MAX retirement recovery must reject an effective S3 storage driver')
+
+    for (const [relativePath, marker] of [
+      ['backend/src/modules/control/infrastructure/control-purge.ts', '\n// synthetic MAX retirement backend drift\n'],
+      ['webapp/src/features/family/FamilyGuide.tsx', '\n// synthetic MAX retirement UI drift\n'],
+    ]) {
+      const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-retirement-current-drift-'))
+      const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
+      if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+      fixtureWorktrees.push(driftDirectory)
+      const mutated = commitSourceChange({ root: driftDirectory, sha: source.sha }, relativePath, marker,
+        `mutate current retirement production input ${relativePath}`)
+      const rejected = profile(mutated)
+      assert.notEqual(rejected.status, 0, `MAX retirement recovery must reject changed production input: ${relativePath}`)
+    }
+  }
 })
 
 test('MAX video readiness is read-only and blocks unsafe held tombstones before service changes', () => {
