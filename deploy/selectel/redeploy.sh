@@ -19,6 +19,7 @@ MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT=b3afd175383307713f5a86470db755b621c9eec0f
 MAX_VIDEO_COMPATIBILITY_FINGERPRINT=ff5758a7a3adb23b028a96e56c6deda68e83bd2f7cad6b2e54c0bd8b5cfa5ca4
 MAX_INVITE_ENTRY_COMPATIBILITY_FINGERPRINT=cda103e46f3e415d92ddcf1b7dcbe44269ccac991bc6d52534a05e8e242d1179
 MAX_VIDEO_PIN_INSTALLER_BLOB=d34a87ec84df49987dc01339481750320f10f203
+MAX_VIDEO_PIN_INSTALLER_BLOB_CURRENT=cab916ae9d2e9144f1918ffe07987c35900cb502
 FORWARD_MARKER=${FORWARD_MARKER:-$SERVER_ROOT/.selectel-b2-forward-only}
 COMPOSE_FILE=${COMPOSE_FILE:-"$SERVER_ROOT/compose.yml"}
 ROLLBACK_ENV=${ROLLBACK_ENV:-"$SERVER_ROOT/rollback.env"}
@@ -39,7 +40,10 @@ CONTROL_PIN_CADDY_BLOB=b97f014fa6882141f8d8d6038afb50f9757d9d83
 CONTROL_PIN_INSTALLER_BLOB=f11f9b7f0b8ec0b381ab0508b15a4e58cd539cad
 MEMOLY_PUBLIC_HOST=${MEMOLY_PUBLIC_HOST:-}
 MEMOLY_PRODUCT_SHA=${MEMOLY_PRODUCT_SHA:-}
+MEMOLY_BACKEND_IMAGE_TAG=${MEMOLY_BACKEND_IMAGE_TAG:-$MEMOLY_PRODUCT_SHA}
+MEMOLY_WEBAPP_IMAGE_TAG=${MEMOLY_WEBAPP_IMAGE_TAG:-$MEMOLY_PRODUCT_SHA}
 export MEMOLY_PRODUCT_SHA
+export MEMOLY_BACKEND_IMAGE_TAG MEMOLY_WEBAPP_IMAGE_TAG
 BACKUP_DIR=
 EDGE_CANDIDATE=
 GATEWAY_BACKUP_FILE=
@@ -511,6 +515,7 @@ guard_membership_transition() {
 			[ "$count" -eq 0 ] && stopped_count=$((stopped_count + 1))
 		done
 		if [ "$stopped_count" -eq 3 ]; then
+			load_runtime_secrets
 			max_video_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA") ||
 				die 'stopped-writer promotion requires the exact MAX video recovery profile'
 			[ "$max_video_profile" = max-video ] || [ "$max_video_profile" = max-video-retirement ] ||
@@ -522,7 +527,6 @@ guard_membership_transition() {
 			[ "${PREVIOUS_BACKEND_IMAGE_TAG:-}" = "$MAX_VIDEO_RECOVERY_BACKEND_SHA" ] &&
 				[ "${PREVIOUS_WEBAPP_IMAGE_TAG:-}" = "$MAX_VIDEO_RECOVERY_WEBAPP_SHA" ] ||
 				die 'stopped-writer promotion requires the exact pinned MAX recovery pair'
-			load_runtime_secrets
 			verify_application_rollback complete ||
 				die 'stopped-writer promotion requires exact completed MAX migration history and recovery readiness'
 			printf 'Exact MAX migration and recovery readiness verified for stopped-writer promotion.\n'
@@ -901,13 +905,17 @@ rollback_max_video_host_inputs_match() {
 		"deploy/selectel/control/memoly-control-sampler.timer:$CONTROL_PIN_TIMER_BLOB"
 		"deploy/selectel/compose.yml.template:$CONTROL_PIN_COMPOSE_BLOB"
 		"deploy/selectel/Caddyfile.static.template:$CONTROL_PIN_CADDY_BLOB"
-		"deploy/selectel/ci-release.sh:$MAX_VIDEO_PIN_INSTALLER_BLOB"
 	)
 	for pin in "${pins[@]}"; do
 		IFS=: read -r path expected <<< "$pin"
 		[[ "$expected" =~ ^[0-9a-f]{40}$ ]] || return 1
 		[ "$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" rev-parse "$revision:$path" 2>/dev/null || true)" = "$expected" ] || return 1
 	done
+	local installer_blob
+	installer_blob=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" rev-parse \
+		"$revision:deploy/selectel/ci-release.sh" 2>/dev/null || true)
+	[ "$installer_blob" = "$MAX_VIDEO_PIN_INSTALLER_BLOB" ] ||
+		[ "$installer_blob" = "$MAX_VIDEO_PIN_INSTALLER_BLOB_CURRENT" ] || return 1
 }
 
 rollback_max_video_retirement_host_inputs_match() {
@@ -1526,6 +1534,12 @@ verify_application_rollback() {
 	source_status=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" status --porcelain) || die 'cannot inspect rollback source checkout'
 	[ -z "$source_status" ] ||
 		die 'rollback source checkout is not clean'
+	# Compatibility may inspect the effective Compose environment, so initialize
+	# the candidate's immutable image context and protected secrets first.
+	MEMOLY_BACKEND_IMAGE_TAG=$MEMOLY_PRODUCT_SHA
+	MEMOLY_WEBAPP_IMAGE_TAG=$MEMOLY_PRODUCT_SHA
+	export MEMOLY_BACKEND_IMAGE_TAG MEMOLY_WEBAPP_IMAGE_TAG
+	load_runtime_secrets
 	local target_runtime
 	profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$target") ||
 		die 'application runtime differs from the verified rollback source'
@@ -1572,7 +1586,6 @@ verify_application_rollback() {
 	case "$MEMOLY_BACKEND_IMAGE_TAG $MEMOLY_WEBAPP_IMAGE_TAG" in
 		*__SET_*|*latest*) die "rollback tags must be immutable, not placeholders or latest" ;;
 	esac
-	load_runtime_secrets
 	validate_inputs rollback
 	local expected_backend_id expected_webapp_id
 	case "$target" in

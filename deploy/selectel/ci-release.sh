@@ -292,8 +292,12 @@ require_release_ownership() {
   expected_gid=$(getent group "$APP_GROUP" | cut -d: -f3)
   [[ "$expected_gid" =~ ^[0-9]+$ ]] || die "cannot determine release group ID: $APP_GROUP"
 
+  local -A checked_paths=()
+
   check_path_owner() {
     local candidate=$1 actual_uid actual_gid
+    [[ -n "${checked_paths["$candidate"]+present}" ]] && return 0
+    checked_paths["$candidate"]=1
     [ -e "$candidate" ] || [ -L "$candidate" ] || return 0
     read -r actual_uid actual_gid < <(stat -c '%u %g' -- "$candidate" 2>/dev/null) ||
       die "cannot inspect checkout ownership at ${candidate#"$APP_ROOT"/}"
@@ -303,23 +307,23 @@ require_release_ownership() {
   }
 
   check_tree_paths() {
-    local revision=$1 path parent candidate
-    if ! git_memoly ls-tree -r --name-only -z "$revision" | while IFS= read -r -d '' path; do
+    local revision=$1 target_revision=$2 path parent candidate
+    if ! { git_memoly ls-tree -r --name-only -z "$revision" &&
+      git_memoly ls-tree -r --name-only -z "$target_revision"; } | while IFS= read -r -d '' path; do
       candidate=$APP_ROOT/$path
       check_path_owner "$candidate"
-      parent=$(dirname -- "$candidate")
+      parent=${candidate%/*}
       while [ "$parent" != "$APP_ROOT" ] && [[ "$parent" == "$APP_ROOT"/* ]]; do
         check_path_owner "$parent"
-        parent=$(dirname -- "$parent")
+        parent=${parent%/*}
       done
     done; then
-      die "cannot inspect tracked paths for checkout ownership: $revision"
+      die "cannot inspect tracked paths for checkout ownership: $revision or $target_revision"
     fi
   }
 
   check_path_owner "$APP_ROOT"
-  check_tree_paths HEAD
-  check_tree_paths "$PRODUCT_SHA"
+  check_tree_paths HEAD "$PRODUCT_SHA"
 }
 
 check_disk_space() {
@@ -900,6 +904,11 @@ main() {
   detect_membership_rollback_boundary
   detect_mm0_boundary
 
+  export MEMOLY_PRODUCT_SHA="$PRODUCT_SHA"
+  export MEMOLY_BACKEND_IMAGE_TAG="$PRODUCT_SHA"
+  export MEMOLY_WEBAPP_IMAGE_TAG="$PRODUCT_SHA"
+  export MEMOLY_PUBLIC_HOST=${MEMOLY_PUBLIC_HOST:-app.memoly.ru}
+
   if [ "$PREBUILT_IMAGES" = false ]; then
     SELECTEL_MAX_BOT_USERNAME="$MAX_BOT_USERNAME" bash "$APP_ROOT/deploy/selectel/build-images.sh" "$PRODUCT_SHA"
     require_release_ownership
@@ -909,10 +918,6 @@ main() {
   fi
   if [ "$RESUMING_FORWARD_ONLY" = false ]; then prepare_rollback; fi
 
-  export MEMOLY_PRODUCT_SHA="$PRODUCT_SHA"
-  export MEMOLY_BACKEND_IMAGE_TAG="$PRODUCT_SHA"
-  export MEMOLY_WEBAPP_IMAGE_TAG="$PRODUCT_SHA"
-  export MEMOLY_PUBLIC_HOST=${MEMOLY_PUBLIC_HOST:-app.memoly.ru}
   bash "$APP_ROOT/deploy/selectel/redeploy.sh" preflight
   if [ "$LEGACY_MM0_RUNTIME" = true ] && [ "$RUN_MIGRATION" = true ]; then
     backup_mm0_database

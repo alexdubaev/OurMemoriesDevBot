@@ -33,7 +33,14 @@ require the normal lane. No backend change alone is not proof of eligibility.
 
 Backend, authentication/session/ACL, API/contracts, private-media lifecycle,
 data/schema, dependencies/build/deploy tooling and uncertain changes still require
-**FULL on the exact final release SHA** and the complete normal release guards.
+**FULL** on the complete release source tree and the complete normal release guards.
+Run the selected profile once per complete source tree in the release session. After
+squash, source-bound evidence may transfer to final main only after verifying a clean
+checkout, equal source/merged trees, unchanged comparison bases and scope, and
+unchanged dependency/environment inputs with no unresolved errors or review findings.
+Record both SHAs/trees and the equality check; do not describe the transferred evidence
+as a rerun on final SHA. If those inputs differ or evidence is incomplete or stale,
+rerun the affected checks. Host release guards still run against the actual final SHA.
 The short lane retains source/ownership/lock/disk/UI v4/immutable artifact guards,
 read-only migration-history verification, service-retention checks, public smoke,
 a protected manifest and exact frontend recovery state. It does not run migrations,
