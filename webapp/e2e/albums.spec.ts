@@ -117,7 +117,14 @@ test('MAX authenticated album cover choices save and complete the picker', async
   await page.getByRole('button', { name: /Создать свою семью/ }).click()
   await expect.poll(() => familyId).not.toBe('')
   page.on('console', (message) => {
-    if (message.type() === 'error' && !message.text().includes('status of 503 (Service Unavailable)')) consoleErrors.push(message.text())
+    const text = message.text()
+    let pathname: string
+    try { pathname = new URL(message.location().url).pathname } catch { pathname = '' }
+    const expectedControlProbe = pathname === '/api/v1/control/me' &&
+      text === 'Failed to load resource: the server responded with a status of 403 (Forbidden)'
+    if (message.type() === 'error' && !text.includes('status of 503 (Service Unavailable)') && !expectedControlProbe) {
+      consoleErrors.push(text)
+    }
   })
   page.on('pageerror', (error) => pageErrors.push(error.message))
   await page.getByRole('button', { name: 'Альбомы', exact: true }).click()

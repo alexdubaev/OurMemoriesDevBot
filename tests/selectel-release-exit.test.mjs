@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { afterAll } from 'bun:test'
 import { bashExecutable, gitBashPath, linuxPath, runLinuxRoot } from './bash-runtime.mjs'
@@ -1010,6 +1010,28 @@ afterAll(() => {
   }
 }, { timeout: 60_000 })
 const redeployDefinitions = `. ${shellQuote(resolve(root, 'deploy/selectel/redeploy.sh'))}`
+
+test('MAX video installer host pin accepts only the historic blob or this exact reviewed blob', () => {
+  const currentInstallerBlob = execFileSync('git', ['hash-object', 'deploy/selectel/ci-release.sh'], {
+    cwd: root, encoding: 'utf8',
+  }).trim()
+  const invoke = (installerBlob) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(root)}\n` +
+      `git() { case "$*" in *:deploy/selectel/ci-release.sh) printf '%s\\n' ${shellQuote(installerBlob)} ;;
+        *:deploy/selectel/control/sampler.py) printf '%s\\n' fbbc06bc8b62d86f0fe7685ee6651adf7da48898 ;;
+        *:deploy/selectel/control/memoly-control-sampler.service) printf '%s\\n' 7b4b900ce078e47e1fedd59d9e6928ec8efc31a6 ;;
+        *:deploy/selectel/control/memoly-control-sampler.timer) printf '%s\\n' 5399165d2e405d443bffdc5c76c519a189707f90 ;;
+        *:deploy/selectel/compose.yml.template) printf '%s\\n' 977ed58350e849f52e530dde5976acb7b0ac6051 ;;
+        *:deploy/selectel/Caddyfile.static.template) printf '%s\\n' b97f014fa6882141f8d8d6038afb50f9757d9d83 ;;
+        *) return 1 ;; esac; }\nrollback_max_video_host_inputs_match fixture\n`,
+    encoding: 'utf8',
+  })
+
+  assert.equal(invoke('d34a87ec84df49987dc01339481750320f10f203').status, 0, 'historic installer remains accepted')
+  assert.equal(invoke(currentInstallerBlob).status, 0, 'reviewed installer blob is accepted')
+  assert.notEqual(invoke('1'.repeat(40)).status, 0, 'arbitrary installer drift remains rejected')
+})
 
 function runApplicationRollback(options = {}) {
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
@@ -3058,9 +3080,17 @@ docker() {
     *) return 0 ;;
   esac
 }
-rollback_source_compatibility_profile() { printf '%s\\n' "$FIXTURE_PROFILE"; }
+rollback_source_compatibility_profile() {
+  [ -n "\${MAX_BOT_TOKEN:-}" ] && [ "$MEMOLY_BACKEND_IMAGE_TAG" = "$MEMOLY_PRODUCT_SHA" ] &&
+    [ "$MEMOLY_WEBAPP_IMAGE_TAG" = "$MEMOLY_PRODUCT_SHA" ] || { echo PROFILE_CONTEXT_FAILED >> "$FIXTURE_EVENTS"; return 1; }
+  echo "PROFILE_CONTEXT:$MEMOLY_BACKEND_IMAGE_TAG:$MEMOLY_WEBAPP_IMAGE_TAG" >> "$FIXTURE_EVENTS"
+  printf '%s\\n' "$FIXTURE_PROFILE"
+}
 load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic MAX_WEBHOOK_SECRET=synthetic MAX_INBOX_ENCRYPTION_KEY=synthetic; echo SECRET_INIT >> "$FIXTURE_EVENTS"; }
-verify_application_rollback() { echo "VERIFY:$1" >> "$FIXTURE_EVENTS"; [ "$FIXTURE_VERIFY" = pass ] && [ -n "$MAX_BOT_TOKEN" ]; }
+verify_application_rollback() {
+  echo "VERIFY:$1:$PREVIOUS_BACKEND_IMAGE_TAG:$PREVIOUS_WEBAPP_IMAGE_TAG" >> "$FIXTURE_EVENTS"
+  [ "$FIXTURE_VERIFY" = pass ] && [ -n "$MAX_BOT_TOKEN" ]
+}
 
 # Real migration guard accepts the running B2 services before quiescence.
 guard_membership_transition
@@ -3081,7 +3111,8 @@ FIXTURE_WRITERS=stopped
 sed -i 's/^PREVIOUS_BACKEND_IMAGE_TAG=.*/PREVIOUS_BACKEND_IMAGE_TAG=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/' "$ROLLBACK_ENV"
 if ( guard_membership_transition promotion ); then echo 'unpinned rollback pair accepted' >&2; exit 45; fi
 grep -q '^SECRET_INIT$' "$FIXTURE_EVENTS"
-grep -q '^VERIFY:complete$' "$FIXTURE_EVENTS"
+grep -q "^PROFILE_CONTEXT:$MEMOLY_PRODUCT_SHA:$MEMOLY_PRODUCT_SHA$" "$FIXTURE_EVENTS"
+grep -q "^VERIFY:complete:$MAX_VIDEO_RECOVERY_BACKEND_SHA:$MAX_VIDEO_RECOVERY_WEBAPP_SHA$" "$FIXTURE_EVENTS"
 printf 'PASS: only exact stopped-writer MAX promotion accepted; migration and drift checks preserved\\n'
 `)
   assert.equal(result.status, 0, result.stdout + result.stderr)

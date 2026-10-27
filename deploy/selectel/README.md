@@ -102,13 +102,20 @@ independent report, not substituting a self-review.
    confirms exact bytes and range; the existing authorized operator is the trust
    boundary for the independent provenance and semantic decision.
 
-3. Squash merge through the normal reviewed PR process. Verify the final main tree,
-   then run FRONTEND on that exact final SHA with the deployed backend base. Do not
-   run FULL merely because squash changed the commit SHA. New or broader source
-   changes require the appropriate new checks.
+3. Squash merge through the normal reviewed PR process. Verify a clean checkout,
+   equal complete source and merged trees, unchanged comparison bases/scope and
+   dependency/environment inputs, plus no unresolved errors or review findings.
+   Record source and final SHAs/trees and the equality check, then transfer the
+   source-bound FRONTEND evidence to final main. Do not claim the profile reran on
+   final SHA. If an input differs or evidence is stale/incomplete, rerun affected
+   checks; do not create a generic PASS cache.
 
 4. From the accepted clean main checkout, invoke the **versioned** host entry point
    with migration `false` and the explicit fifth argument `frontend`:
+
+   The canonical entry point exports the candidate SHA/image tags before rollback
+   readiness and the redeploy script loads protected runtime secrets before
+   compatibility checks. Do not reconstruct this context with a separate wrapper.
 
    ```sh
    SHA=$(git rev-parse HEAD)
@@ -309,7 +316,7 @@ The running service SHA may intentionally lag the checkout SHA after documentati
 only changes. Promote images only when their exact SHA has been accepted for a
 release; do not use `latest`.
 
-Before PR merge, run the applicable risk profile on the exact source SHA and record the reason, commands, result, and environment limits. The main/master pre-push hook runs risk-based verification against the remote SHA; PR merge does not invoke local hooks. Eligible reviewed client-UI production releases use FRONTEND under the owner policy of 2026-10-22 and the short procedure below. All other runtime releases require FULL on the exact final release SHA, including all changes since the deployed version, and the complete backup/migration/readiness/recovery guards. Production deployment is a separate manual operation under standing owner authorization unless the task limits it. For the normal full release, confirm the accepted clean SHA,
+Before PR merge, run the applicable risk profile once on the complete source tree and record source SHA/tree, comparison bases, commands, result and environment. After squash, transfer source-bound evidence only when the clean complete source and final trees, bases, scope and dependency/environment inputs match and no errors or review findings remain; record the final SHA/tree and equality check without calling it a rerun. Repeat affected checks when evidence or inputs differ. The main/master pre-push hook runs risk-based verification against the remote SHA; PR merge does not invoke local hooks. Eligible reviewed client-UI production releases use FRONTEND under the owner policy of 2026-10-22 and the short procedure below. All other runtime releases require FULL on the complete release source tree, including all changes since the deployed version, and the complete backup/migration/readiness/recovery guards. Production deployment is a separate manual operation under standing owner authorization unless the task limits it. For the normal full release, confirm the accepted clean SHA,
 then invoke the reviewed host entry point:
 
 ```sh
