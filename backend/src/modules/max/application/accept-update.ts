@@ -27,7 +27,7 @@ function attachmentsOf(event: Extract<MaxAcceptedEvent, { kind: 'message_created
 }
 
 export function selectMaxImmediateResponse(event: MaxAcceptedEvent): MaxImmediateResponse | null {
-  if (event.kind === 'bot_started' || event.kind === 'family_choice' || isLifecycleEvent(event)) return null
+  if (event.kind === 'bot_started' || event.kind === 'bot_stopped' || event.kind === 'family_choice' || isLifecycleEvent(event)) return null
   if (event.kind === 'message_created' && event.isChannel) return null
   if (event.kind === 'message_created' && event.forwardedFrom) {
     return { kind: 'accepted', text: forwardAcceptedText, destinationUserId: event.senderId }

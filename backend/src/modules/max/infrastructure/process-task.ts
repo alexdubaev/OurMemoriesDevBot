@@ -45,7 +45,7 @@ export function createMaxTaskProcessor(options: {
   const resolveInviteStart = options.resolveInviteStart ?? createInviteStartResolver(prisma)
   const resolveDetailedInviteStart = options.resolveDetailedInviteStart ?? createDetailedInviteStartResolver(prisma)
   const access = createPrismaFamilyAccess(prisma)
-  const publisher = createSourceMemoryPublisher(prisma, access)
+  const publisher = createSourceMemoryPublisher(prisma, access, options.runtime.env)
   const imageProcessor = options.api && options.media && options.download
     ? createMaxImageProcessor({ runtime: options.runtime, api: options.api, media: options.media, download: options.download, videoDownload: options.videoDownload })
     : null
@@ -68,6 +68,8 @@ export function createMaxTaskProcessor(options: {
       iv: inbox.encryptionIv,
       authTag: inbox.encryptionAuthTag,
     })
+
+    if (decryptedEvent.kind === 'bot_stopped') return 'skipped'
 
     if (decryptedEvent.kind === 'bot_added' || decryptedEvent.kind === 'bot_removed' || decryptedEvent.kind === 'bot_admin_permissions_changed') {
       if (options.processChannelLifecycle) await options.processChannelLifecycle(inbox.id, decryptedEvent)
@@ -108,7 +110,7 @@ export function createMaxTaskProcessor(options: {
           }
           return { text: hasPriorInteraction ? returningWelcomeText : responseText }
         },
-        retainInviteContext) ? 'done' : 'skipped'
+        retainInviteContext, event.occurredAt) ? 'done' : 'skipped'
     }
     if (decryptedEvent.kind === 'family_choice') {
       const event = decryptedEvent
@@ -669,6 +671,7 @@ async function terminalInbox(
   botId: string,
   responseForInteraction: (hasPriorInteraction: boolean) => { text: string; buttons?: { kind: 'browser_approval' } | { kind: 'invite_welcome'; returning: boolean } },
   retainInviteContext: boolean,
+  pilotStartedAt: string,
 ) {
   return db.$transaction(async (tx) => {
     const browserApproval = responseForInteraction(false).buttons?.kind === 'browser_approval'
@@ -682,7 +685,7 @@ async function terminalInbox(
         JOIN max_inbox inbox ON inbox.id = response.inbox_id
         WHERE response.destination_user_id = ${BigInt(destinationUserId)}
           AND response.kind = 'welcome'
-          AND response.buttons IS DISTINCT FROM '{"kind":"browser_approval"}'::jsonb
+          AND (response.buttons->>'kind') IS DISTINCT FROM 'browser_approval'
           AND inbox.bot_id = ${BigInt(botId)}
           AND inbox.event_kind = 'bot_started'
           AND inbox.id <> ${inboxId}::uuid
@@ -694,7 +697,7 @@ async function terminalInbox(
     } })
     if (changed.count !== 1) return false
     const selected = responseForInteraction(Boolean(previous?.prior))
-    await createResponseAndTask(tx, { inboxId, destinationUserId, kind, text: selected.text, ...(selected.buttons ? { buttons: selected.buttons } : {}) })
+    await createResponseAndTask(tx, { inboxId, destinationUserId, kind, text: selected.text, buttons: { ...selected.buttons, pilotStartedAt } })
     return true
   })
 }
@@ -712,7 +715,7 @@ async function markInboxProcessed(tx: PrismaTransactionClient, inboxId: string) 
 
 async function createResponseAndTask(
   tx: PrismaTransactionClient,
-  input: { inboxId: string; destinationUserId: string; kind: 'saved' | 'denied' | 'unsupported_media' | 'welcome'; text: string; buttons?: { kind: 'browser_approval' } | { kind: 'invite_welcome'; returning: boolean } },
+  input: { inboxId: string; destinationUserId: string; kind: 'saved' | 'denied' | 'unsupported_media' | 'welcome'; text: string; buttons?: { kind?: 'browser_approval' | 'invite_welcome'; returning?: boolean; pilotStartedAt?: string } },
 ) {
   const response = await tx.maxOutgoingResponse.upsert({
     where: { inboxId_kind: { inboxId: input.inboxId, kind: input.kind } },

@@ -17,6 +17,7 @@ const MAX_RECOVERY_LIFECYCLE_MIGRATIONS = [
   ['20261025170000_control_durable_purge', 'f9ff69a061afefeceaeda618c4aeaf424563b2fed850d6e17808e23554b2fa8d'],
   ['20261025180000_control_purge_fences', 'eee2bddedbd167b1de111b16e8c0a75e054c9cf9c555752d73b8f02e3f2c3655'],
 ] as const
+const MAX_RECOVERY_NOTIFICATION_MIGRATION = ['20261027210000_max_bot_stopped', 'f394dc4d1a981756729478576352efdbae1e955357d97be65fe95802782274b5'] as const
 
 export type MaxVideoLegacyCandidate = {
   mediaId: string
@@ -214,11 +215,12 @@ export function createMaxVideoLegacyMigration(options: { prisma: DbClient; api?:
 }
 
 async function hasFamilyDeletionTable(prisma: DbClient) {
-  const schemaRows = await prisma.$queryRaw<Array<{ migrationLedger: boolean; familyDeletions: boolean; storageDeletes: boolean; purgeFences: boolean }>>(Prisma.sql`
+  const schemaRows = await prisma.$queryRaw<Array<{ migrationLedger: boolean; familyDeletions: boolean; storageDeletes: boolean; purgeFences: boolean; botStopped: boolean }>>(Prisma.sql`
     SELECT to_regclass('public._prisma_migrations') IS NOT NULL AS "migrationLedger",
            to_regclass('public.control_family_deletions') IS NOT NULL AS "familyDeletions",
            to_regclass('public.control_storage_deletes') IS NOT NULL AS "storageDeletes",
-           EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='max_sources_control_no_redacted_replay' AND NOT tgisinternal) AS "purgeFences"
+           EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='max_sources_control_no_redacted_replay' AND NOT tgisinternal) AS "purgeFences",
+           EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='max_inbox_event_kind' AND e.enumlabel='bot_stopped') AS "botStopped"
   `)
   const schema = schemaRows[0]
   if (!schema || Object.values(schema).some((value) => typeof value !== 'boolean') || !schema.migrationLedger) {
@@ -227,8 +229,9 @@ async function hasFamilyDeletionTable(prisma: DbClient) {
 
   const catalog = await reviewedMigrationCatalog()
   const baselineCatalogHash = createHash('sha256').update(catalog.slice(0, 59).map(({ name, checksum }) => `${name}:${checksum}`).join('\n') + '\n').digest('hex')
-  if (catalog.length !== 62 || baselineCatalogHash !== MAX_RECOVERY_BASELINE_CATALOG_SHA256 ||
-      MAX_RECOVERY_LIFECYCLE_MIGRATIONS.some(([name, checksum], index) => catalog[59 + index]?.name !== name || catalog[59 + index]?.checksum !== checksum)) {
+  if (catalog.length !== 63 || baselineCatalogHash !== MAX_RECOVERY_BASELINE_CATALOG_SHA256 ||
+      MAX_RECOVERY_LIFECYCLE_MIGRATIONS.some(([name, checksum], index) => catalog[59 + index]?.name !== name || catalog[59 + index]?.checksum !== checksum) ||
+      catalog[62]?.name !== MAX_RECOVERY_NOTIFICATION_MIGRATION[0] || catalog[62]?.checksum !== MAX_RECOVERY_NOTIFICATION_MIGRATION[1]) {
     throw new Error('MAX recovery migration catalog is not the exact reviewed lifecycle extension')
   }
   const ledger = await prisma.$queryRaw<Array<{ migration_name: string; checksum: string; finished_at: Date | null; rolled_back_at: Date | null }>>(Prisma.sql`
@@ -236,7 +239,7 @@ async function hasFamilyDeletionTable(prisma: DbClient) {
       FROM _prisma_migrations
      ORDER BY migration_name, started_at, id
   `)
-  if (ledger.length < 59 || ledger.length > 62 || ledger.some((row, index) => {
+  if (ledger.length < 59 || ledger.length > 63 || ledger.some((row, index) => {
     const expected = catalog[index]
     return !row.finished_at || row.rolled_back_at !== null || row.migration_name !== expected?.name ||
       (row.checksum !== expected?.checksum && row.checksum !== expected?.crlfChecksum)
@@ -244,8 +247,8 @@ async function hasFamilyDeletionTable(prisma: DbClient) {
 
   const expectedFamilyDeletionTable = ledger.length >= 60
   const expectedStorageDeleteTable = ledger.length >= 61
-  const expectedPurgeFences = ledger.length === 62
-  if (schema.familyDeletions !== expectedFamilyDeletionTable || schema.storageDeletes !== expectedStorageDeleteTable || schema.purgeFences !== expectedPurgeFences) {
+  const expectedPurgeFences = ledger.length >= 62
+  if (schema.familyDeletions !== expectedFamilyDeletionTable || schema.storageDeletes !== expectedStorageDeleteTable || schema.purgeFences !== expectedPurgeFences || schema.botStopped !== (ledger.length === 63)) {
     throw new Error('Control lifecycle schema does not match the exact MAX recovery migration prefix')
   }
   return schema.familyDeletions

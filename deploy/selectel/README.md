@@ -1199,4 +1199,17 @@ its local tests do not authorize a production release.
 
 ### Local release metadata preparation
 
+The owner-only MAX notification pilot uses executable compatibility fingerprint
+`5ba0f03f8a30fee1a4e25d6531b52c3d6fac46f0b363bd317cd07430f01bb07d`, bound to the
+existing `d2999cca6e4e5980cc2277de7453440353f5b392` backend/webapp recovery images,
+runtime fingerprint and filesystem/Control/legacy-video guards. Its only new SQL is
+the additive `20261027210000_max_bot_stopped` enum migration. The exact ledger gate
+accepts the completed 62-migration production baseline before SQL, and requires all
+63 afterward, including the actual enum label. Missing, changed, unfinished, extra or
+schema-inconsistent rows fail closed. Recovery does not restore the database. The
+existing current → frozen d299 → current real PostgreSQL probe additionally covers
+the stopped enum and unhandled pilot queue; source-drift and ledger regressions are
+required before using this binding. See [pilot operation](../../docs/development/MAX_NOTIFICATIONS_PILOT.md)
+for default OFF, identity preflight, subscription, activation and disabling.
+
 For review preparation only, the local `teamlead-development` skill includes `scripts/prepare-selectel-release.mjs` (use the installed skill path). Example: `node <skill-path>/scripts/prepare-selectel-release.mjs --repo <checkout> --base <full-base-sha> [--candidate <full-candidate-sha>]`. The helper reads the accepted `origin/main` fingerprint function and produces exact source-bound metadata without modifying Git or touching the host. Its output is preparation only: it is not approval, a gate, a patch, a deployment, or a compatibility decision. All existing review and release safeguards still apply.

@@ -54,3 +54,14 @@ test('forwards the exact raw lifecycle update to acceptance instead of acknowled
   expect(response.status).toBe(200)
   expect(accepted).toEqual({ kind: 'bot_added', rawPayload: rawBody })
 })
+
+test('preserves the stopped recipient int64 and rejects ambiguous stop identities', async () => {
+  let accepted: unknown
+  const app = route(async (event) => { accepted = event })
+  const headers = { 'X-Max-Bot-Api-Secret': secret, 'Content-Type': 'application/json' }
+  const body = '{"update_type":"bot_stopped","timestamp":1700000000000,"chat_id":9223372036854775807,"user":{"user_id":9223372036854775807}}'
+  expect((await app.request('/webhooks/max', { method: 'POST', headers, body })).status).toBe(200)
+  expect(accepted).toEqual({ kind: 'bot_stopped', chatId: '9223372036854775807', userId: '9223372036854775807', occurredAt: '2023-11-14T22:13:20.000Z', payload: null })
+  const ambiguous = body.replace('"user_id":9223372036854775807', '"user_id":1,"user_id":2')
+  expect((await app.request('/webhooks/max', { method: 'POST', headers, body: ambiguous })).status).toBe(400)
+})

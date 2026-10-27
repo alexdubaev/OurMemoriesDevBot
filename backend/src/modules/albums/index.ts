@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'hono'
+import type { MaxNotificationPilot } from '../../max-notifications-pilot'
 import type { DbClient } from '../../db'
 import type { IdempotencyExecutor, PrismaTransactionClient } from '../../idempotency'
 import type { AuthHttpEnv } from '../auth'
@@ -11,10 +12,10 @@ import { createAlbumMemorySourceCatalog } from '../memories'
 import type { AlbumMemoryPickerItem } from './application/album-types'
 import { createComposedAlbumSourceCatalog, type AlbumSourceCatalog } from './infrastructure/composed-album-source-catalog'
 
-export function createAlbumsModule({ db, idempotencyExecutor, idempotencySecret, requireAuth, sourceCatalog }:
-  { db: DbClient; idempotencyExecutor: IdempotencyExecutor<PrismaTransactionClient>; idempotencySecret: string; requireAuth: MiddlewareHandler<AuthHttpEnv>; sourceCatalog?: AlbumSourceCatalog }) {
+export function createAlbumsModule({ db, idempotencyExecutor, idempotencySecret, requireAuth, sourceCatalog, notificationPilot }:
+  { db: DbClient; idempotencyExecutor: IdempotencyExecutor<PrismaTransactionClient>; idempotencySecret: string; requireAuth: MiddlewareHandler<AuthHttpEnv>; sourceCatalog?: AlbumSourceCatalog; notificationPilot?: MaxNotificationPilot }) {
   const catalog = sourceCatalog ?? createComposedAlbumSourceCatalog(createAlbumMemorySourceCatalog(), createPrismaAlbumPhotoSourceCatalog())
-  const repository = new PrismaAlbumRepository(db, idempotencyExecutor, catalog)
+  const repository = new PrismaAlbumRepository(db, idempotencyExecutor, catalog, notificationPilot)
   const service = new AlbumService(repository, idempotencySecret)
   return { routes: createAlbumRoutes({ requireAuth, service }), service, repository }
 }

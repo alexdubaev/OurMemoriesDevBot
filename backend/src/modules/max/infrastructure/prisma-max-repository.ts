@@ -44,6 +44,14 @@ export class PrismaMaxRepository implements MaxAcceptRepository {
         return { inboxId: existing.id, duplicate: true }
       }
 
+      if (input.event.kind === 'bot_stopped') {
+        // The hashed event key carries only the stop instant and recipient correlation.
+        // Persist before acknowledging; no outgoing response or publication is created.
+        await tx.maxInbox.update({ where: { id: inboxId }, data: { status: 'processed', processedAt: input.now,
+          encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+        return { inboxId, duplicate: false }
+      }
+
       // Newly accepted lifecycle updates use the same durable worker boundary, where they are
       // interpreted as channel state only. Existing captured rows have no task and are never replayed.
       if (isLifecycleEvent(input.event)) {

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import type { MaxAcceptedEvent } from './ports'
 
 export function maxEventKey(botId: string, event: MaxAcceptedEvent): string {
+  if (event.kind === 'bot_stopped') return `pilot-stop:${sha256(`${botId}:${event.userId}`)}|${event.occurredAt}`
   if (event.kind === 'bot_added' || event.kind === 'bot_removed' || event.kind === 'bot_admin_permissions_changed') {
     return sha256(lengthPrefixed([event.kind, botId, sha256(event.rawPayload)]))
   }

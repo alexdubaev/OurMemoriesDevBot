@@ -2926,6 +2926,58 @@ test('MAX video retirement accepts only frozen current filesystem profiles and r
   }
 })
 
+test('notification pilot retains only the exact measured d299 filesystem recovery source', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
+  const baseline = 'aa4e9bc818392bc067ba862017c63a0d2d35495b'
+  const blobs = [
+    ['backend/prisma/migrations/20261027210000_max_bot_stopped/migration.sql', '564c558249b511220c7de095a3f22f87760d9b40'],
+    ['backend/prisma/schema.prisma', '30fcb7c2ae3425ca30a32858c5e4a9447ac5aea5'],
+    ['backend/scripts/max-notifications-pilot.ts', '94da4b723a7c893da3c5d295cea83e704826a5e2'],
+    ['backend/src/app.ts', '402c46ccecfb4c27b02503906e38f74a7f4a2649'],
+    ['backend/src/env.ts', '8d3a3b61d8a46c1242f8029047ebebbc8a56f95d'],
+    ['backend/src/max-notifications-pilot.ts', 'a274a970e0c80c46eff78275e1c9294a4605fb77'],
+    ['backend/src/modules/albums/index.ts', 'b0ec96581e6ca9b205d9dd4ecd35ff2aab7e47a3'],
+    ['backend/src/modules/albums/infrastructure/prisma-album-repository.ts', 'a6e8b850a47e87ca03df00e556cba0d33fbe8e5c'],
+    ['backend/src/modules/max/application/accept-update.ts', '8468e022949650428dbe53d0386011510f30c7ce'],
+    ['backend/src/modules/max/application/event-key.ts', 'b19353b7b14aab06fe984b57d0b6b6da183d763e'],
+    ['backend/src/modules/max/application/ports.ts', 'c1ee5522ab8ebbe79c3d1f2385e6ef03f2a3a98d'],
+    ['backend/src/modules/max/index.ts', 'c6b226860ca40b75e04178b1fd2eed5b8fae95ca'],
+    ['backend/src/modules/max/infrastructure/deliver-pilot-notification.ts', '4e122b2d10823dc7dec530b19661a28d7a536bec'],
+    ['backend/src/modules/max/infrastructure/legacy-video-migration.ts', 'ee43d7cd562463343abae068fa82fd1ee1c22b5b'],
+    ['backend/src/modules/max/infrastructure/max-api.ts', 'a38de570142bb3070de54ca42f0db1beaeee2125'],
+    ['backend/src/modules/max/infrastructure/prisma-max-repository.ts', '76fea79235df414aa4d761dae4961d17106d458b'],
+    ['backend/src/modules/max/infrastructure/process-image.ts', 'd059047faf1499523963367e9609dd4c5b2a8894'],
+    ['backend/src/modules/max/infrastructure/process-task.ts', '6395b41e4b96a25884bc48b7504a9dd7345fb620'],
+    ['backend/src/modules/max/infrastructure/process-video.ts', '02c9253d8f2c34c85d58365ebb96dc28077b8bdf'],
+    ['backend/src/modules/max/infrastructure/process-voice.ts', '02c191a5e1dab5aa4db27fb7d0deb9c1e749ef8f'],
+    ['backend/src/modules/max/transport/update-mapping.ts', 'c3084b0d64abf2f916341226adfa4350d913edfa'],
+    ['backend/src/modules/memories/index.ts', '746e484417b09691683e4be929d77a0cef3a190c'],
+    ['backend/src/modules/memories/infrastructure/prisma-memory-repository.ts', 'bbf17014985713b07ed7eafb8955489494f94c50'],
+    ['backend/src/modules/memories/infrastructure/source-memory-publisher.ts', 'e58940aa38bc2a030e5034ef0cdec4a1d7fb015b'],
+    ['backend/src/modules/telegram/infrastructure/process-task.ts', '9644a3872e9b2fa7f531479e18d04bdb206656bf'],
+    ['backend/src/outbox/handlers.ts', 'a505e347c4bb914fb98d4dcb016816069b6ff7a0'],
+  ]
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const directory = mkdtempSync(resolve(root, '.scratch', 'rollback-notification-pilot-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, baseline], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(directory)
+  const source = commitFrozenSourceFiles({ root: directory, sha: baseline }, blobs, 'freeze notification pilot production inputs')
+  assert.equal(productionCompatibilityFingerprint(source.root), '5ba0f03f8a30fee1a4e25d6531b52c3d6fac46f0b363bd317cd07430f01bb07d')
+  const profile = (candidate, driver = 'filesystem', target = maxVideoRecoveryBackend) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root, encoding: 'utf8', timeout: 30_000,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\ncompose() { [ '${driver}' = filesystem ]; }\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
+  })
+  const accepted = profile(source)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
+  assert.notEqual(profile(source, 's3').status, 0)
+  assert.notEqual(profile(source, 'filesystem', rollbackHealthy).status, 0)
+  const drift = commitSourceChange(source, 'backend/src/max-notifications-pilot.ts', '\n// changed pilot recipient policy\n', 'reject notification source drift')
+  assert.notEqual(profile(drift).status, 0)
+})
+
 test('owner-guide and disabled-instructions runtimes accept only their frozen d299 filesystem recovery profiles', {
   timeout: process.platform === 'win32' ? 240_000 : 90_000,
 }, () => {
@@ -3161,7 +3213,7 @@ test('MAX video rollback pre-SQL verification uses the exact-prefix helper while
       const rows = candidate.slice(0, count).map(([migration_name, checksum]) => ({ migration_name, checksum, finished_at: '2026-10-25T10:00:00.000Z', rolled_back_at: null }))
       if (process.env.FIXTURE_LEDGER_VARIANT === 'wrong' && rows.length > 56) rows[56].migration_name = '20990101000000_unreviewed'
       if (sql.startsWith('SELECT migration_name,checksum')) return { rows }
-      if (sql.includes('to_regclass')) return { rows: [{ retention: count === 59, family_deletions: false, storage_deletes: false, purge_fences: false }] }
+      if (sql.includes('to_regclass')) return { rows: [{ retention: count === 59, family_deletions: false, storage_deletes: false, purge_fences: false, bot_stopped: false }] }
       if (sql.includes('SELECT EXISTS')) return { rows: [{ unread: false, multiple: false, unfinished: false }] }
       throw new Error('unexpected release-verification SQL')
     }

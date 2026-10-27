@@ -568,8 +568,8 @@ describe('MAX durable capture', () => {
     const preview = await sendStart(1_757_844_030_002, 'guide_preview')
     expect(first.text).toBe('Добро пожаловать в memoLy ❤️\nОткройте приложение, чтобы продолжить.')
     expect(preview.text).toBe('С возвращением в memoLy ❤️\nОткройте приложение, чтобы продолжить.')
-    expect(first.buttons).toBeNull()
-    expect(preview.buttons).toBeNull()
+    expect(first.buttons).toEqual({ pilotStartedAt: new Date(1_757_844_030_001).toISOString() })
+    expect(preview.buttons).toEqual({ pilotStartedAt: new Date(1_757_844_030_002).toISOString() })
     const legacyCaption = await accept({ kind: 'message_created', senderId: subject, recipientId: '900',
       messageId: 'owner-start-caption', occurredAt: '2026-10-27T10:00:00.000Z', text: '/start', hasAttachments: true })
     await process({ inboxId: legacyCaption.inboxId })
@@ -598,7 +598,7 @@ describe('MAX durable capture', () => {
       inboxId_kind: { inboxId: ordinary.inboxId, kind: 'welcome' },
     } })
     expect(ordinaryResponse.text).toBe('Добро пожаловать в memoLy ❤️\nОткройте приложение, чтобы продолжить.')
-    expect(ordinaryResponse.buttons).toBeNull()
+    expect(ordinaryResponse.buttons).toEqual({ pilotStartedAt: '2026-10-27T10:01:00.000Z' })
     expect(await prisma.maxSource.count()).toBe(2)
     expect(await prisma.maxSource.count({ where: { status: 'denied' } })).toBe(1)
     expect(await prisma.memory.count()).toBe(0)

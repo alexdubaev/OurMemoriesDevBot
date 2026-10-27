@@ -102,7 +102,8 @@ for (const lineEndingMode of ['lf', 'mixed'] as const) test.serial(`current → 
       'scripts/test-support/control-deletion-recovery-probe.mjs', root, 'seed-current', statePath, storageRoot, root,
     ], backendRoot)
     const before = await ledgerSnapshot(ownUrl.toString())
-    expect(before).toHaveLength(62)
+    expect(before).toHaveLength(63)
+    expect(before.at(-1)).toMatchObject({ migration_name: '20261027210000_max_bot_stopped' })
     const candidateRecovery = checked('candidate recovery inverse', 'bun', ['scripts/migrate-max-legacy-videos.ts', '--recover-all', '--apply'], backendRoot)
     expect(JSON.parse(candidateRecovery.trim().split('\n').at(-1)!)).toMatchObject({ inspected: 2, excluded: 1, recovered: 2, refused: 0, remaining: 0 })
 

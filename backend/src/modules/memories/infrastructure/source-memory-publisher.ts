@@ -6,6 +6,7 @@ import type { FamilyAccess, FamilyScope } from '../../families'
 import { MemoryFailure } from '../domain/errors'
 import { allocatePublicationOrdinal, firstPublicationTime, lockPublicationFamily } from './publication-boundary'
 import { insertPublicationChildTags, removeDetachedAttachmentTags, resolveCreationChildTags } from './child-tags'
+import { enqueuePilotNotification, type MaxNotificationPilot } from '../../../max-notifications-pilot'
 
 export type SourceMemoryInput = {
   id: string
@@ -30,7 +31,7 @@ type AfterMemoryWrite = (tx: PrismaTransactionClient, memoryId: string) => Promi
 
 /** Trusted adapter boundary: fixed ids make a crash between publication and source bookkeeping
  * replay-safe, while the same family/media invariants as the HTTP service stay enforced. */
-export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) {
+export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess, notificationPilot?: MaxNotificationPilot) {
   return {
     async publish(scope: FamilyScope, input: SourceMemoryInput, afterWrite?: AfterMemoryWrite) {
       await access.requireFull(scope)
@@ -69,6 +70,9 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
             await tx.memory.update({ where: { id: existing.id }, data: { sourcePublishedAt: input.sourcePublishedAt } })
           }
           await afterWrite?.(tx, existing.id)
+          if (existing.status !== 'published' && existing.firstPublishedAt === null) {
+            await enqueuePilotNotification(tx, notificationPilot, { kind: 'feed', familyId: scope.familyId, memoryId: existing.id })
+          }
           return existing.id
         }
         const childTags = await resolveCreationChildTags(tx, scope.familyId, input.childIds)
@@ -90,6 +94,7 @@ export function createSourceMemoryPublisher(db: DbClient, access: FamilyAccess) 
           familyId: scope.familyId, memoryId: input.id, mediaId, position: input.mediaPositions?.[index] ?? index,
         })) })
         await afterWrite?.(tx, input.id)
+        await enqueuePilotNotification(tx, notificationPilot, { kind: 'feed', familyId: scope.familyId, memoryId: input.id })
         return input.id
       })
     },

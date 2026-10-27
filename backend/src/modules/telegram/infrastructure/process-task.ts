@@ -32,7 +32,7 @@ export function createTelegramTaskProcessor(options: {
   const { prisma, env } = options.runtime
   const access = createPrismaFamilyAccess(prisma)
   const media = createMediaService({ db: prisma, env, familyAccess: access, storage: options.runtime.privateStorage.storage })
-  const memories = createSourceMemoryPublisher(prisma, access)
+  const memories = createSourceMemoryPublisher(prisma, access, options.runtime.env)
   const videoDelivery = new TelegramVideoDeliveryService(prisma, access, env.TELEGRAM_BOT_EXPECTED_USERNAME)
 
   return async (payload: unknown, signal?: AbortSignal) => {

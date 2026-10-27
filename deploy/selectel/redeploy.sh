@@ -857,7 +857,10 @@ rollback_source_compatibility_profile() {
 				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:4e1ba54ea6c8f0df481d8adfc5d75378c0545d21922170cb3184551b96d4c02d:max-video-retirement"
 				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:e2375eecbdd2f4942dd996ae88b31a15da95ea9007b32f112c8772c96a38200c:max-video-retirement"
 				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:ca18410eb5ba4bfaf124251863c4167e68b44549cd013bf39cd73ff5a3daabcc:max-video-retirement"
-				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:5fa0ba3bc8d6a3c6d1a67b8b2b557300a3a6487fd0e0649e92e44f515cef9d00:max-video-retirement") ;;
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:5fa0ba3bc8d6a3c6d1a67b8b2b557300a3a6487fd0e0649e92e44f515cef9d00:max-video-retirement"
+				# Exact owner-only notification pilot; retains d299 images, filesystem,
+				# Control/legacy-media guards and the measured 62-to-63 enum ledger.
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:5ba0f03f8a30fee1a4e25d6531b52c3d6fac46f0b363bd317cd07430f01bb07d:max-video-retirement") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do
@@ -1275,6 +1278,11 @@ rollback_verify_max_video_migration_history() {
 				20261025160000_control_user_lifecycle \
 				20261025170000_control_durable_purge \
 				20261025180000_control_purge_fences)" ] || return 1 ;;
+		63)
+			profile=notifications63
+			baseline_revision=aa4e9bc818392bc067ba862017c63a0d2d35495b
+			baseline_count=62
+			[ "$(printf '%s\n' "$candidate_catalog" | tail -n 1 | cut -d: -f1)" = 20261027210000_max_bot_stopped ] || return 1 ;;
 		*) return 1 ;;
 	esac
 	baseline_catalog=$(rollback_migration_catalog_checksums "$baseline_revision") || return 1
@@ -1308,9 +1316,10 @@ const phase = process.env.MEMOLY_MAX_VIDEO_LEDGER_PHASE;
 const profile = process.env.MEMOLY_MAX_VIDEO_LEDGER_PROFILE;
 const legacy = [["20261025100000_control_observability", "479632ba94f73de699a0e6d70170b6de134b62343536a1480e1e80bb5eb6c557"], ["20261025110000_max_multivideo_references", "9e505de99d8e7a65b9c5652ebd213d20f93c845ae9ebf6615d6d35d460fcdb90"], ["20261025120000_max_video_legacy_retention", "7de7987b54a79e13fde70a1604ebc41f19fc49ac953bfd48f03a90353cfca1f0"]];
 const lifecycle = [["20261025160000_control_user_lifecycle", "910ee6aeda44457ae611a69994cd7f11eb6c1e0936ac33874cdcb8bd59f5df57"], ["20261025170000_control_durable_purge", "f9ff69a061afefeceaeda618c4aeaf424563b2fed850d6e17808e23554b2fa8d"], ["20261025180000_control_purge_fences", "eee2bddedbd167b1de111b16e8c0a75e054c9cf9c555752d73b8f02e3f2c3655"]];
-const expectedBaseline = profile === "legacy59" ? 56 : profile === "lifecycle62" ? 59 : -1;
-const expectedCount = profile === "legacy59" ? 59 : profile === "lifecycle62" ? 62 : -1;
-const expectedSuffix = profile === "legacy59" ? legacy : profile === "lifecycle62" ? lifecycle : [];
+const notifications = [["20261027210000_max_bot_stopped", "f394dc4d1a981756729478576352efdbae1e955357d97be65fe95802782274b5"]];
+const expectedBaseline = profile === "legacy59" ? 56 : profile === "lifecycle62" ? 59 : profile === "notifications63" ? 62 : -1;
+const expectedCount = profile === "legacy59" ? 59 : profile === "lifecycle62" ? 62 : profile === "notifications63" ? 63 : -1;
+const expectedSuffix = profile === "legacy59" ? legacy : profile === "lifecycle62" ? lifecycle : profile === "notifications63" ? notifications : [];
 if (baseline.length !== expectedBaseline || candidate.length !== expectedCount || expectedCount < 0 ||
     !["pre-sql", "complete"].includes(phase) ||
     candidate.slice(0, expectedBaseline).some((row, index) => row.name !== baseline[index].name ||
@@ -1322,7 +1331,7 @@ try {
   const { rows } = await client.query("SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name");
   if (!Array.isArray(rows) || rows.some(row => !row.finished_at || row.rolled_back_at)) throw new Error("unfinished or rolled-back MAX video migration");
   const count = rows.length;
-  const minimum = profile === "legacy59" ? 56 : 59;
+  const minimum = expectedBaseline;
   if (phase === "complete" ? count !== expectedCount : count < minimum || count > expectedCount)
     throw new Error("MAX video migration ledger count mismatch");
   const expected = candidate.slice(0, count);
@@ -1332,13 +1341,15 @@ try {
     to_regclass('public.max_video_legacy_retention') IS NOT NULL AS retention,
     to_regclass('public.control_family_deletions') IS NOT NULL AS family_deletions,
     to_regclass('public.control_storage_deletes') IS NOT NULL AS storage_deletes,
-    EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='max_sources_control_no_redacted_replay' AND NOT tgisinternal) AS purge_fences`);
+    EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='max_sources_control_no_redacted_replay' AND NOT tgisinternal) AS purge_fences,
+    EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='max_inbox_event_kind' AND e.enumlabel='bot_stopped') AS bot_stopped`);
   const state = schema.rows[0];
-  const lifecycleProfile = profile === "lifecycle62";
+  const lifecycleProfile = profile === "lifecycle62" || profile === "notifications63";
   if (typeof state?.retention !== "boolean" || state.retention !== (lifecycleProfile ? count >= 59 : count === 59) ||
       typeof state.family_deletions !== "boolean" || state.family_deletions !== (lifecycleProfile && count >= 60) ||
       typeof state.storage_deletes !== "boolean" || state.storage_deletes !== (lifecycleProfile && count >= 61) ||
-      typeof state.purge_fences !== "boolean" || state.purge_fences !== (lifecycleProfile && count === 62))
+      typeof state.purge_fences !== "boolean" || state.purge_fences !== (lifecycleProfile && count >= 62) ||
+      typeof state.bot_stopped !== "boolean" || state.bot_stopped !== (profile === "notifications63" && count === 63))
     throw new Error("MAX video or Control lifecycle schema disagrees with the exact migration prefix");
   await client.end();
   process.stdout.write(count >= 59 ? "present\n" : "absent\n");

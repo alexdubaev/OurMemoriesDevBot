@@ -132,6 +132,7 @@ export type MaxInboundEvent =
       payload: string | null
     }
   | { kind: 'family_choice'; callbackId: string; payload: string; userId: string; occurredAt: string }
+  | { kind: 'bot_stopped'; chatId: string; userId: string; occurredAt: string; payload: null }
 
 /** Lifecycle events are captured durably but intentionally excluded from worker processing. */
 export type MaxLifecycleEvent =
