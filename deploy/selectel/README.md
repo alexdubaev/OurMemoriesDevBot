@@ -591,6 +591,18 @@ source (1 test, 0 failures, 5 assertions). Both exact source profiles retain
 the same target pin, host-input checks, 59–62 migration ledger validation,
 recovery readiness, and data safeguards.
 
+The owner-guide runtime source from `7873375d462ba59b6bcc227b58da36feb000bbdd`
+is bound to the same d299 pair by executable compatibility fingerprint
+`e2375eecbdd2f4942dd996ae88b31a15da95ea9007b32f112c8772c96a38200c`. The
+fingerprint was reconstructed over accepted baseline `2fc3abd4d85419ce972bacfceac1ec29c70fdeef`
+with the six reviewed production blobs. Its PostgreSQL current → d299 → current
+compatibility probe passed for both LF and historical mixed-line-ending
+migrations (2 tests, 0 failures, 22 assertions, 22.75 seconds). The frozen
+regression accepts only the measured executable input and filesystem storage;
+it rejects S3 and backend or UI drift. This is targeted recovery evidence, not a
+FULL release-profile result. The existing target, host pins, migration ledger,
+and recovery safeguards are unchanged.
+
 The LF/CRLF-compatible recovery source was later proven at `a6fc2b4ecdb0b2886b80a0f201edb74f0ad0f424`, with executable compatibility fingerprint
 `ca18410eb5ba4bfaf124251863c4167e68b44549cd013bf39cd73ff5a3daabcc`. Its native PostgreSQL current → d299 → current matrix passed (2 tests, 0 failures, 22 assertions), covering both the all-LF prefix and the historical mixed prefix (24 CRLF, 35 LF). The original 59 ledger rows remained unchanged; SQL-byte drift was rejected. The profile keeps the same d299 target, filesystem driver requirement, host-input checks, and recovery safeguards.
 

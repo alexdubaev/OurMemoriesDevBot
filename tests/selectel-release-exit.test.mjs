@@ -827,6 +827,14 @@ const reviewedControlDeletionRecoveryProductionBlobs = [
   ['webapp/src/features/memoly-ui/FamilyPresentation.tsx', '1c7658b0e78ad37b1544938bc0c158d04f4937fe'],
   ['webapp/src/features/memoly-ui/index.ts', 'ea5ed560b03b02590ceb06404eeea3eac4a2a15b'],
 ]
+const reviewedOwnerGuideRuntimeProductionBlobs = [
+  ['backend/src/modules/max/infrastructure/process-task.ts', '324533021e859f94a7351f2389c1963dd837ad1a'],
+  ['backend/src/modules/max/infrastructure/deliver-response.ts', 'bca24ffc72ef63849ff7d526cbceba3a2c16054d'],
+  ['webapp/src/App.tsx', '61e6352466450e0fa16772b19cfdbe31e9e40054'],
+  ['webapp/src/features/app/index.ts', '7ced3d322d285be2919285f63ad2a6336632c4d3'],
+  ['webapp/src/features/app/use-owner-guide-replay.ts', '0cc05d0f54f2a18977a3fdd1b6a3ae23934df287'],
+  ['webapp/src/features/family/index.ts', '94c1cfb785fb29fb4616efbabe1effdbd902f5d1'],
+]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
@@ -2887,6 +2895,49 @@ test('MAX video retirement accepts only frozen current filesystem profiles and r
       const rejected = profile(mutated)
       assert.notEqual(rejected.status, 0, `MAX retirement recovery must reject changed production input: ${relativePath}`)
     }
+  }
+})
+
+test('owner-guide runtime accepts only its frozen d299 filesystem recovery profile', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
+  const baseline = '2fc3abd4d85419ce972bacfceac1ec29c70fdeef'
+  const target = maxVideoRecoveryBackend
+  const expectedCompatibility = 'e2375eecbdd2f4942dd996ae88b31a15da95ea9007b32f112c8772c96a38200c'
+  assert.equal(productionRuntimeFingerprint(root, target), maxVideoRecoveryRuntime)
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-owner-guide-source-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(sourceDirectory)
+  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedOwnerGuideRuntimeProductionBlobs,
+    'freeze reviewed owner-guide runtime production blobs')
+  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
+
+  const profile = (candidate, storageDriver = 'filesystem') => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\ncompose() { [[ "$*" == *'loadEnv(process.env)'* && "$*" == *'PRIVATE_STORAGE_DRIVER'* ]] || return 63; [ "\${MOCK_EFFECTIVE_STORAGE_DRIVER:-}" = filesystem ]; }\nMOCK_EFFECTIVE_STORAGE_DRIVER=${storageDriver}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
+    encoding: 'utf8', timeout: 30_000,
+  })
+
+  const accepted = profile(source)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
+  const s3Rejected = profile(source, 's3')
+  assert.notEqual(s3Rejected.status, 0, 'owner-guide recovery must reject an effective S3 storage driver')
+
+  for (const [relativePath, marker] of [
+    ['backend/src/modules/max/infrastructure/process-task.ts', '\n// synthetic owner-guide backend drift\n'],
+    ['webapp/src/App.tsx', '\n// synthetic owner-guide UI drift\n'],
+  ]) {
+    const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-owner-guide-drift-'))
+    const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
+    if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+    fixtureWorktrees.push(driftDirectory)
+    const mutated = commitSourceChange({ root: driftDirectory, sha: source.sha }, relativePath, marker,
+      `mutate owner-guide recovery input ${relativePath}`)
+    const rejected = profile(mutated)
+    assert.notEqual(rejected.status, 0, `owner-guide recovery must reject changed production input: ${relativePath}`)
   }
 })
 

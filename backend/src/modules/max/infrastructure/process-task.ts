@@ -95,6 +95,9 @@ export function createMaxTaskProcessor(options: {
       const event = decryptedEvent
       const token = inviteTokenFromPayload(event.payload)
       const browserApproval = isBrowserApprovalPayload(event.payload)
+      const ownerReplay = !browserApproval && !event.payload?.startsWith('invite_') &&
+        await isConfiguredMaxControlOwner(options.runtime, event.userId)
+      const guideReplay = ownerReplay && (event.payload === 'guide_preview' || event.payload === null)
       let responseText = welcomeText
       let retainInviteContext = false
       let inviteResolution: DetailedInviteStartResolution | null = null
@@ -122,7 +125,9 @@ export function createMaxTaskProcessor(options: {
             return { text: hasPriorInteraction ? inviteReturningText(inviteResolution.familyName) : responseText,
               buttons: { kind: 'invite_welcome' as const, returning: hasPriorInteraction } }
           }
-          return { text: hasPriorInteraction ? returningWelcomeText : responseText }
+          return guideReplay
+            ? { text: welcomeText, buttons: { kind: 'guide_preview' as const } }
+            : { text: hasPriorInteraction ? returningWelcomeText : responseText }
         },
         retainInviteContext) ? 'done' : 'skipped'
     }
@@ -171,6 +176,13 @@ export function createMaxTaskProcessor(options: {
     if (source.status !== 'accepted') {
       await retryTerminalSourceCleanup(prisma, options.media, source)
       return 'skipped'
+    }
+
+    if (event.kind === 'message_created' && !event.isChannel && !event.forwardedFrom &&
+        event.text?.trim() === '/start' && !event.hasAttachments && (event.attachments?.length ?? 0) === 0 &&
+        await isConfiguredMaxControlOwner(options.runtime, event.senderId)) {
+      const response = await dbOwnerStart(prisma, inbox.id, event.senderId, inbox.botId.toString())
+      return response ? 'done' : 'skipped'
     }
 
     let verifiedForward: MaxResolvedMessage | undefined
@@ -362,6 +374,28 @@ export function createMaxTaskProcessor(options: {
       throw error
     }
   }
+}
+
+async function isConfiguredMaxControlOwner(runtime: BackendRuntime, maxSubject: string): Promise<boolean> {
+  const env = runtime.env
+  if (!env?.CONTROL_ENABLED || env.CONTROL_OWNER_USER_IDS.length === 0) return false
+  const identity = await runtime.prisma.externalIdentity.findUnique({
+    where: { provider_subject: { provider: 'max', subject: maxSubject } },
+    select: { userId: true },
+  })
+  return identity !== null && env.CONTROL_OWNER_USER_IDS.includes(identity.userId)
+}
+
+async function dbOwnerStart(db: DbClient, inboxId: string, destinationUserId: string, botId: string) {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`max-bot-start:${botId}:${destinationUserId}`}, 0))`
+    const changed = await tx.maxSource.updateMany({ where: { inboxId, status: 'accepted' }, data: { status: 'denied', rejectionCode: 'owner_start_command' } })
+    if (changed.count !== 1) return false
+    await markInboxProcessed(tx, inboxId)
+    await createResponseAndTask(tx, { inboxId, destinationUserId, kind: 'welcome', text: welcomeText,
+      buttons: { kind: 'guide_preview' } })
+    return true
+  })
 }
 
 async function claimMaxForwardSource(
@@ -655,7 +689,7 @@ async function terminalInbox(
   kind: 'welcome',
   destinationUserId: string,
   botId: string,
-  responseForInteraction: (hasPriorInteraction: boolean) => { text: string; buttons?: { kind: 'browser_approval' } | { kind: 'invite_welcome'; returning: boolean } },
+  responseForInteraction: (hasPriorInteraction: boolean) => { text: string; buttons?: { kind: 'browser_approval' } | { kind: 'invite_welcome'; returning: boolean } | { kind: 'guide_preview' } },
   retainInviteContext: boolean,
 ) {
   return db.$transaction(async (tx) => {
@@ -700,7 +734,7 @@ async function markInboxProcessed(tx: PrismaTransactionClient, inboxId: string) 
 
 async function createResponseAndTask(
   tx: PrismaTransactionClient,
-  input: { inboxId: string; destinationUserId: string; kind: 'saved' | 'denied' | 'unsupported_media' | 'welcome'; text: string; buttons?: { kind: 'browser_approval' } | { kind: 'invite_welcome'; returning: boolean } },
+  input: { inboxId: string; destinationUserId: string; kind: 'saved' | 'denied' | 'unsupported_media' | 'welcome'; text: string; buttons?: { kind: 'browser_approval' } | { kind: 'invite_welcome'; returning: boolean } | { kind: 'guide_preview' } },
 ) {
   const response = await tx.maxOutgoingResponse.upsert({
     where: { inboxId_kind: { inboxId: input.inboxId, kind: input.kind } },

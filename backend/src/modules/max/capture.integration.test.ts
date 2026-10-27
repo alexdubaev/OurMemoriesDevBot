@@ -548,6 +548,60 @@ describe('MAX durable capture', () => {
     expect(responses.filter((response) => response.text === 'С возвращением в memoLy ❤️\nОткройте приложение, чтобы продолжить.')).toHaveLength(1)
   })
 
+  test('configured MAX owner can replay the full welcome on distinct starts and plain private /start without publishing a memory', async () => {
+    const owner = await prisma.user.create({ data: { displayName: 'Synthetic replay owner' } })
+    const subject = '771234567'
+    await prisma.externalIdentity.create({ data: { userId: owner.id, provider: 'max', subject } })
+    const runtime = { prisma, env: { CONTROL_ENABLED: true, CONTROL_OWNER_USER_IDS: [owner.id] } } as unknown as BackendRuntime
+    const process = createMaxTaskProcessor({ runtime, crypto })
+    const sendStart = async (timestamp: number, payload: string | null, messageId?: string) => {
+      const body = messageId
+        ? { update_type: 'message_created', timestamp, message: { sender: { user_id: Number(subject) }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 900 }, body: { mid: messageId, text: '/start', attachments: [] } } }
+        : { ...botStarted, timestamp, user: { user_id: Number(subject) }, payload }
+      const accepted = await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(body) })
+      expect(accepted.status).toBe(200)
+      const inbox = await prisma.maxInbox.findFirstOrThrow({ orderBy: { receivedAt: 'desc' }, include: { source: true } })
+      const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${inbox.id}` } } })
+      await process(task.payload)
+      await process(task.payload)
+      return prisma.maxOutgoingResponse.findUniqueOrThrow({ where: { inboxId_kind: { inboxId: inbox.id, kind: 'welcome' } } })
+    }
+    const first = await sendStart(1_757_844_030_001, null)
+    const preview = await sendStart(1_757_844_030_002, 'guide_preview')
+    const command = await sendStart(1_757_844_030_003, null, 'owner-start-command')
+    expect(first.text).toContain('начать вашу семейную историю.')
+    expect(preview.text).toBe(first.text)
+    expect(command.text).toBe(first.text)
+    expect(first.buttons).toEqual({ kind: 'guide_preview' })
+    expect(preview.buttons).toEqual({ kind: 'guide_preview' })
+    expect(command.buttons).toEqual({ kind: 'guide_preview' })
+    const legacyCaption = await accept({ kind: 'message_created', senderId: subject, recipientId: '900',
+      messageId: 'owner-start-caption', occurredAt: '2026-10-27T10:00:00.000Z', text: '/start', hasAttachments: true })
+    await process({ inboxId: legacyCaption.inboxId })
+    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: legacyCaption.inboxId, kind: 'welcome' } })).toBe(0)
+    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: legacyCaption.inboxId, kind: 'unsupported_media' } })).toBe(1)
+    const browser = await sendStart(1_757_844_030_004, `browser_${'8'.repeat(24)}`)
+    expect(browser).toMatchObject({ text: 'Откройте memoLy, чтобы подтвердить вход в браузере.', buttons: { kind: 'browser_approval' } })
+    const commandDeliveryTask = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:deliver-response', payload: { path: ['responseId'], equals: command.id } } })
+    const delivered: Array<{ userId: string; text: string; buttons?: Array<{ type?: string; text?: string; webApp?: string; payload?: string }> }> = []
+    const delivery = createMaxResponseDelivery({ prisma, api: { sendMessage: async (input: Parameters<MaxApiPort['sendMessage']>[0]) => { delivered.push(input) } } as unknown as MaxApiPort,
+      maxBotUsername: 'OurMemoriesMaxBot' })
+    await delivery(commandDeliveryTask.payload)
+    expect(delivered).toHaveLength(1)
+    expect(delivered[0]?.buttons).toEqual([{ type: 'open_app', text: 'Открыть memoLy', webApp: 'OurMemoriesMaxBot', payload: 'guide_preview' }])
+    const ordinary = await accept({ kind: 'bot_started', chatId: '88', userId: '771234568',
+      occurredAt: '2026-10-27T10:01:00.000Z', payload: null })
+    await process({ inboxId: ordinary.inboxId })
+    const ordinaryResponse = await prisma.maxOutgoingResponse.findUniqueOrThrow({ where: {
+      inboxId_kind: { inboxId: ordinary.inboxId, kind: 'welcome' },
+    } })
+    expect(ordinaryResponse.text).toContain('начать вашу семейную историю.')
+    expect(ordinaryResponse.buttons).not.toEqual({ kind: 'guide_preview' })
+    expect(await prisma.maxSource.count()).toBe(2)
+    expect(await prisma.maxSource.count({ where: { status: 'denied' } })).toBe(1)
+    expect(await prisma.memory.count()).toBe(0)
+  })
+
   test('browser approval starts preserve the challenge and do not consume ordinary welcome state', async () => {
     const browserPayload = `browser_${'7'.repeat(24)}`
     const browserBody = { ...botStarted, timestamp: 1_757_844_020_001, chat_id: 803, payload: browserPayload }
