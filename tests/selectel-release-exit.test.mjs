@@ -835,6 +835,12 @@ const reviewedOwnerGuideRuntimeProductionBlobs = [
   ['webapp/src/features/app/use-owner-guide-replay.ts', '0cc05d0f54f2a18977a3fdd1b6a3ae23934df287'],
   ['webapp/src/features/family/index.ts', '94c1cfb785fb29fb4616efbabe1effdbd902f5d1'],
 ]
+const reviewedDisabledInstructionsRuntimeProductionBlobs = [
+  ['backend/src/modules/max/infrastructure/process-task.ts', '82338afc7a279587e99982202ad440b636d12d90'],
+  ['webapp/src/features/family/InvitationScreens.tsx', '1e6897cfd14181abb5b42f5c9a7568e2e5446f17'],
+  ['webapp/src/features/family/index.ts', '0b457c8bb21e0da01adc6d4857aa832cff43b28a'],
+  ['webapp/src/features/memoly-ui/FamilyPresentation.tsx', '693d4f584c13a0db66a3d64f023781b2bc65118c'],
+]
 const fixtureWorktrees = []
 const fixtureSourceCache = new Map()
 
@@ -2920,46 +2926,63 @@ test('MAX video retirement accepts only frozen current filesystem profiles and r
   }
 })
 
-test('owner-guide runtime accepts only its frozen d299 filesystem recovery profile', {
+test('owner-guide and disabled-instructions runtimes accept only their frozen d299 filesystem recovery profiles', {
   timeout: process.platform === 'win32' ? 240_000 : 90_000,
 }, () => {
   const baseline = '2fc3abd4d85419ce972bacfceac1ec29c70fdeef'
   const target = maxVideoRecoveryBackend
-  const expectedCompatibility = 'e2375eecbdd2f4942dd996ae88b31a15da95ea9007b32f112c8772c96a38200c'
   assert.equal(productionRuntimeFingerprint(root, target), maxVideoRecoveryRuntime)
   mkdirSync(resolve(root, '.scratch'), { recursive: true })
-  const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-owner-guide-source-'))
-  const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
-  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
-  fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedOwnerGuideRuntimeProductionBlobs,
-    'freeze reviewed owner-guide runtime production blobs')
-  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
-
   const profile = (candidate, storageDriver = 'filesystem') => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
     input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\ncompose() { [[ "$*" == *'loadEnv(process.env)'* && "$*" == *'PRIVATE_STORAGE_DRIVER'* ]] || return 63; [ "\${MOCK_EFFECTIVE_STORAGE_DRIVER:-}" = filesystem ]; }\nMOCK_EFFECTIVE_STORAGE_DRIVER=${storageDriver}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
     encoding: 'utf8', timeout: 30_000,
   })
 
-  const accepted = profile(source)
-  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
-  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
-  const s3Rejected = profile(source, 's3')
-  assert.notEqual(s3Rejected.status, 0, 'owner-guide recovery must reject an effective S3 storage driver')
+  const scenarios = [
+    {
+      name: 'owner-guide', blobs: reviewedOwnerGuideRuntimeProductionBlobs,
+      compatibility: 'e2375eecbdd2f4942dd996ae88b31a15da95ea9007b32f112c8772c96a38200c',
+      drift: [
+        ['backend/src/modules/max/infrastructure/process-task.ts', '\n// synthetic owner-guide backend drift\n'],
+        ['webapp/src/App.tsx', '\n// synthetic owner-guide UI drift\n'],
+      ],
+    },
+    {
+      name: 'disabled-instructions', blobs: reviewedDisabledInstructionsRuntimeProductionBlobs,
+      compatibility: '5fa0ba3bc8d6a3c6d1a67b8b2b557300a3a6487fd0e0649e92e44f515cef9d00',
+      drift: [
+        ['backend/src/modules/max/infrastructure/process-task.ts', '\n// synthetic disabled-instructions backend drift\n'],
+        ['webapp/src/features/family/InvitationScreens.tsx', '\n// synthetic disabled-instructions UI drift\n'],
+      ],
+    },
+  ]
 
-  for (const [relativePath, marker] of [
-    ['backend/src/modules/max/infrastructure/process-task.ts', '\n// synthetic owner-guide backend drift\n'],
-    ['webapp/src/App.tsx', '\n// synthetic owner-guide UI drift\n'],
-  ]) {
-    const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-owner-guide-drift-'))
-    const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
-    if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
-    fixtureWorktrees.push(driftDirectory)
-    const mutated = commitSourceChange({ root: driftDirectory, sha: source.sha }, relativePath, marker,
-      `mutate owner-guide recovery input ${relativePath}`)
-    const rejected = profile(mutated)
-    assert.notEqual(rejected.status, 0, `owner-guide recovery must reject changed production input: ${relativePath}`)
+  for (const scenario of scenarios) {
+    const sourceDirectory = mkdtempSync(resolve(root, '.scratch', `rollback-${scenario.name}-source-`))
+    const added = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+    if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+    fixtureWorktrees.push(sourceDirectory)
+    const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, scenario.blobs,
+      `freeze reviewed ${scenario.name} runtime production blobs`)
+    assert.equal(productionCompatibilityFingerprint(source.root), scenario.compatibility)
+
+    const accepted = profile(source)
+    assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+    assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
+    const s3Rejected = profile(source, 's3')
+    assert.notEqual(s3Rejected.status, 0, `${scenario.name} recovery must reject an effective S3 storage driver`)
+
+    for (const [relativePath, marker] of scenario.drift) {
+      const driftDirectory = mkdtempSync(resolve(root, '.scratch', `rollback-${scenario.name}-drift-`))
+      const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
+      if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+      fixtureWorktrees.push(driftDirectory)
+      const mutated = commitSourceChange({ root: driftDirectory, sha: source.sha }, relativePath, marker,
+        `mutate ${scenario.name} recovery input ${relativePath}`)
+      const rejected = profile(mutated)
+      assert.notEqual(rejected.status, 0, `${scenario.name} recovery must reject changed production input: ${relativePath}`)
+    }
   }
 })
 
