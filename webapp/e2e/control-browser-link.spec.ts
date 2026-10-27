@@ -186,7 +186,7 @@ test('MAX Control owner does not enter the synthetic guide on startup, WebView r
   await page.goto('/')
   const continueWelcome = page.getByRole('button', { name: 'Продолжить' })
   const guide = page.getByRole('heading', { name: 'Пример семейного альбома' })
-  const normalApp = page.locator('[data-slot="family-hub"], [data-slot="memoly-theme-root"]')
+  const normalApp = page.locator('[data-slot="family-hub"]')
   await expect.poll(async () => await normalApp.isVisible() || await continueWelcome.isVisible()).toBe(true)
   if (await continueWelcome.isVisible().catch(() => false)) await continueWelcome.click()
   await expect(normalApp).toBeVisible()
