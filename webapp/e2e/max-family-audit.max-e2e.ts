@@ -685,7 +685,7 @@ test('MAX voice handoff opens the supported MAX bot through hostBridge', async (
 
   await page.evaluate((data) => { (window as unknown as MaxAuditWindow).WebApp.initData = data }, signedMaxInitData({ id: maxId, first_name: 'MAX voice handoff' }, randomUUID(), ''))
   await page.reload()
-  await page.getByRole('button', { name: 'Продолжить' }).click()
+  // This account already claimed the once-per-account welcome before reload.
   await page.getByRole('button', { name: /MAX voice handoff family/ }).click()
   await page.getByRole('button', { name: 'Добавить', exact: true }).click()
   await page.getByRole('button', { name: 'Добавить голос или видео' }).click()
