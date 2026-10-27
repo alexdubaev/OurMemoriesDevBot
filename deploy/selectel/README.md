@@ -580,6 +580,17 @@ and `20261025180000_control_purge_fences`. Pre-SQL verification accepts only a
 completed, checksum-matching prefix of 59–62 entries; complete verification
 requires all 62. The older 56–59 profile retains its own reviewed scope.
 
+The same `max-video-retirement` profile also accepts the separately frozen
+current Control-deletion production inputs from source
+`4d6e1e9822bafb97bd0414f32d01139e1a356dc8`, measured at executable
+compatibility fingerprint
+`4e1ba54ea6c8f0df481d8adfc5d75378c0545d21922170cb3184551b96d4c02d`. It uses
+the unchanged d299 image pair and filesystem-only storage requirement. The
+current → d299 → current PostgreSQL compatibility proof passed on this exact
+source (1 test, 0 failures, 5 assertions). Both exact source profiles retain
+the same target pin, host-input checks, 59–62 migration ledger validation,
+recovery readiness, and data safeguards.
+
 Grace-trashed archives still require their original objects and normal MAX
 metadata recovery. Only a durable irreversible deletion intent for an inactive
 family is excluded from that inverse. Recovery refuses an unfinished intent
