@@ -197,7 +197,7 @@ test('MAX-FULL: member avatar directory updates an already-open family and comme
   }, signedMaxInitData({ id: ownerId + 1, first_name: 'Avatar viewer' }, randomUUID(), `invite_${invite}`))
   await viewerPage.goto('/')
   await viewerPage.getByRole('button', { name: 'Продолжить' }).click()
-  await finishInviteIntroduction(viewerPage)
+  await expectInviteReady(viewerPage)
   await expect(viewerPage.getByRole('button', { name: 'Присоединиться' })).toBeVisible({ timeout: 15_000 })
   await expect(viewerPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   await viewerPage.getByRole('button', { name: 'Присоединиться' }).click()
@@ -551,7 +551,7 @@ test('MAX owner retries a lost invite response with one idempotency key and invi
   const guestAuthResponsePromise = guestPage.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.ok())
   await guestPage.goto('/')
   await guestPage.getByRole('button', { name: 'Продолжить' }).click()
-  await finishInviteIntroduction(guestPage)
+  await expectInviteReady(guestPage)
   await expect(guestPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   await expect(guestPage.getByText(/До вступления семейные фотографии/)).toBeVisible()
   const authResponse = await guestAuthResponsePromise
@@ -768,7 +768,7 @@ test('MAX-FULL: documented invite launch retries invite authentication failure a
   await expect(launchPage.getByRole('button', { name: 'Создать свою семью' })).toHaveCount(0)
   expect(previewRequests).toHaveLength(1)
   await launchPage.getByRole('button', { name: 'Повторить' }).click()
-  await finishInviteIntroduction(launchPage)
+  await expectInviteReady(launchPage)
   await expect(launchPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   expect(previewRequests).toHaveLength(2)
   const authenticatedMe = await cookieAuthenticatedMe(launchPage)
@@ -838,7 +838,7 @@ test('MAX-FULL: owner switches family data while an older feed response is pendi
   const inviteContext = await browser.newContext()
   const invitePage = await inviteContext.newPage()
   await signInMax(invitePage, { id: actorId, first_name: 'MAX family owner' }, `invite_${rawInvite}`)
-  await finishInviteIntroduction(invitePage)
+  await expectInviteReady(invitePage)
   await expect(invitePage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   await invitePage.getByRole('button', { name: 'Присоединиться' }).click()
   await selectFamilyFeed(invitePage, 'Family B child', 'B-only history')
@@ -973,7 +973,7 @@ test('MAX-FULL: revoked viewer loses family access and rejoins with retained his
   const viewerContext = await browser.newContext()
   const viewerPage = await viewerContext.newPage()
   const viewerToken = await signInMax(viewerPage, { id: viewerId, first_name: 'MAX revocation viewer' }, `invite_${initialInvite}`)
-  await finishInviteIntroduction(viewerPage)
+  await expectInviteReady(viewerPage)
   await expect(viewerPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   await viewerPage.getByRole('button', { name: 'Присоединиться' }).click()
   await selectFamilyFeed(viewerPage, 'B child updated', 'B retained history')
@@ -1040,7 +1040,7 @@ test('MAX-FULL: revoked viewer loses family access and rejoins with retained his
   const rejoinContext = await browser.newContext()
   const rejoinPage = await rejoinContext.newPage()
   const rejoinToken = await signInMax(rejoinPage, { id: viewerId, first_name: 'MAX revocation viewer' }, `invite_${nextInvite}`)
-  await finishInviteIntroduction(rejoinPage)
+  await expectInviteReady(rejoinPage)
   await expect(rejoinPage.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   await rejoinPage.getByRole('button', { name: 'Присоединиться' }).click()
   await selectFamilyFeed(rejoinPage, 'B child updated', 'B retained history')
@@ -1056,6 +1056,13 @@ test('MAX-FULL: revoked viewer loses family access and rejoins with retained his
   await viewerContext.close()
   await usedInviteContext.close()
 })
+
+async function expectInviteReady(page: Page) {
+  await expect(page.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: 'Присоединиться', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Пример семейного альбома' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Посмотреть пример и инструкцию' })).toHaveCount(0)
+}
 
 async function signInMax(page: import('@playwright/test').Page, user: { id: number; first_name: string }, startParam = '') {
   await page.addInitScript((data: string) => {
