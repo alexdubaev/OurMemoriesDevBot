@@ -548,6 +548,37 @@ describe('MAX durable capture', () => {
     expect(responses.filter((response) => response.text === 'С возвращением в memoLy ❤️\nОткройте приложение, чтобы продолжить.')).toHaveLength(1)
   })
 
+  test('configured MAX owner can replay the full welcome on distinct starts and plain private /start without publishing a memory', async () => {
+    const owner = await prisma.user.create({ data: { displayName: 'Synthetic replay owner' } })
+    const subject = '771234567'
+    await prisma.externalIdentity.create({ data: { userId: owner.id, provider: 'max', subject } })
+    const runtime = { prisma, env: { CONTROL_ENABLED: true, CONTROL_OWNER_USER_IDS: [owner.id] } } as unknown as BackendRuntime
+    const process = createMaxTaskProcessor({ runtime, crypto })
+    const sendStart = async (timestamp: number, payload: string | null, messageId?: string) => {
+      const body = messageId
+        ? { update_type: 'message_created', timestamp, message: { sender: { user_id: Number(subject) }, recipient: { chat_id: 900, chat_type: 'dialog', user_id: 900 }, body: { mid: messageId, text: '/start', attachments: [] } } }
+        : { ...botStarted, timestamp, user: { user_id: Number(subject) }, payload }
+      const accepted = await webhook.request('/webhooks/max', { method: 'POST', headers, body: JSON.stringify(body) })
+      expect(accepted.status).toBe(200)
+      const inbox = await prisma.maxInbox.findFirstOrThrow({ orderBy: { receivedAt: 'desc' }, include: { source: true } })
+      const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${inbox.id}` } } })
+      await process(task.payload)
+      return prisma.maxOutgoingResponse.findUniqueOrThrow({ where: { inboxId_kind: { inboxId: inbox.id, kind: 'welcome' } } })
+    }
+    const first = await sendStart(1_757_844_030_001, null)
+    const preview = await sendStart(1_757_844_030_002, 'guide_preview')
+    const command = await sendStart(1_757_844_030_003, null, 'owner-start-command')
+    expect(first.text).toContain('начать вашу семейную историю.')
+    expect(preview.text).toBe(first.text)
+    expect(command.text).toBe(first.text)
+    expect(first.buttons).toEqual({ kind: 'guide_preview' })
+    expect(preview.buttons).toEqual({ kind: 'guide_preview' })
+    expect(command.buttons).toEqual({ kind: 'guide_preview' })
+    expect(await prisma.maxSource.count()).toBe(1)
+    expect(await prisma.maxSource.count({ where: { status: 'denied' } })).toBe(1)
+    expect(await prisma.memory.count()).toBe(0)
+  })
+
   test('browser approval starts preserve the challenge and do not consume ordinary welcome state', async () => {
     const browserPayload = `browser_${'7'.repeat(24)}`
     const browserBody = { ...botStarted, timestamp: 1_757_844_020_001, chat_id: 803, payload: browserPayload }
