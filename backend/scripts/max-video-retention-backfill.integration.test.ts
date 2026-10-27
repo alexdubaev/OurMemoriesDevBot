@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { resolve, sep } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { Client } from 'pg'
+import { loadEnv } from '../src/env'
 import { childrenFixtures } from '../src/test-support/children-fixtures'
 import { createMaxVideoLegacyMigration } from '../src/modules/max/infrastructure/legacy-video-migration'
 import { PrismaMemoryRepository } from '../src/modules/memories'
@@ -227,6 +228,11 @@ import { PrismaMemoryRepository } from '../../src/modules/memories/index.ts'
 import { createMediaTasks } from '../../src/modules/media/index.ts'
 import { createPrivateStorage } from '../../src/storage/index.ts'
 import { taskHandlers } from '../../src/outbox/handlers.ts'
+import { findClaimableTasks } from '../../src/outbox/store.ts'
+import { createMaxAcceptUpdate } from '../../src/modules/max/application/accept-update.ts'
+import { PrismaMaxRepository } from '../../src/modules/max/infrastructure/prisma-max-repository.ts'
+import { createMaxPayloadCrypto } from '../../src/modules/max/infrastructure/payload-crypto.ts'
+import { createMaxTaskProcessor } from '../../src/modules/max/infrastructure/process-task.ts'
 import { randomUUID } from 'node:crypto'
 const [databaseUrl, familyId, memoryId, userId, sourceId, videoId, storageRoot, stoppedInboxId, pilotTaskId] = process.argv.slice(2)
 const env = loadEnv({ DATABASE_URL: databaseUrl, NODE_ENV: 'test', JWT_SECRET: '0123456789abcdef'.repeat(4),
@@ -244,10 +250,22 @@ try {
   const replayedPositionThree = await upsert(3, 'frozen-d299-video-three-replayed')
   const createdPositionFour = await upsert(4, 'frozen-d299-video-four')
   const referenceCount = await prisma.maxVideoReference.count({ where: { sourceId } })
-  const stoppedInbox = await prisma.maxInbox.findUniqueOrThrow({ where: { id: stoppedInboxId } })
+  // Recovery must exercise the actual old worker/ingress path. Old Prisma cannot select a new
+  // enum label, but stopped rows are terminal, have no process task, and are never read by it.
+  const stoppedInbox = await prisma.$queryRaw\`SELECT status::text AS status, event_kind::text AS kind FROM max_inbox WHERE id=\${stoppedInboxId}::uuid\`
   const pilotTask = await prisma.taskOutbox.findUniqueOrThrow({ where: { id: pilotTaskId } })
-  const oldCanReadStoppedEnum = stoppedInbox.eventKind === 'bot_stopped' && stoppedInbox.status === 'processed'
+  const stopEvidencePreserved = stoppedInbox[0]?.kind === 'bot_stopped' && stoppedInbox[0]?.status === 'processed'
   const oldSeesPilotTaskAsUnhandled = pilotTask.type === 'max:notify-pilot' && !Object.hasOwn(taskHandlers, 'max:notify-pilot')
+  const oldClaims = await findClaimableTasks(prisma, { limit: 100, now: new Date(), types: Object.keys(taskHandlers) })
+  const oldDoesNotClaimPilot = !oldClaims.some(row => row.id === pilotTaskId)
+  const identity = await prisma.externalIdentity.findFirstOrThrow({ where: { provider: 'max', userId }, select: { subject: true } })
+  const crypto = createMaxPayloadCrypto('B'.repeat(43))
+  const accepted = await createMaxAcceptUpdate({ botId: '900', repository: new PrismaMaxRepository(prisma), encrypt: crypto.encrypt })({
+    kind: 'bot_started', chatId: '123456789', userId: identity.subject, occurredAt: new Date().toISOString(), payload: null,
+  })
+  const oldStartResult = await createMaxTaskProcessor({ runtime: { prisma }, crypto })({ inboxId: accepted.inboxId })
+  const oldWelcome = await prisma.maxOutgoingResponse.findUniqueOrThrow({ where: { inboxId_kind: { inboxId: accepted.inboxId, kind: 'welcome' } } })
+  const oldProcessesNewStart = oldStartResult === 'done' && oldWelcome.kind === 'welcome'
   const repository = new PrismaMemoryRepository(prisma, createPrismaIdempotencyExecutor(prisma))
   const before = await repository.get(scope, memoryId)
   const updated = await repository.update(scope, memoryId, { expectedVersion: before.version, body: 'edited by frozen d299', occurredAt: before.occurredAt })
@@ -257,7 +275,7 @@ try {
   console.log(JSON.stringify({ attachments: before.attachments.map(({ id, source }) => [id, source]),
     stableReplayId: createdPositionThree.id === replayedPositionThree.id, replayedProviderId: replayedPositionThree.providerAttachmentId,
     createdPositionFour: createdPositionFour.attachmentPosition, referenceCount, editedBody: updated.body, deleted: true,
-    oldCanReadStoppedEnum, oldSeesPilotTaskAsUnhandled }))
+    stopEvidencePreserved, oldSeesPilotTaskAsUnhandled, oldDoesNotClaimPilot, oldProcessesNewStart }))
 } finally { await prisma.$disconnect() }
 `)
       const frozenOutput = checked('frozen d299 performs native composite create/replay and reads, edits, deletes, and runs its media delete task', 'bun', [frozenProbe,
@@ -268,7 +286,7 @@ try {
         [expect.any(String), 'max'], [expect.any(String), 'max'],
       ], stableReplayId: true, replayedProviderId: 'frozen-d299-video-three-replayed', createdPositionFour: 4,
       referenceCount: 4, editedBody: 'edited by frozen d299', deleted: true,
-      oldCanReadStoppedEnum: true, oldSeesPilotTaskAsUnhandled: true })
+      stopEvidencePreserved: true, oldSeesPilotTaskAsUnhandled: true, oldDoesNotClaimPilot: true, oldProcessesNewStart: true })
       expect((await fx.db.taskOutbox.findUniqueOrThrow({ where: { id: queuedPilotTask.id } })).status).toBe('pending')
       const { drainTaskOutbox } = await import('../src/outbox/drain')
       const { taskHandlers: currentTaskHandlers } = await import('../src/outbox/handlers')

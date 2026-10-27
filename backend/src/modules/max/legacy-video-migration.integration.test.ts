@@ -344,7 +344,7 @@ describe('MAX legacy video retention and recovery', () => {
       return new Proxy(fx.db, { get(target, property, receiver) {
         if (property === '$queryRaw') return async (...args: unknown[]) => {
           const call = rawCall++
-          if (call === 0) return [{ migrationLedger: true, familyDeletions: false, storageDeletes: false, purgeFences: false }]
+          if (call === 0) return [{ migrationLedger: true, familyDeletions: false, storageDeletes: false, purgeFences: false, botStopped: false }]
           const result = await Reflect.apply(Reflect.get(target, property, target) as (...items: unknown[]) => Promise<unknown[]>, target, args)
           return call === 1 ? result.slice(0, ledgerLimit) : result
         }
