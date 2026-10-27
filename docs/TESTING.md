@@ -4,6 +4,10 @@ Tests protect observable behavior, access control, data and recovery contracts. 
 implementation rewrite should not require changing assertions about CSS, decorative assets,
 private helpers or SQL call order. Preserve distinct negative and concurrent cases.
 
+For small known low-risk changes, use [the small change workflow](development/SMALL_CHANGE_WORKFLOW.md). The generic verifier remains strict whenever used.
+
+For this path, run one meaningful affected checkset, and after a fix rerun only the affected check. For all other work, the generic verifier remains strict when selected; `--profile` cannot lower its classification. The profile table and journey mapping below describe that general verifier mode, not mandatory additions to a known small change.
+
 ## Local verification profiles
 
 The default command for development and review is:

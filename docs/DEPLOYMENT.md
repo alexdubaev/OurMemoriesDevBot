@@ -31,9 +31,7 @@ backend, worker, scheduler, gateway and database. A strict scope check compares
 against both deployed backend and frontend revisions; unknown or sensitive inputs
 require the normal lane. No backend change alone is not proof of eligibility.
 
-Backend, authentication/session/ACL, API/contracts, private-media lifecycle,
-data/schema, dependencies/build/deploy tooling and uncertain changes still require
-**FULL** on the complete release source tree and the complete normal release guards.
+Actual auth/session/ACL, API/contracts, private-media, data/schema, dependency, or deployment/recovery safety-logic changes require **FULL**. Unresolved unknown risk stops for a concrete ruling. Known small non-protected changes use the documented affected checkset. Full-service release mode is not itself a FULL verification profile; all selected-mode host safeguards remain mandatory.
 Run the selected profile once per complete source tree in the release session. After
 squash, source-bound evidence may transfer to final main only after verifying a clean
 checkout, equal source/merged trees, unchanged comparison bases and scope, and

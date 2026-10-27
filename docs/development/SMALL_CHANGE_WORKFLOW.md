@@ -1,0 +1,15 @@
+# Small change workflow
+
+Use this path when the location is known, the change is bounded, and it needs no product or architecture decision or uncertain ownership. Small work must not change actual auth, session, ACL, persistence, private-media, contract, dependency, deployment, recovery, scope/verifier safety logic, or other protected behavior. Read-only metadata preparation is not a protected logic change. Unresolved uncertainty stops for a concrete ruling; confirmed protected changes use FULL.
+
+One executor may implement an eligible change directly. Leave a short scenario and affected-check note. Skip separate scout, specification, planning document, and worker handoff when the surface is known. Use at most one independent short review when risk warrants it or an actual release gate requires it.
+
+Run one meaningful check set for the affected behavior; after a fix, rerun only the affected check. For example, use `git diff --check` for documentation or passive non-executable text, or the existing focused module/typecheck command for a known isolated code or message-literal change. Do not invent a wrapper or profile to bypass a gate. Generic `verify:local` remains strict when used; do not claim it passed if it was not run or use `--profile` to downgrade it. Docs-only changes need no app tests or deployment.
+
+For release preparation metadata only, the local `teamlead-development/scripts/prepare-selectel-release.mjs` helper accepts `--repo PATH --base FULL_SHA [--candidate FULL_SHA]` (default candidate `HEAD`). It reads the accepted `origin/main` fingerprint function and reports fingerprints and changed blobs/deletions. Its output is not approval, a gate result, a compatibility decision, a patch, or deployment. Actual verifier/scope/recovery/deployment safety logic changes remain protected and require FULL plus relevant proof and review.
+
+For eligible presentation-only UI releases, retain the existing FRONTEND scope, receipts, host lock, disk/source checks, immutable images, and smoke protections. Use exact-tree evidence transfer only where already permitted. Full-service deployment is a release mode, not the FULL verification profile. Recovery, readiness, backup, SQL, and ownership safeguards remain mandatory. Mechanical source binding for an already proven recovery model is evidence metadata and does not authorize guard changes.
+
+Reuse ready services and caches when inputs are unchanged. PostgreSQL tests use a unique `*_test` database and isolated ports/storage. Preserve shared ready servers and clean only task-owned artifacts. On WSL, keep the environment alive before starting a native database, and migrate the test database before starting a fixture web server.
+
+Measure start through confirmed result, including discovery, setup, review, checks, and authorized publication/deployment. Report cleanup/report tail and server-only time separately when useful. Keep handoffs brief; screenshots, matrices, or long reports are needed only when actual acceptance or risk requires them. Historical evidence is not procedural authority.
