@@ -306,8 +306,8 @@ test('Control owner trashes and restores a synthetic account, then confirms only
   await authenticateOwner(page, browser)
   const apiOrigin = new URL(process.env.VITE_API_URL ?? 'http://127.0.0.1:56701').origin
   const maxContext = await browser.newContext()
-  const targetSubject = browserName === 'webkit' ? 987655002 : 987655001
-  const targetName = `Control Delete Target ${browserName}`
+  const targetSubject = 1_000_000_000 + Number.parseInt(randomUUID().replaceAll('-', '').slice(0, 10), 16)
+  const targetName = `Control Delete Target ${browserName} ${targetSubject}`
   const familyName = `${targetName} Family`
   try {
     const targetLogin = await maxContext.request.post(`${apiOrigin}/api/v1/auth/max`, {
