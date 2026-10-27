@@ -13,9 +13,6 @@ export function createPilotNotificationDelivery(options: { prisma: DbClient; con
     return options.prisma.$transaction(async (tx) => {
       // Serializes this pilot's dialog across workers and spaces messages below MAX's 2/s limit.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`max-pilot:${input.identityId}`}, 0))`
-      await tx.$queryRaw`SELECT id FROM families WHERE id=${input.familyId}::uuid FOR SHARE`
-      await tx.$queryRaw`SELECT user_id FROM family_members WHERE family_id=${input.familyId}::uuid AND user_id=${options.config.CONTROL_OWNER_USER_IDS[0]}::uuid FOR SHARE`
-      await tx.$queryRaw`SELECT id FROM external_identities WHERE id=${input.identityId}::uuid FOR SHARE`
       const recipient = await pilotRecipient(tx, options.config, input.familyId)
       if (!recipient || recipient.id !== input.identityId || pilotSubjectHash(recipient.subject) !== input.subjectHash || recipient.botId !== input.botId || recipient.membershipEpoch !== input.membershipEpoch) return 'skipped'
       let text: string
@@ -41,7 +38,9 @@ export function createPilotNotificationDelivery(options: { prisma: DbClient; con
         if (!bot.isBot || String(bot.userId) !== recipient.botId || bot.username.toLowerCase() !== options.config.MAX_BOT_EXPECTED_USERNAME!.toLowerCase()) return 'skipped'
         await tx.$executeRaw`SELECT pg_sleep(0.55)`
         // Recheck stop state after provider identity lookup/delay, immediately before the send.
-        if (!await pilotRecipient(tx, options.config, input.familyId)) return 'skipped'
+        const current = await pilotRecipient(tx, options.config, input.familyId)
+        if (!current || current.id !== recipient.id || current.subject !== recipient.subject ||
+          current.botId !== recipient.botId || current.membershipEpoch !== recipient.membershipEpoch) return 'skipped'
         await options.api.sendMessage({ userId: recipient.subject, text,
           buttons: [{ type: 'open_app', text: 'Открыть memoLy', webApp: options.config.MAX_BOT_EXPECTED_USERNAME! }] }, signal)
       } catch (error) {

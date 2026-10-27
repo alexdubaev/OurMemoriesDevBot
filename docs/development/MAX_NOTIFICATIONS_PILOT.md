@@ -31,8 +31,9 @@ webhook acceptance, before acknowledgment, with a hashed recipient correlation a
 there is no outgoing response. The webhook subscription must include `bot_stopped`. Started/stopped
 event times prevent a stale start redelivery from reopening delivery after a stop. A fresh successful
 start can reopen it. The worker verifies the actual MAX bot identity, active membership and stop
-state immediately before sending. Family/member/identity locks protect against access revocation
-during delivery. Pilot messages are serialized and spaced by at least 550 ms across workers.
+state immediately before sending. The READ COMMITTED recheck observes revocation or identity changes
+committed during provider lookup. Family writes remain available during MAX outages; only pilot
+deliveries share the dialog advisory lock. Messages are spaced by at least 550 ms across workers.
 
 Temporary MAX/429 failures use existing Outbox retries and Retry-After; blocked/unsupported recipients
 are terminal skips. Terminal task payloads are redacted by the existing Outbox. A successful MAX API

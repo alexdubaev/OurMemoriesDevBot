@@ -597,6 +597,47 @@ describe('MAX notification pilot PostgreSQL integration', () => {
     expect(sends).toBe(1)
   })
 
+  test('a MAX outage cannot block a concurrent family publication', async () => {
+    await engage()
+    const publisher = createSourceMemoryPublisher(prisma, await access(), pilotConfig())
+    const scope = { familyId, principal: { userId: ownerId, sessionId } }
+    await publisher.publish(scope, { id: randomUUID(), kind: 'note', body: 'First', occurredAt: new Date(), mediaIds: [] })
+    const [intent] = await outboxForFamily()
+    let enter!: () => void
+    let release!: () => void
+    const entered = new Promise<void>((resolve) => { enter = resolve })
+    const providerWait = new Promise<void>((resolve) => { release = resolve })
+    const api = fakeApi({ onGetMe: async () => { enter(); await providerWait } })
+    const delivery = createPilotNotificationDelivery({ prisma, config: pilotConfig(), api })(intent!.payload)
+    await entered
+    const secondId = randomUUID()
+    const saving = publisher.publish(scope, { id: secondId, kind: 'note', body: 'Concurrent', occurredAt: new Date(), mediaIds: [] })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let state: string
+    try {
+      state = await Promise.race([saving.then(() => 'saved'), new Promise<string>((resolve) => { timer = setTimeout(() => resolve('blocked'), 1_500) })])
+    } finally { if (timer) clearTimeout(timer); release() }
+    await Promise.all([delivery, saving])
+    expect(state!).toBe('saved')
+    expect(await prisma.memory.findUniqueOrThrow({ where: { id: secondId }, select: { status: true } })).toEqual({ status: 'published' })
+    expect(await outboxForFamily()).toHaveLength(2)
+  })
+
+  test('revocation during MAX identity lookup is observed immediately before delivery', async () => {
+    await engage()
+    const publisher = createSourceMemoryPublisher(prisma, await access(), pilotConfig())
+    await publisher.publish({ familyId, principal: { userId: ownerId, sessionId } }, {
+      id: randomUUID(), kind: 'note', body: 'Revoke during lookup', occurredAt: new Date(), mediaIds: [],
+    })
+    const [intent] = await outboxForFamily()
+    let sends = 0
+    const api = fakeApi({ onGetMe: async () => {
+      await prisma.familyMember.update({ where: { familyId_userId: { familyId, userId: ownerId } }, data: { revokedAt: new Date() } })
+    }, onSend: async () => { sends++ } })
+    expect(await createPilotNotificationDelivery({ prisma, config: pilotConfig(), api })(intent!.payload)).toBe('skipped')
+    expect(sends).toBe(0)
+  })
+
   test('outbox retries a 429, then records the successful provider delivery in PostgreSQL', async () => {
     await engage()
     const publisher = createSourceMemoryPublisher(prisma, await access(), pilotConfig())
