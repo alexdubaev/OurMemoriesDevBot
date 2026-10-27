@@ -1200,7 +1200,7 @@ its local tests do not authorize a production release.
 ### Local release metadata preparation
 
 The owner-only MAX notification pilot uses executable compatibility fingerprint
-`eb5d6a8dad88a71476d36263a03ec8f79c1948662dcf10b413ba1b8f55814423`, bound to the
+`5ba0f03f8a30fee1a4e25d6531b52c3d6fac46f0b363bd317cd07430f01bb07d`, bound to the
 existing `d2999cca6e4e5980cc2277de7453440353f5b392` backend/webapp recovery images,
 runtime fingerprint and filesystem/Control/legacy-video guards. Its only new SQL is
 the additive `20261027210000_max_bot_stopped` enum migration. The exact ledger gate

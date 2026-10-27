@@ -2943,7 +2943,7 @@ test('notification pilot retains only the exact measured d299 filesystem recover
     ['backend/src/modules/max/application/event-key.ts', 'b19353b7b14aab06fe984b57d0b6b6da183d763e'],
     ['backend/src/modules/max/application/ports.ts', 'c1ee5522ab8ebbe79c3d1f2385e6ef03f2a3a98d'],
     ['backend/src/modules/max/index.ts', 'c6b226860ca40b75e04178b1fd2eed5b8fae95ca'],
-    ['backend/src/modules/max/infrastructure/deliver-pilot-notification.ts', '5f536ff604bdd629125dd0c0fdec3250b29d8971'],
+    ['backend/src/modules/max/infrastructure/deliver-pilot-notification.ts', '4e122b2d10823dc7dec530b19661a28d7a536bec'],
     ['backend/src/modules/max/infrastructure/legacy-video-migration.ts', 'ee43d7cd562463343abae068fa82fd1ee1c22b5b'],
     ['backend/src/modules/max/infrastructure/max-api.ts', 'a38de570142bb3070de54ca42f0db1beaeee2125'],
     ['backend/src/modules/max/infrastructure/prisma-max-repository.ts', '76fea79235df414aa4d761dae4961d17106d458b'],
@@ -2964,7 +2964,7 @@ test('notification pilot retains only the exact measured d299 filesystem recover
   if (added.status !== 0) throw new Error(added.stdout + added.stderr)
   fixtureWorktrees.push(directory)
   const source = commitFrozenSourceFiles({ root: directory, sha: baseline }, blobs, 'freeze notification pilot production inputs')
-  assert.equal(productionCompatibilityFingerprint(source.root), 'eb5d6a8dad88a71476d36263a03ec8f79c1948662dcf10b413ba1b8f55814423')
+  assert.equal(productionCompatibilityFingerprint(source.root), '5ba0f03f8a30fee1a4e25d6531b52c3d6fac46f0b363bd317cd07430f01bb07d')
   const profile = (candidate, driver = 'filesystem', target = maxVideoRecoveryBackend) => spawnSync(bashExecutable, ['-s'], {
     cwd: root, encoding: 'utf8', timeout: 30_000,
     input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\ncompose() { [ '${driver}' = filesystem ]; }\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
