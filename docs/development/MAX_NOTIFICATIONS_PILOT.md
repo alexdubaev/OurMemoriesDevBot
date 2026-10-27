@@ -69,7 +69,7 @@ Task `MEMOLY-MAX-NOTIFICATIONS-PILOT`; base `7032652dff512c28e0cf52f6c5e20fd9b00
 branch `feat/memoly-max-notifications-pilot`; isolated worktree
 `D:/codex/TG_OurMemoriesDevBot/worktrees/memoly-max-notifications-pilot`.
 Allowed scope: notification helper/delivery, album/publication/MAX composition, Outbox handler,
-MAX stop ingress/enum migration, affected tests, public env example and these operating notes.
+MAX stop ingress/enum migration, affected tests, exact recovery-source/ledger registration and these operating notes.
 Dependencies, auth mechanisms, family ACL rules and UI remain outside scope.
 
 Development checks: focused real PostgreSQL endpoint/publisher/worker tests, affected MAX capture and
