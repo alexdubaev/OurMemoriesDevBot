@@ -119,7 +119,7 @@ test('MAX authenticated album cover choices save and complete the picker', async
   page.on('console', (message) => {
     const text = message.text()
     let pathname = ''
-    try { pathname = new URL(message.location().url).pathname } catch {}
+    try { pathname = new URL(message.location().url).pathname } catch { pathname = '' }
     const expectedControlProbe = pathname === '/api/v1/control/me' &&
       text === 'Failed to load resource: the server responded with a status of 403 (Forbidden)'
     if (message.type() === 'error' && !text.includes('status of 503 (Service Unavailable)') && !expectedControlProbe) {
