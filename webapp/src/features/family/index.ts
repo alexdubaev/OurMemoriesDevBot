@@ -1,5 +1,4 @@
 export { FamilyOnboarding } from './FamilyOnboarding'
-export { FamilyGuide, FamilyGuideEntry } from './FamilyGuide'
 export { FamilyScreen } from './FamilyScreen'
 export { FamilyHubPage, FamilySummaryCard } from './FamilyHubPage'
 export { ChildProfile } from './ChildProfile'
