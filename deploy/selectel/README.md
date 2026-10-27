@@ -591,6 +591,9 @@ source (1 test, 0 failures, 5 assertions). Both exact source profiles retain
 the same target pin, host-input checks, 59–62 migration ledger validation,
 recovery readiness, and data safeguards.
 
+The LF/CRLF-compatible recovery source was later proven at `a6fc2b4ecdb0b2886b80a0f201edb74f0ad0f424`, with executable compatibility fingerprint
+`ca18410eb5ba4bfaf124251863c4167e68b44549cd013bf39cd73ff5a3daabcc`. Its native PostgreSQL current → d299 → current matrix passed (2 tests, 0 failures, 22 assertions), covering both the all-LF prefix and the historical mixed prefix (24 CRLF, 35 LF). The original 59 ledger rows remained unchanged; SQL-byte drift was rejected. The profile keeps the same d299 target, filesystem driver requirement, host-input checks, and recovery safeguards.
+
 Grace-trashed archives still require their original objects and normal MAX
 metadata recovery. Only a durable irreversible deletion intent for an inactive
 family is excluded from that inverse. Recovery refuses an unfinished intent

@@ -2834,44 +2834,59 @@ test('MAX video retirement historical source remains frozen and accepts only its
   assert.notEqual(rejected.status, 0, 'MAX retirement recovery must reject changed executable input')
 })
 
-test('MAX video retirement accepts only the frozen current filesystem profile and rejects backend or UI drift', {
+test('MAX video retirement accepts only frozen current filesystem profiles and rejects backend or UI drift', {
   timeout: process.platform === 'win32' ? 240_000 : 90_000,
 }, () => {
   const target = maxVideoRecoveryBackend
   const baseline = '6160b5ac6cc5d5c9661d90b7328c4f78e0361141'
-  const expectedCompatibility = '4e1ba54ea6c8f0df481d8adfc5d75378c0545d21922170cb3184551b96d4c02d'
   assert.equal(productionRuntimeFingerprint(root, target), maxVideoRecoveryRuntime)
-  const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-retirement-current-'))
-  const sourceAdded = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
-  if (sourceAdded.status !== 0) throw new Error(sourceAdded.stdout + sourceAdded.stderr)
-  fixtureWorktrees.push(sourceDirectory)
-  const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline },
-    reviewedControlDeletionRecoveryProductionBlobs, 'freeze current Control retirement production inputs')
-  assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
-
   const profile = (candidate, storageDriver = 'filesystem') => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
     input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\ncompose() { [[ "$*" == *'loadEnv(process.env)'* && "$*" == *'PRIVATE_STORAGE_DRIVER'* ]] || return 63; [ "\${MOCK_EFFECTIVE_STORAGE_DRIVER:-}" = filesystem ]; }\nMOCK_EFFECTIVE_STORAGE_DRIVER=${storageDriver}\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
     encoding: 'utf8', timeout: 30_000,
   })
-  const accepted = profile(source)
-  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
-  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
-  const s3Rejected = profile(source, 's3')
-  assert.notEqual(s3Rejected.status, 0, 'MAX retirement recovery must reject an effective S3 storage driver')
 
-  for (const [relativePath, marker] of [
-    ['backend/src/modules/control/infrastructure/control-purge.ts', '\n// synthetic MAX retirement backend drift\n'],
-    ['webapp/src/features/family/FamilyGuide.tsx', '\n// synthetic MAX retirement UI drift\n'],
-  ]) {
-    const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-retirement-current-drift-'))
-    const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
-    if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
-    fixtureWorktrees.push(driftDirectory)
-    const mutated = commitSourceChange({ root: driftDirectory, sha: source.sha }, relativePath, marker,
-      `mutate current retirement production input ${relativePath}`)
-    const rejected = profile(mutated)
-    assert.notEqual(rejected.status, 0, `MAX retirement recovery must reject changed production input: ${relativePath}`)
+  const profiles = [
+    {
+      expectedCompatibility: '4e1ba54ea6c8f0df481d8adfc5d75378c0545d21922170cb3184551b96d4c02d',
+      blobs: reviewedControlDeletionRecoveryProductionBlobs,
+      label: 'historical frozen Control retirement inputs',
+    },
+    {
+      expectedCompatibility: 'ca18410eb5ba4bfaf124251863c4167e68b44549cd013bf39cd73ff5a3daabcc',
+      blobs: [...reviewedControlDeletionRecoveryProductionBlobs,
+        ['backend/src/modules/max/infrastructure/legacy-video-migration.ts', '69273f6e615df48ac3e0968ff8e7d7e8191f4902']],
+      label: 'LF/CRLF-compatible recovery inputs',
+    },
+  ]
+
+  for (const { expectedCompatibility, blobs, label } of profiles) {
+    const sourceDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-retirement-current-'))
+    const sourceAdded = spawnSync('git', ['worktree', 'add', '--detach', sourceDirectory, baseline], { cwd: root, encoding: 'utf8' })
+    if (sourceAdded.status !== 0) throw new Error(sourceAdded.stdout + sourceAdded.stderr)
+    fixtureWorktrees.push(sourceDirectory)
+    const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, blobs, `freeze ${label}`)
+    assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility, label)
+
+    const accepted = profile(source)
+    assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+    assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
+    const s3Rejected = profile(source, 's3')
+    assert.notEqual(s3Rejected.status, 0, 'MAX retirement recovery must reject an effective S3 storage driver')
+
+    for (const [relativePath, marker] of [
+      ['backend/src/modules/control/infrastructure/control-purge.ts', '\n// synthetic MAX retirement backend drift\n'],
+      ['webapp/src/features/family/FamilyGuide.tsx', '\n// synthetic MAX retirement UI drift\n'],
+    ]) {
+      const driftDirectory = mkdtempSync(resolve(root, '.scratch', 'rollback-max-retirement-current-drift-'))
+      const driftAdded = spawnSync('git', ['worktree', 'add', '--detach', driftDirectory, source.sha], { cwd: root, encoding: 'utf8' })
+      if (driftAdded.status !== 0) throw new Error(driftAdded.stdout + driftAdded.stderr)
+      fixtureWorktrees.push(driftDirectory)
+      const mutated = commitSourceChange({ root: driftDirectory, sha: source.sha }, relativePath, marker,
+        `mutate current retirement production input ${relativePath}`)
+      const rejected = profile(mutated)
+      assert.notEqual(rejected.status, 0, `MAX retirement recovery must reject changed production input: ${relativePath}`)
+    }
   }
 })
 
