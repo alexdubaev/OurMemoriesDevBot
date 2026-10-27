@@ -1557,6 +1557,7 @@ enum MaxSourceAttachmentStatus {
 enum MaxInboxEventKind {
   message_created
   bot_started
+  bot_stopped
   family_choice
   bot_added
   bot_removed

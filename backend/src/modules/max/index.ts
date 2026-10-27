@@ -31,6 +31,7 @@ import { createMaxPosterDownload } from './infrastructure/media-download'
 import type { MaxChannelAvatarContent } from './transport/channel-avatar-routes'
 import type { FamilyScope } from '../families'
 export { createMaxVideoLegacyMigration } from './infrastructure/legacy-video-migration'
+export { createPilotNotificationDelivery } from './infrastructure/deliver-pilot-notification'
 
 export { createMaxVideoPlayback }
 
@@ -57,7 +58,7 @@ export function createMaxModule(options: {
     access,
     api,
     repository: new PrismaMaxDirectUploadRepository(options.runtime.prisma),
-    publisher: createSourceMemoryPublisher(options.runtime.prisma, access),
+    publisher: createSourceMemoryPublisher(options.runtime.prisma, access, env),
     memoryReader: new PrismaMemoryRepository(options.runtime.prisma, createPrismaIdempotencyExecutor(options.runtime.prisma)),
     enqueueVideoPoster: enqueueMaxVideoPoster,
   })

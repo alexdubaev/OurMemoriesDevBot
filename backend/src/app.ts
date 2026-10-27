@@ -90,6 +90,7 @@ export function createApp({
     requireAuth: auth.requireAuth,
     mediaCatalog: createMediaMemoryCatalog((scope, ids) => media.service.assertReadyForMemory(scope, ids)),
     telegramBotUsername: env.TELEGRAM_BOT_EXPECTED_USERNAME,
+    notificationPilot: env,
   })
   const gifts = createGiftsModule({
     db: prisma,
@@ -99,7 +100,7 @@ export function createApp({
     requireAuth: auth.requireAuth,
     ...(giftMetadataProvider ? { metadataProvider: giftMetadataProvider } : {}),
   })
-  const albums = createAlbumsModule({ db: prisma, idempotencyExecutor, idempotencySecret: env.JWT_SECRET, requireAuth: auth.requireAuth })
+  const albums = createAlbumsModule({ db: prisma, idempotencyExecutor, idempotencySecret: env.JWT_SECRET, requireAuth: auth.requireAuth, notificationPilot: env })
   const adminUsersReadRateLimit = createFixedWindowRateLimit<AuthHttpEnv>({
     errorMessage: 'Слишком много запросов. Попробуйте позже',
     key: (c) => c.var.user.id,

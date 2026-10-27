@@ -19,7 +19,7 @@ const unsupportedText = 'Получено. Медиа пока не поддер
 export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api: MaxApiPort }) {
   const { prisma } = options.runtime
   const access = createPrismaFamilyAccess(prisma)
-  const publisher = createSourceMemoryPublisher(prisma, access)
+  const publisher = createSourceMemoryPublisher(prisma, access, options.runtime.env)
 
   return async (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal;
     verifiedMessage?: Awaited<ReturnType<MaxApiPort['getMessage']>>; verifiedChannelId?: bigint }): Promise<'done' | 'skipped'> => {

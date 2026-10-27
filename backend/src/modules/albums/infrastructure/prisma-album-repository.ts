@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { enqueuePilotNotification, type MaxNotificationPilot } from '../../../max-notifications-pilot'
 import type {
   AlbumDatePrecision,
   AlbumEntryKind,
@@ -39,6 +40,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
     private readonly db: DbClient,
     private readonly idempotency: IdempotencyExecutor<PrismaTransactionClient>,
     private readonly sourceCatalog: AlbumSourceCatalog,
+    private readonly notificationPilot?: MaxNotificationPilot,
   ) {}
 
   async listAlbums(scope: FamilyScope, input: { kind?: AlbumKind; filter: 'all' | 'template' | 'custom'; childId?: string; limit: number; before?: AlbumCursor }) {
@@ -181,6 +183,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
 
   async createEntry(scope: FamilyScope, albumId: string, input: CreateAlbumEntryRequest, key: string, payloadHash: string) {
     const sourceCatalog = this.sourceCatalog
+    const notificationPilot = this.notificationPilot
     const result = await this.idempotency.run<{ entryId: string; reused: boolean }>({
       actorUserId: scope.principal.userId, operation: `albums:${albumId}:entries:create`, key, payloadHash, now: new Date(),
       payloadConflict: () => idempotencyConflict(),
@@ -213,6 +216,8 @@ export class PrismaAlbumRepository implements AlbumRepository {
           sourceKind: source.sourceKind as AlbumEntrySourceKind, sourceId: source.sourceId, kind: source.kind as AlbumSourceMediaKind, position,
         })) })
         await tx.album.update({ where: { id: albumId }, data: { version: { increment: 1 } } })
+        await enqueuePilotNotification(tx, notificationPilot, { kind: 'album', familyId: scope.familyId, albumId,
+          entryId: entry.id, eventId: `create:${entry.id}`, photoCount: resolved.filter(({ kind }) => kind === 'photo').length })
         return { resourceId: entry.id, response: { entryId: entry.id, reused: false }, responseSnapshot: { entryId: entry.id } }
       },
     })
@@ -288,6 +293,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
 
   async setSources(scope: FamilyScope, albumId: string, entryId: string, input: AlbumSourceSelection, key: string, payloadHash: string) {
     const sourceCatalog = this.sourceCatalog
+    const notificationPilot = this.notificationPilot
     const result = await this.idempotency.run<{ entryId: string }>({
       actorUserId: scope.principal.userId, operation: `albums:${albumId}:entries:${entryId}:sources`, key, payloadHash, now: new Date(),
       payloadConflict: () => idempotencyConflict(),
@@ -334,10 +340,12 @@ export class PrismaAlbumRepository implements AlbumRepository {
       if (album.kind === 'workshop' && resolved.length === 0) throw new AlbumFailure('invalid_input', 'Для работы добавьте хотя бы одно фото')
       await tx.albumEntry.update({ where: { id: entryId }, data: { version: { increment: 1 } } })
       await tx.album.update({ where: { id: albumId }, data: { version: { increment: 1 } } })
-      await tx.albumSourceOperation.create({ data: {
+      const operation = await tx.albumSourceOperation.create({ data: {
         familyId: scope.familyId, albumId, entryId, actorUserId: scope.principal.userId,
         operation: 'set_sources', requestId: key, payloadHash,
       } })
+      await enqueuePilotNotification(tx, notificationPilot, { kind: 'album', familyId: scope.familyId, albumId, entryId,
+        eventId: `sources:${operation.id}`, photoCount: resolved.filter((source) => source.kind === 'photo' && !byKey.has(keyOf(source))).length })
       return { resourceId: entryId, response: { entryId }, responseSnapshot: { entryId } }
     },
     })

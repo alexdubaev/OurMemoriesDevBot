@@ -15,6 +15,7 @@ import { Prisma } from '../../../generated/prisma/client'
 
 import type { DbClient } from '../../../db'
 import { insertTask } from '../../../outbox/store'
+import { enqueuePilotNotification, type MaxNotificationPilot } from '../../../max-notifications-pilot'
 import type {
   IdempotencyExecutor,
   JsonObject,
@@ -39,6 +40,7 @@ export class PrismaMemoryRepository implements MemoryRepository {
   constructor(
     private readonly db: DbClient,
     private readonly idempotency: IdempotencyExecutor<PrismaTransactionClient>,
+    private readonly notificationPilot?: MaxNotificationPilot,
   ) {}
 
   async addPublicationAttribution(scope: FamilyScope, memories: MemoryDto[], includeChannelAvatar = false): Promise<MemoryDto[]> {
@@ -298,6 +300,7 @@ export class PrismaMemoryRepository implements MemoryRepository {
           where: { id: created.id }, include: memoryInclude(),
         })
         const response = dto(memory, scope.principal.userId, role)
+        await enqueuePilotNotification(tx, this.notificationPilot, { kind: 'feed', familyId: scope.familyId, memoryId: created.id })
         return {
           resourceId: created.id,
           response,

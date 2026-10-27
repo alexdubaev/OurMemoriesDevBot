@@ -25,10 +25,17 @@ export function normalizeMaxUpdate(input: unknown, rawBody?: string): MaxMappedU
     }
     return { kind: input.update_type, rawPayload: rawBody }
   }
-  if (input.update_type !== 'message_created' && input.update_type !== 'bot_started' && input.update_type !== 'message_callback') return { kind: 'ignored' }
+  if (input.update_type !== 'message_created' && input.update_type !== 'bot_started' && input.update_type !== 'bot_stopped' && input.update_type !== 'message_callback') return { kind: 'ignored' }
   const timestamp = input.timestamp
   if (!isNonNegativeSafeInteger(timestamp)) throw new Error('Invalid MAX timestamp')
   const occurredAt = new Date(timestamp).toISOString()
+  if (input.update_type === 'bot_stopped') {
+    const raw = rawBody ?? JSON.stringify(input)
+    const userId = readMaxInt64AtPath(raw, ['user', 'user_id'])
+    const chatId = readMaxInt64AtPath(raw, ['chat_id'])
+    if (userId === null || userId <= 0n || chatId === null || chatId <= 0n) throw new Error('Invalid MAX bot_stopped update')
+    return { kind: 'bot_stopped', chatId: chatId.toString(), userId: userId.toString(), occurredAt, payload: null }
+  }
   if (input.update_type === 'bot_started') return normalizeBotStarted(input, occurredAt)
   if (input.update_type === 'message_callback') return normalizeChoiceCallback(input, occurredAt)
   return normalizeMessage(input, occurredAt, rawBody)

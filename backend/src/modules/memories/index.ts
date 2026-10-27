@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono'
 
 import type { DbClient } from '../../db'
+import type { MaxNotificationPilot } from '../../max-notifications-pilot'
 import type { IdempotencyExecutor, PrismaTransactionClient } from '../../idempotency'
 import type { AuthHttpEnv } from '../auth'
 import type { FamilyAccess } from '../families'
@@ -31,6 +32,7 @@ export function createMemoriesModule({
   requireAuth,
   mediaCatalog = unavailableMediaMemoryCatalog,
   telegramBotUsername,
+  notificationPilot,
 }: {
   db: DbClient
   familyAccess: FamilyAccess
@@ -39,8 +41,9 @@ export function createMemoriesModule({
   requireAuth: MiddlewareHandler<AuthHttpEnv>
   mediaCatalog?: MediaMemoryCatalog
   telegramBotUsername: string
+  notificationPilot?: MaxNotificationPilot
 }) {
-  const repository = new PrismaMemoryRepository(db, idempotencyExecutor)
+  const repository = new PrismaMemoryRepository(db, idempotencyExecutor, notificationPilot)
   const service = new MemoryService(familyAccess, repository, mediaCatalog, idempotencySecret)
   const telegramVideoDelivery = new TelegramVideoDeliveryService(db, familyAccess, telegramBotUsername)
   const commentService = new CommentService(familyAccess, new PrismaCommentRepository(db, idempotencyExecutor), idempotencySecret)

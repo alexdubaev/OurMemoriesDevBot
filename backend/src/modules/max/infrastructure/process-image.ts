@@ -35,7 +35,7 @@ export function createMaxImageProcessor(options: {
 }) {
   const prisma = options.runtime.prisma
   const access = createPrismaFamilyAccess(prisma)
-  const publisher = createSourceMemoryPublisher(prisma, access)
+  const publisher = createSourceMemoryPublisher(prisma, access, options.runtime.env)
   const process = async (input: { inboxId: string; sourceId: string; event: Extract<MaxInboundEvent, { kind: 'message_created' }>; signal?: AbortSignal;
     verifiedMessage?: Awaited<ReturnType<MaxApiPort['getMessage']>>; verifiedChannelId?: bigint }): Promise<'done' | 'skipped'> => {
     const source = await prisma.maxSource.findUnique({ where: { id: input.sourceId }, include: { attachments: true } })

@@ -16,6 +16,17 @@ export type TaskHandlerRegistry = Record<string, TaskHandlerEntry>
  * `await import()` inside `run`, which also keeps a module out of the runs that do not use it.
  */
 export const taskHandlers = {
+  'max:notify-pilot': {
+    maxAttempts: 5,
+    deadlineMs: 45_000,
+    retryDelayMs: providerRetryDelay,
+    run: async ({ payload, signal }, runtime) => {
+      const { createPilotNotificationDelivery, createMaxApi } = await import('../modules/max')
+      if (!runtime.env.MAX_BOT_TOKEN) return 'skipped'
+      return createPilotNotificationDelivery({ prisma: runtime.prisma, config: runtime.env,
+        api: createMaxApi(runtime.env.MAX_BOT_TOKEN) })(payload, signal)
+    },
+  },
   'max:process': {
     maxAttempts: 5,
     deadlineMs: 15 * 60_000,
