@@ -118,7 +118,7 @@ test('MAX authenticated album cover choices save and complete the picker', async
   await expect.poll(() => familyId).not.toBe('')
   page.on('console', (message) => {
     const text = message.text()
-    let pathname = ''
+    let pathname: string
     try { pathname = new URL(message.location().url).pathname } catch { pathname = '' }
     const expectedControlProbe = pathname === '/api/v1/control/me' &&
       text === 'Failed to load resource: the server responded with a status of 403 (Forbidden)'
