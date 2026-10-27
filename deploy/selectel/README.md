@@ -25,15 +25,15 @@ apply migrations, create a database dump or rewrite `rollback.env`.
 
 Eligibility is checked against **both actual running backend and webapp commits**,
 not only the last merged PR. One shared fail-closed interpreter classifies paths
-and reviews exact base-to-candidate ranges. Unknown paths, backend/schema/contracts,
+and reviews exact base-to-candidate ranges. Unresolved unknown paths stop for a ruling. Actual backend/schema/contracts,
 authentication/session/ACL, private media/lifecycle, API/platform/offline/cache,
-dependencies, build and deploy inputs require the normal full release. Every R
+actual dependency/build/deploy safety-logic changes require the normal full release. Read-only metadata preparation does not change release guards. Every R
 range must have an independent report and receipt binding its base SHA, candidate
 tree, NUL-delimited no-rename Git diff hash (paths, modes and full old/new blob
 IDs) and policy hash. The candidate tree and blob IDs bind the complete contents.
 The report reviews changed
 hunks, imports/interfaces/contracts, auth/access/media/storage/lifecycle, API and
-business rules, and backend compatibility; uncertainty means FULL. Same-file
+business rules, and backend compatibility; unresolved uncertainty stops for a ruling; confirmed protected risk requires FULL. Same-file
 sensitive hunks make that range ineligible. Do not add temporary policy exceptions
 to shorten one release. This lane's own implementation and policy changes require
 FULL and independent review.
@@ -316,7 +316,7 @@ The running service SHA may intentionally lag the checkout SHA after documentati
 only changes. Promote images only when their exact SHA has been accepted for a
 release; do not use `latest`.
 
-Before PR merge, run the applicable risk profile once on the complete source tree and record source SHA/tree, comparison bases, commands, result and environment. After squash, transfer source-bound evidence only when the clean complete source and final trees, bases, scope and dependency/environment inputs match and no errors or review findings remain; record the final SHA/tree and equality check without calling it a rerun. Repeat affected checks when evidence or inputs differ. The main/master pre-push hook runs risk-based verification against the remote SHA; PR merge does not invoke local hooks. Eligible reviewed client-UI production releases use FRONTEND under the owner policy of 2026-10-22 and the short procedure below. All other runtime releases require FULL on the complete release source tree, including all changes since the deployed version, and the complete backup/migration/readiness/recovery guards. Production deployment is a separate manual operation under standing owner authorization unless the task limits it. For the normal full release, confirm the accepted clean SHA,
+Use [the small change workflow](../../docs/development/SMALL_CHANGE_WORKFLOW.md) for known small tasks; protected release changes retain the following exact-source release gates. Before PR merge, run the applicable risk profile once on the complete source tree and record source SHA/tree, comparison bases, commands, result and environment. After squash, transfer source-bound evidence only when the clean complete source and final trees, bases, scope and dependency/environment inputs match and no errors or review findings remain; record the final SHA/tree and equality check without calling it a rerun. Repeat affected checks when evidence or inputs differ. The main/master pre-push hook runs risk-based verification against the remote SHA; PR merge does not invoke local hooks. Eligible reviewed client-UI production releases use FRONTEND under the owner policy of 2026-10-22 and the short procedure below. Actual protected runtime/safety-logic releases require FULL on the complete release source tree, including all changes since the deployed version. Known small non-protected changes use their documented affected checkset before merge. Every actual deployment still runs the complete guards required by its chosen release mode; unknown unresolved risk stops. Production deployment is a separate manual operation under standing owner authorization unless the task limits it. For the normal full release, confirm the accepted clean SHA,
 then invoke the reviewed host entry point:
 
 ```sh
@@ -1195,3 +1195,8 @@ image, configuration and forward-only safeguards remain mandatory.
 Incident evidence and limits of historical logs are in the single
 [postmortem](../../docs/RELEASE_POSTMORTEM_2026-10-21.md). This documentation and
 its local tests do not authorize a production release.
+
+
+### Local release metadata preparation
+
+For review preparation only, the local `teamlead-development` skill includes `scripts/prepare-selectel-release.mjs` (use the installed skill path). Example: `node <skill-path>/scripts/prepare-selectel-release.mjs --repo <checkout> --base <full-base-sha> [--candidate <full-candidate-sha>]`. The helper reads the accepted `origin/main` fingerprint function and produces exact source-bound metadata without modifying Git or touching the host. Its output is preparation only: it is not approval, a gate, a patch, a deployment, or a compatibility decision. All existing review and release safeguards still apply.

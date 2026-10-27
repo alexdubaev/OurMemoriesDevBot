@@ -45,6 +45,6 @@ AI, распознавание речи, чтение групп, подборк
 Канонический GitHub repository — `alexdubaev/OurMemoriesDevBot`; точные remotes и безопасный bootstrap описаны в [REPOSITORY.md](REPOSITORY.md). `di-sukharev/vibe` никогда не является push-origin продукта.
 
 
-Порядок параллельных работ: [PARALLEL_WORK.md](PARALLEL_WORK.md). Правила веток — [корневой AGENTS.md](../../AGENTS.md). Все новые иконки — собственные WebP RGBA; старое упоминание SVG-иконок больше не действует. См. [ASSET_GUIDE.md](ASSET_GUIDE.md) и [референсы](../../references/INDEX.md).
+Для известных малых изменений см. [малый workflow](../development/SMALL_CHANGE_WORKFLOW.md). Порядок параллельных работ: [PARALLEL_WORK.md](PARALLEL_WORK.md). Правила веток — [корневой AGENTS.md](../../AGENTS.md). Все новые иконки — собственные WebP RGBA; старое упоминание SVG-иконок больше не действует. См. [ASSET_GUIDE.md](ASSET_GUIDE.md) и [референсы](../../references/INDEX.md).
 
 Для медиа действует отдельный принцип: **не писать собственный проигрыватель как media engine**. В Mini App декодирование, buffering, play/pause и seek выполняет стандартный HTML5 `HTMLMediaElement` (`<video>`/`<audio>`), а мы создаём только визуальные React-контролы в стиле продукта. В чате Telegram остаётся нативный проигрыватель Telegram; Mini App не пытается его встраивать.
