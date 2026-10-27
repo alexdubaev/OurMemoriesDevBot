@@ -563,6 +563,7 @@ describe('MAX durable capture', () => {
       const inbox = await prisma.maxInbox.findFirstOrThrow({ orderBy: { receivedAt: 'desc' }, include: { source: true } })
       const task = await prisma.taskOutbox.findUniqueOrThrow({ where: { type_dedupeKey: { type: 'max:process', dedupeKey: `max-process:${inbox.id}` } } })
       await process(task.payload)
+      await process(task.payload)
       return prisma.maxOutgoingResponse.findUniqueOrThrow({ where: { inboxId_kind: { inboxId: inbox.id, kind: 'welcome' } } })
     }
     const first = await sendStart(1_757_844_030_001, null)
@@ -574,7 +575,29 @@ describe('MAX durable capture', () => {
     expect(first.buttons).toEqual({ kind: 'guide_preview' })
     expect(preview.buttons).toEqual({ kind: 'guide_preview' })
     expect(command.buttons).toEqual({ kind: 'guide_preview' })
-    expect(await prisma.maxSource.count()).toBe(1)
+    const legacyCaption = await accept({ kind: 'message_created', senderId: subject, recipientId: '900',
+      messageId: 'owner-start-caption', occurredAt: '2026-10-27T10:00:00.000Z', text: '/start', hasAttachments: true })
+    await process({ inboxId: legacyCaption.inboxId })
+    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: legacyCaption.inboxId, kind: 'welcome' } })).toBe(0)
+    expect(await prisma.maxOutgoingResponse.count({ where: { inboxId: legacyCaption.inboxId, kind: 'unsupported_media' } })).toBe(1)
+    const browser = await sendStart(1_757_844_030_004, `browser_${'8'.repeat(24)}`)
+    expect(browser).toMatchObject({ text: 'Откройте memoLy, чтобы подтвердить вход в браузере.', buttons: { kind: 'browser_approval' } })
+    const commandDeliveryTask = await prisma.taskOutbox.findFirstOrThrow({ where: { type: 'max:deliver-response', payload: { path: ['responseId'], equals: command.id } } })
+    const delivered: Array<{ userId: string; text: string; buttons?: Array<{ type?: string; text?: string; webApp?: string; payload?: string }> }> = []
+    const delivery = createMaxResponseDelivery({ prisma, api: { sendMessage: async (input: Parameters<MaxApiPort['sendMessage']>[0]) => { delivered.push(input) } } as unknown as MaxApiPort,
+      maxBotUsername: 'OurMemoriesMaxBot' })
+    await delivery(commandDeliveryTask.payload)
+    expect(delivered).toHaveLength(1)
+    expect(delivered[0]?.buttons).toEqual([{ type: 'open_app', text: 'Открыть memoLy', webApp: 'OurMemoriesMaxBot', payload: 'guide_preview' }])
+    const ordinary = await accept({ kind: 'bot_started', chatId: '88', userId: '771234568',
+      occurredAt: '2026-10-27T10:01:00.000Z', payload: null })
+    await process({ inboxId: ordinary.inboxId })
+    const ordinaryResponse = await prisma.maxOutgoingResponse.findUniqueOrThrow({ where: {
+      inboxId_kind: { inboxId: ordinary.inboxId, kind: 'welcome' },
+    } })
+    expect(ordinaryResponse.text).toContain('начать вашу семейную историю.')
+    expect(ordinaryResponse.buttons).not.toEqual({ kind: 'guide_preview' })
+    expect(await prisma.maxSource.count()).toBe(2)
     expect(await prisma.maxSource.count({ where: { status: 'denied' } })).toBe(1)
     expect(await prisma.memory.count()).toBe(0)
   })
