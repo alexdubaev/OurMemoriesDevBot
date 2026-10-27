@@ -515,6 +515,9 @@ guard_membership_transition() {
 			[ "$count" -eq 0 ] && stopped_count=$((stopped_count + 1))
 		done
 		if [ "$stopped_count" -eq 3 ]; then
+			MEMOLY_BACKEND_IMAGE_TAG=$MEMOLY_PRODUCT_SHA
+			MEMOLY_WEBAPP_IMAGE_TAG=$MEMOLY_PRODUCT_SHA
+			export MEMOLY_BACKEND_IMAGE_TAG MEMOLY_WEBAPP_IMAGE_TAG
 			load_runtime_secrets
 			max_video_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA") ||
 				die 'stopped-writer promotion requires the exact MAX video recovery profile'

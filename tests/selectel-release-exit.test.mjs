@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { afterAll } from 'bun:test'
 import { bashExecutable, gitBashPath, linuxPath, runLinuxRoot } from './bash-runtime.mjs'
@@ -3081,7 +3081,7 @@ docker() {
   esac
 }
 rollback_source_compatibility_profile() {
-  [ -n "${MAX_BOT_TOKEN:-}" ] && [ "$MEMOLY_BACKEND_IMAGE_TAG" = "$MEMOLY_PRODUCT_SHA" ] &&
+  [ -n "\${MAX_BOT_TOKEN:-}" ] && [ "$MEMOLY_BACKEND_IMAGE_TAG" = "$MEMOLY_PRODUCT_SHA" ] &&
     [ "$MEMOLY_WEBAPP_IMAGE_TAG" = "$MEMOLY_PRODUCT_SHA" ] || { echo PROFILE_CONTEXT_FAILED >> "$FIXTURE_EVENTS"; return 1; }
   echo "PROFILE_CONTEXT:$MEMOLY_BACKEND_IMAGE_TAG:$MEMOLY_WEBAPP_IMAGE_TAG" >> "$FIXTURE_EVENTS"
   printf '%s\\n' "$FIXTURE_PROFILE"
