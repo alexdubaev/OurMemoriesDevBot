@@ -2978,6 +2978,36 @@ test('notification pilot retains only the exact measured d299 filesystem recover
   assert.notEqual(profile(drift).status, 0)
 })
 
+test('family notifications retain the exact measured d299 recovery source without relaxing owner pilot pins', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
+  const baseline = '76b31d275344145446780fdc7416ce275fbf7836'
+  const blobs = [
+    ['backend/scripts/max-notifications-pilot.ts', '6c754febb81a13e2f4fd9fea8cf2a6911a90c409'],
+    ['backend/src/env.ts', 'bfeb4d35c29ba1f96549bef54280a1aa354a3a5a'],
+    ['backend/src/max-notifications-pilot.ts', '84235928b31c9e73b70785d4232cda12e74189ac'],
+    ['backend/src/modules/max/infrastructure/deliver-pilot-notification.ts', '45670ef2e3e32a85c571caf4ae8bb4df798d1525'],
+  ]
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const directory = mkdtempSync(resolve(root, '.scratch', 'rollback-family-notifications-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, baseline], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(directory)
+  const source = commitFrozenSourceFiles({ root: directory, sha: baseline }, blobs, 'freeze family notification production inputs')
+  assert.equal(productionCompatibilityFingerprint(source.root), 'ab7b198170fdbc5a62fdc45946bf97760fbf1f0178540883020dd4e5d4900646')
+  const profile = (candidate, driver = 'filesystem', target = maxVideoRecoveryBackend) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root, encoding: 'utf8', timeout: 30_000,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\ncompose() { [ '${driver}' = filesystem ]; }\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${target}\n`,
+  })
+  const accepted = profile(source)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
+  assert.notEqual(profile(source, 's3').status, 0)
+  assert.notEqual(profile(source, 'filesystem', rollbackHealthy).status, 0)
+  const drift = commitSourceChange(source, 'backend/src/max-notifications-pilot.ts', '\n// changed family recipient policy\n', 'reject family notification source drift')
+  assert.notEqual(profile(drift).status, 0)
+})
+
 test('owner-guide and disabled-instructions runtimes accept only their frozen d299 filesystem recovery profiles', {
   timeout: process.platform === 'win32' ? 240_000 : 90_000,
 }, () => {

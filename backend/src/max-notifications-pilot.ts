@@ -5,7 +5,8 @@ import { insertTask } from './outbox/store'
 
 export const pilotTaskType = 'max:notify-pilot'
 export type MaxNotificationPilot = Pick<AppEnv, 'MAX_ENABLED' | 'MAX_BOT_EXPECTED_USERNAME' |
-  'CONTROL_OWNER_USER_IDS' | 'MAX_NOTIFICATIONS_PILOT_ENABLED' | 'MAX_NOTIFICATIONS_PILOT_SINCE' | 'MAX_NOTIFICATIONS_PILOT_SUBJECT'>
+  'CONTROL_OWNER_USER_IDS' | 'MAX_NOTIFICATIONS_PILOT_ENABLED' | 'MAX_NOTIFICATIONS_PILOT_SINCE' | 'MAX_NOTIFICATIONS_PILOT_SUBJECT'> &
+  Partial<Pick<AppEnv, 'MAX_NOTIFICATIONS_AUDIENCE'>>
 export type PilotEvent = { familyId: string } & (
   | { kind: 'album'; albumId: string; entryId: string; eventId: string; photoCount: number }
   | { kind: 'feed'; memoryId: string }
@@ -13,22 +14,34 @@ export type PilotEvent = { familyId: string } & (
 
 export function pilotEnabled(config?: MaxNotificationPilot): config is MaxNotificationPilot & { MAX_NOTIFICATIONS_PILOT_SINCE: string; MAX_BOT_EXPECTED_USERNAME: string } {
   return Boolean(config?.MAX_ENABLED && config.MAX_NOTIFICATIONS_PILOT_ENABLED &&
-    config.CONTROL_OWNER_USER_IDS.length === 1 && config.MAX_BOT_EXPECTED_USERNAME &&
-    config.MAX_NOTIFICATIONS_PILOT_SUBJECT && /^[1-9][0-9]{0,18}$/.test(config.MAX_NOTIFICATIONS_PILOT_SUBJECT) &&
+    config.MAX_BOT_EXPECTED_USERNAME &&
+    (notificationAudience(config) === 'family' || config.CONTROL_OWNER_USER_IDS.length === 1 &&
+      config.MAX_NOTIFICATIONS_PILOT_SUBJECT && /^[1-9][0-9]{0,18}$/.test(config.MAX_NOTIFICATIONS_PILOT_SUBJECT)) &&
     /^[A-Za-z0-9_]{5,32}$/.test(config.MAX_BOT_EXPECTED_USERNAME) &&
     config.MAX_NOTIFICATIONS_PILOT_SINCE && Number.isFinite(Date.parse(config.MAX_NOTIFICATIONS_PILOT_SINCE)) &&
     Date.parse(config.MAX_NOTIFICATIONS_PILOT_SINCE) <= Date.now())
 }
 
-/** No recipient discovery/fanout: exactly one configured project owner, one MAX identity. */
-export async function pilotRecipient(tx: PrismaTransactionClient, config: MaxNotificationPilot, familyId: string) {
+export function notificationAudience(config: MaxNotificationPilot) {
+  return config.MAX_NOTIFICATIONS_AUDIENCE ?? 'owner'
+}
+
+/** Revalidates one exact identity; family mode never resolves a queued task to a different user. */
+export async function pilotRecipient(tx: PrismaTransactionClient, config: MaxNotificationPilot, familyId: string, identityId?: string) {
   if (!pilotEnabled(config)) return null
-  const identities = await tx.externalIdentity.findMany({ where: { userId: config.CONTROL_OWNER_USER_IDS[0], provider: 'max' },
+  const audience = notificationAudience(config)
+  if (audience === 'family' && !identityId) return null
+  const target = audience === 'family'
+    ? await tx.externalIdentity.findFirst({ where: { id: identityId, provider: 'max' }, select: { userId: true } })
+    : { userId: config.CONTROL_OWNER_USER_IDS[0]! }
+  if (!target) return null
+  const identities = await tx.externalIdentity.findMany({ where: { userId: target.userId, provider: 'max' },
     select: { id: true, userId: true, subject: true } })
   const identity = identities.length === 1 ? identities[0] : null
-  if (!identity || identity.subject !== config.MAX_NOTIFICATIONS_PILOT_SUBJECT || !/^[1-9][0-9]{0,18}$/.test(identity.subject) || BigInt(identity.subject) > 9_223_372_036_854_775_807n) return null
+  if (!identity || identityId && identity.id !== identityId || audience === 'owner' && identity.subject !== config.MAX_NOTIFICATIONS_PILOT_SUBJECT ||
+    !/^[1-9][0-9]{0,18}$/.test(identity.subject) || BigInt(identity.subject) > 9_223_372_036_854_775_807n) return null
   const member = await tx.familyMember.findFirst({ where: { familyId, userId: identity.userId, revokedAt: null,
-    family: { status: 'active' } }, select: { membershipEpoch: true } })
+    family: { status: 'active' }, user: { controlState: 'active' } }, select: { membershipEpoch: true } })
   if (!member) return null
   // Successful bot-start welcome is existing, server-authoritative engagement evidence.
   const welcomes = await tx.maxOutgoingResponse.findMany({ where: { destinationUserId: BigInt(identity.subject), kind: 'welcome',
@@ -46,6 +59,24 @@ export async function pilotRecipient(tx: PrismaTransactionClient, config: MaxNot
   return null
 }
 
+/** Only members of the event's family; no global user list or historic event expansion. */
+export async function notificationRecipients(tx: PrismaTransactionClient, config: MaxNotificationPilot, familyId: string) {
+  if (!pilotEnabled(config)) return []
+  if (notificationAudience(config) === 'owner') {
+    const recipient = await pilotRecipient(tx, config, familyId)
+    return recipient ? [recipient] : []
+  }
+  const identities = await tx.externalIdentity.findMany({ where: { provider: 'max', user: { controlState: 'active',
+    familyMemberships: { some: { familyId, revokedAt: null, family: { status: 'active' } } } } },
+    select: { id: true }, orderBy: { id: 'asc' } })
+  const recipients = []
+  for (const identity of identities) {
+    const recipient = await pilotRecipient(tx, config, familyId, identity.id)
+    if (recipient) recipients.push(recipient)
+  }
+  return recipients
+}
+
 export function pilotStopPrefix(botId: string, subject: string) {
   return `pilot-stop:${createHash('sha256').update(`${botId}:${subject}`).digest('hex')}|`
 }
@@ -53,12 +84,13 @@ export function pilotStopPrefix(botId: string, subject: string) {
 /** Called only inside the actual album/publication transaction; OFF never creates historical work. */
 export async function enqueuePilotNotification(tx: PrismaTransactionClient, config: MaxNotificationPilot | undefined, event: PilotEvent) {
   if (!pilotEnabled(config) || event.kind === 'album' && event.photoCount < 1) return
-  const recipient = await pilotRecipient(tx, config, event.familyId)
-  if (!recipient) return
+  const recipients = await notificationRecipients(tx, config, event.familyId)
   const eventKey = event.kind === 'feed' ? `feed:${event.familyId}:${event.memoryId}` : `album:${event.familyId}:${event.albumId}:${event.entryId}:${event.eventId}`
-  await insertTask(tx, { type: pilotTaskType, dedupeKey: eventKey,
+  const audience = notificationAudience(config)
+  for (const recipient of recipients) await insertTask(tx, { type: pilotTaskType,
+    dedupeKey: audience === 'family' ? `${eventKey}:recipient:${recipient.id}` : eventKey,
     payload: { ...event, identityId: recipient.id, subjectHash: pilotSubjectHash(recipient.subject), membershipEpoch: recipient.membershipEpoch, botId: recipient.botId,
-      pilotSince: config.MAX_NOTIFICATIONS_PILOT_SINCE } })
+      audience, pilotSince: config.MAX_NOTIFICATIONS_PILOT_SINCE } })
 }
 
 export function pilotSubjectHash(subject: string) {

@@ -45,6 +45,7 @@ const envSchema = z.object({
   MULTI_FAMILY_ACTIVATION: z.enum(['off', 'on']).default('off'),
   MAX_ENABLED: booleanStringSchema,
   MAX_NOTIFICATIONS_PILOT_ENABLED: booleanStringSchema,
+  MAX_NOTIFICATIONS_AUDIENCE: z.enum(['owner', 'family']).default('owner'),
   MAX_NOTIFICATIONS_PILOT_SINCE: optionalStringSchema,
   MAX_NOTIFICATIONS_PILOT_SUBJECT: optionalStringSchema,
   MAX_BOT_TOKEN: optionalStringSchema,

@@ -1,5 +1,10 @@
 # MAX notifications pilot (#257)
 
+This document describes the compatible `owner` audience. The owner's 2026-10-28 follow-up
+authorizes the explicit `family` audience, including the author; see
+[family notifications](MAX_FAMILY_NOTIFICATIONS.md). The default remains owner-only until
+that protected server setting is changed.
+
 Only the single project owner in protected `CONTROL_OWNER_USER_IDS` is eligible. The value must
 contain exactly one internal UUID, with exactly one `ExternalIdentity(provider=max)`, active
 family membership and a delivered bot-start welcome. No names, family-owner role, actor or
