@@ -1,5 +1,6 @@
 import {
   DeleteObjectCommand,
+  GetBucketVersioningCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
@@ -7,6 +8,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { createHash, randomBytes } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -29,6 +31,11 @@ import type {
   StorageObjectRead,
   WriteObjectInput,
 } from './port'
+
+export const s3RetiredObjectContentType = 'application/x-memoly-retired'
+export const s3RetiredObjectLength = 32
+export const s3RetiredObjectMetadataKey = 'memoly-retired'
+export const s3RetiredObjectDigestMetadataKey = 'memoly-retirement-sha256'
 import {
   assertByteSize,
   assertContentType,
@@ -178,6 +185,13 @@ export class S3PrivateStorage implements PrivateStorage {
         Key: key,
         ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
       }))
+      const responseLength = range
+        ? parseContentRangeTotal(response.ContentRange) ?? response.ContentLength
+        : response.ContentLength
+      if (isRetiredS3Object(response, responseLength)) {
+        await response.Body?.transformToByteArray()
+        return null
+      }
       const body = response.Body?.transformToWebStream()
       if (!body) throw new Error('S3 returned an object without a response body')
       const total = range ? parseContentRangeTotal(response.ContentRange) : undefined
@@ -193,6 +207,10 @@ export class S3PrivateStorage implements PrivateStorage {
       }
     } catch (error) {
       if (isMissingObject(error)) return null
+      if (range && isRangeNotSatisfiable(error)) {
+        const head = await this.headRawObject(key)
+        if (head && isRetiredS3Object(head)) return null
+      }
       throw error
     }
   }
@@ -200,20 +218,14 @@ export class S3PrivateStorage implements PrivateStorage {
   async headObject(key: string): Promise<StorageObjectHead | null> {
     const safeKey = assertSafeObjectKey(key)
 
-    try {
-      const response = await this.s3.send(
-        new HeadObjectCommand({ Bucket: this.config.bucket, Key: safeKey }),
-      )
+    const response = await this.headRawObject(safeKey)
+    if (!response || isRetiredS3Object(response)) return null
 
-      return {
-        key: safeKey,
-        contentLength: response.ContentLength ?? 0,
-        contentType: response.ContentType ?? 'application/octet-stream',
-        ...(response.ETag ? { etag: response.ETag } : {}),
-      }
-    } catch (error) {
-      if (isMissingObject(error)) return null
-      throw error
+    return {
+      key: safeKey,
+      contentLength: response.ContentLength ?? 0,
+      contentType: response.ContentType ?? 'application/octet-stream',
+      ...(response.ETag ? { etag: response.ETag } : {}),
     }
   }
 
@@ -230,17 +242,86 @@ export class S3PrivateStorage implements PrivateStorage {
         }),
       )
 
+      if (isRetiredS3Object(response, parseContentRangeTotal(response.ContentRange) ?? response.ContentLength)) {
+        await response.Body?.transformToByteArray()
+        return null
+      }
+
       return (await response.Body?.transformToByteArray()) ?? new Uint8Array()
     } catch (error) {
       if (isMissingObject(error)) return null
+      if (isRangeNotSatisfiable(error)) {
+        const head = await this.headRawObject(safeKey)
+        if (head && isRetiredS3Object(head)) return null
+      }
       throw error
     }
   }
 
   async deleteObject(key: string) {
-    await this.s3.send(
-      new DeleteObjectCommand({ Bucket: this.config.bucket, Key: assertSafeObjectKey(key) }),
-    )
+    const safeKey = assertSafeObjectKey(key)
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const current = await this.headRawObject(safeKey)
+      if (!current || isRetiredS3Object(current)) return
+      if (!current.ETag) throw new Error('S3 object has no ETag; refusing an unconditional delete')
+
+      try {
+        await this.s3.send(new DeleteObjectCommand({
+          Bucket: this.config.bucket,
+          Key: safeKey,
+          IfMatch: current.ETag,
+        }))
+        return
+      } catch (error) {
+        if (!isPreconditionFailure(error) || attempt === 3) throw error
+      }
+    }
+  }
+
+  async retireObject(key: string) {
+    const safeKey = assertSafeObjectKey(key)
+    const versioning = await this.s3.send(new GetBucketVersioningCommand({ Bucket: this.config.bucket }))
+    if (versioning.Status !== undefined) {
+      throw new StorageError('misconfigured', 'S3 durable retirement requires bucket versioning to be disabled')
+    }
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const current = await this.headRawObject(safeKey)
+      if (current && await this.isVerifiedRetirement(safeKey, current)) return
+      const previousMd5 = normalizeEtag(current?.ETag)
+      let body = randomBytes(s3RetiredObjectLength)
+      for (let candidate = 0; candidate < 4 && createHash('md5').update(body).digest('hex') === previousMd5; candidate += 1) {
+        body = randomBytes(s3RetiredObjectLength)
+      }
+      if (createHash('md5').update(body).digest('hex') === previousMd5) {
+        throw new Error('S3 retirement could not create a sentinel with a distinct ETag')
+      }
+      const digest = createHash('sha256').update(body).digest('hex')
+      const put = await this.s3.send(new PutObjectCommand({
+        Bucket: this.config.bucket,
+        Key: safeKey,
+        Body: body,
+        ContentLength: body.byteLength,
+        ContentType: s3RetiredObjectContentType,
+        Metadata: {
+          [s3RetiredObjectMetadataKey]: '1',
+          [s3RetiredObjectDigestMetadataKey]: digest,
+        },
+      }))
+      if (!put.ETag) throw new Error('S3 retirement write returned no ETag; refusing unverified retirement')
+
+      try {
+        const written = await this.s3.send(new GetObjectCommand({
+          Bucket: this.config.bucket,
+          Key: safeKey,
+          IfMatch: put.ETag,
+        }))
+        const actualBody = await readBodyAtMost(written.Body, s3RetiredObjectLength)
+        if (isRetiredS3Object(written) && actualBody && actualBody.byteLength === body.byteLength && Buffer.from(actualBody).equals(body)) return
+      } catch (error) {
+        if (!isPreconditionFailure(error) || attempt === 3) throw error
+      }
+    }
+    throw new Error('S3 retirement write could not be verified against the stored object bytes')
   }
 
 
@@ -252,11 +333,43 @@ export class S3PrivateStorage implements PrivateStorage {
       const page = await this.s3.send(new ListObjectsV2Command({ Bucket: this.config.bucket,
         Prefix: safePrefix, ContinuationToken: continuationToken }))
       for (const object of page.Contents ?? []) {
-        if (object.Key && object.LastModified) found.push({ key: object.Key, lastModified: object.LastModified })
+        if (!object.Key || !object.LastModified) continue
+        if (object.Size === s3RetiredObjectLength) {
+          const head = await this.headRawObject(object.Key)
+          if (!head || isRetiredS3Object(head)) continue
+        }
+        found.push({ key: object.Key, lastModified: object.LastModified })
       }
       continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined
     } while (continuationToken)
     return found
+  }
+
+  private async headRawObject(key: string) {
+    try {
+      return await this.s3.send(new HeadObjectCommand({ Bucket: this.config.bucket, Key: key }))
+    } catch (error) {
+      if (isMissingObject(error)) return null
+      throw error
+    }
+  }
+
+  private async isVerifiedRetirement(key: string, head: Awaited<ReturnType<S3PrivateStorage['headRawObject']>>) {
+    if (!head || !isRetiredS3Object(head) || !head.ETag) return false
+    try {
+      const response = await this.s3.send(new GetObjectCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        IfMatch: head.ETag,
+      }))
+      const body = await readBodyAtMost(response.Body, s3RetiredObjectLength)
+      const expectedDigest = response.Metadata?.[s3RetiredObjectDigestMetadataKey]
+      return isRetiredS3Object(response) && body?.byteLength === s3RetiredObjectLength &&
+        typeof expectedDigest === 'string' && createHash('sha256').update(body).digest('hex') === expectedDigest
+    } catch (error) {
+      if (isPreconditionFailure(error) || isMissingObject(error)) return false
+      throw error
+    }
   }
 }
 
@@ -279,6 +392,39 @@ function isPreconditionFailure(error: unknown) {
   if (typeof error !== 'object' || error === null) return false
   const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } }
   return candidate.name === 'PreconditionFailed' || candidate.$metadata?.httpStatusCode === 412
+}
+
+function isRangeNotSatisfiable(error: unknown) {
+  if (typeof error !== 'object' || error === null) return false
+  const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } }
+  return candidate.name === 'InvalidRange' || candidate.$metadata?.httpStatusCode === 416
+}
+
+function normalizeEtag(etag: string | undefined) {
+  return etag?.replace(/^"|"$/g, '').toLowerCase()
+}
+
+export function isRetiredS3Object(
+  object: { ContentLength?: number; ContentType?: string; Metadata?: Record<string, string> },
+  fullObjectLength = object.ContentLength,
+) {
+  return fullObjectLength === s3RetiredObjectLength &&
+    object.ContentType === s3RetiredObjectContentType &&
+    object.Metadata?.[s3RetiredObjectMetadataKey] === '1' &&
+    /^[0-9a-f]{64}$/.test(object.Metadata?.[s3RetiredObjectDigestMetadataKey] ?? '')
+}
+
+async function readBodyAtMost(body: { transformToWebStream(): ReadableStream } | undefined, maxLength: number) {
+  if (!body) return new Uint8Array()
+  const chunks: Buffer[] = []
+  let length = 0
+  const nodeBody = Readable.from(body.transformToWebStream() as unknown as AsyncIterable<Uint8Array>)
+  for await (const chunk of nodeBody) {
+    length += chunk.byteLength
+    if (length > maxLength) return null
+    chunks.push(Buffer.from(chunk))
+  }
+  return Buffer.concat(chunks, length)
 }
 
 function parseContentRangeTotal(value: string | undefined) {

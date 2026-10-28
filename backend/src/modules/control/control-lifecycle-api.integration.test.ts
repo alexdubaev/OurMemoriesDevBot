@@ -5,6 +5,7 @@ import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
 import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
+import { createPrivateStorage } from '../../storage'
 
 const databaseUrl = requireIntegrationDatabaseUrl()
 const prisma = createPrisma(databaseUrl)
@@ -56,13 +57,16 @@ describe('Control lifecycle API', () => {
     return signAccessToken({ sub: id, sessionId: session.id }, { JWT_SECRET: jwtSecret, ACCESS_TOKEN_TTL_SECONDS: 900 })
   }
 
-  function app(storageDriver: 'filesystem' | 's3' = 'filesystem') {
+  function app(storageDriver: 'filesystem' | 's3' = 'filesystem', retirementSupported = true) {
     const s3 = storageDriver === 's3' ? {
       PRIVATE_STORAGE_DRIVER: 's3', PRIVATE_STORAGE_REGION: 'test-region', PRIVATE_STORAGE_BUCKET: 'control-test',
       PRIVATE_STORAGE_ENDPOINT: 'https://s3.example.test', PRIVATE_STORAGE_ACCESS_KEY_ID: 'synthetic-control-key',
       PRIVATE_STORAGE_SECRET_ACCESS_KEY: 'synthetic-control-secret', PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true',
     } : {}
-    return createApp({ env: loadEnv({ ...baseEnv, ...s3, CONTROL_ENABLED: 'true', CONTROL_OWNER_USER_IDS: ownerId }), prisma })
+    const env = loadEnv({ ...baseEnv, ...s3, CONTROL_ENABLED: 'true', CONTROL_OWNER_USER_IDS: ownerId })
+    const privateStorage = createPrivateStorage(env)
+    if (!retirementSupported) Object.defineProperty(privateStorage.storage, 'retireObject', { value: undefined })
+    return createApp({ env, prisma, privateStorage })
   }
 
   test('exposes deletion previews only through the existing exact MAX owner gate', async () => {
@@ -116,8 +120,8 @@ describe('Control lifecycle API', () => {
     expect(await legacyFamily.json()).toMatchObject({ status: 'deleting', lifecycleState: 'inactive', deletionId: null, purgeAfter: null })
   })
 
-  test('S3 reports irreversible retirement as unsupported and refuses lifecycle mutations', async () => {
-    const control = app('s3')
+  test('storage without durable retirement refuses lifecycle mutations and preserves database state', async () => {
+    const control = app('s3', false)
     const headers = { Authorization: `Bearer ${await token(ownerId)}`, 'Content-Type': 'application/json' }
     const userPreview = await control.request(`/api/v1/control/users/${targetId}/deletion-preview`, { headers })
     expect(userPreview.status).toBe(200)
@@ -132,5 +136,21 @@ describe('Control lifecycle API', () => {
     expect(purge.status).toBe(503)
     expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId }, select: { controlState: true } })).toEqual({ controlState: 'active' })
     expect(await prisma.controlFamilyDeletion.count({ where: { familyId } })).toBe(0)
+  })
+
+  test('S3 durable retirement preserves the Control trash flow and persists its lifecycle state', async () => {
+    const control = app('s3')
+    const headers = { Authorization: `Bearer ${await token(ownerId)}`, 'Content-Type': 'application/json' }
+    const response = await control.request(`/api/v1/control/users/${targetId}/deletion-preview`, { headers })
+    expect(response.status).toBe(200)
+    const preview = await response.json() as { retirementSupported: boolean; canTrash: boolean; fingerprint: string }
+    expect(preview).toMatchObject({ retirementSupported: true, canTrash: true })
+    const trash = await control.request(`/api/v1/control/users/${targetId}/trash`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ key: randomUUID(), fingerprint: preview.fingerprint, confirmation: targetId }),
+    })
+    expect(trash.status).toBe(200)
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: targetId }, select: { controlState: true } })).toEqual({ controlState: 'trashed' })
+    expect(await prisma.controlUserDeletion.count({ where: { targetUserId: targetId } })).toBe(1)
   })
 })

@@ -861,7 +861,10 @@ rollback_source_compatibility_profile() {
 				# Exact owner-only notification pilot; retains d299 images, filesystem,
 				# Control/legacy-media guards and the measured 62-to-63 enum ledger.
 				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:5ba0f03f8a30fee1a4e25d6531b52c3d6fac46f0b363bd317cd07430f01bb07d:max-video-retirement"
-				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:ab7b198170fdbc5a62fdc45946bf97760fbf1f0178540883020dd4e5d4900646:max-video-retirement") ;;
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:ab7b198170fdbc5a62fdc45946bf97760fbf1f0178540883020dd4e5d4900646:max-video-retirement"
+				# Verified S3 migration tools retain filesystem-only d299 application
+				# recovery. Current S3 bytes must first be restored to filesystem.
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:9ebdb17ce7dad5bc3571c4ba5b5ebd9376c6e70d14fffdb82e7d059c57b79923:max-video-retirement") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do
