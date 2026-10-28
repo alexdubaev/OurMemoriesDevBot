@@ -1212,4 +1212,12 @@ the stopped enum and unhandled pilot queue; source-drift and ledger regressions 
 required before using this binding. See [pilot operation](../../docs/development/MAX_NOTIFICATIONS_PILOT.md)
 for default OFF, identity preflight, subscription, activation and disabling.
 
+The separately authorized family audience uses executable fingerprint
+`ab7b198170fdbc5a62fdc45946bf97760fbf1f0178540883020dd4e5d4900646` with that same
+exact d299 pair, unchanged 63-migration catalog and all existing host/image/Control/
+filesystem/legacy-media guards. No SQL is added. The frozen-source regression accepts
+only the four measured production blobs over accepted pilot main and rejects drift;
+the real PostgreSQL current → d299 → current probe remains required. This binding does
+not enable sending. See [family notification operation](../../docs/development/MAX_FAMILY_NOTIFICATIONS.md).
+
 For review preparation only, the local `teamlead-development` skill includes `scripts/prepare-selectel-release.mjs` (use the installed skill path). Example: `node <skill-path>/scripts/prepare-selectel-release.mjs --repo <checkout> --base <full-base-sha> [--candidate <full-candidate-sha>]`. The helper reads the accepted `origin/main` fingerprint function and produces exact source-bound metadata without modifying Git or touching the host. Its output is preparation only: it is not approval, a gate, a patch, a deployment, or a compatibility decision. All existing review and release safeguards still apply.
