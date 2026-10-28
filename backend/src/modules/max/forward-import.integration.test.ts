@@ -36,7 +36,7 @@ describe('MAX forward import integration', () => {
   const roots = new Set<string>()
   const channelId = -79560265048692n
 
-  beforeEach(async () => {
+  const clean = async () => {
     await prisma.maxOutgoingResponse.deleteMany()
     await prisma.maxSource.deleteMany()
     await prisma.maxInbox.deleteMany()
@@ -49,12 +49,13 @@ describe('MAX forward import integration', () => {
     await prisma.family.deleteMany()
     await prisma.externalIdentity.deleteMany()
     await prisma.user.deleteMany()
-  })
+  }
+  beforeEach(clean)
   afterEach(async () => {
     for (const root of roots) await rm(root, { recursive: true, force: true })
     roots.clear()
   })
-  afterAll(async () => { await prisma.$disconnect() })
+  afterAll(async () => { await clean(); await prisma.$disconnect() })
 
   test('recovers an unbound channel through consent before importing the forwarded video once', async () => {
     const fixture = await familyFixture('7001', 'forward-video')
