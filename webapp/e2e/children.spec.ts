@@ -198,7 +198,7 @@ test('a one-child family keeps the plain feed: no filters, no child choice, no m
   await expect(card(page, created.id)).toBeVisible()
 
   await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
-  await page.getByRole('button', { name: 'Создать альбом', exact: true }).click()
+  await page.locator('.albums-heading').getByRole('button', { name: 'Создать альбом', exact: true }).click()
   await page.getByRole('button', { name: /Первый год/ }).click()
   await expect(page.getByLabel('Для кого этот альбом')).toHaveCount(0)
   await page.getByRole('button', { name: 'Создать', exact: true }).click()

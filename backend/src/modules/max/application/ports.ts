@@ -115,7 +115,7 @@ export type MaxInboundEvent =
       recipientId: string
       /** Present only for posts addressed to a MAX channel; recipientId is its signed chat_id. */
       isChannel?: true
-      /** Present only for a user-forwarded original that must be fetched and verified server-side. */
+      /** Forwarded identity verified server-side; channel copies use their bound outer envelope. */
       forwardedFrom?: { messageId: string; timestamp?: number; attachments?: MaxInboundAttachment[] }
       messageId: string
       occurredAt: string

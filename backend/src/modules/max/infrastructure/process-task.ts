@@ -13,7 +13,7 @@ import { createMaxVoiceProcessor } from './process-voice'
 import type { MaxDownloadedMedia, MaxVideoStream } from './media-download'
 import { resolveMaxTarget, chooseMaxTarget, expireMaxTarget } from './source-target'
 import { parseChoicePayload, savedFamilyText } from '../../../bot-family-target'
-import { assertMaxForwardBinding, reportMaxForwardDiagnostic, validateMaxForwardedMessage } from './forward-import'
+import { assertMaxForwardBinding, materializeMaxChannelForward, reportMaxForwardDiagnostic, validateMaxForwardedMessage } from './forward-import'
 import { MaxProviderError } from './max-api'
 
 type PayloadCrypto = {
@@ -169,6 +169,35 @@ export function createMaxTaskProcessor(options: {
     let verifiedForward: MaxResolvedMessage | undefined
     let verifiedForwardChannelId: bigint | undefined
     let envelopeFallback = false
+    if (event.isChannel && event.forwardedFrom) {
+      const denyChannel = async () => await deny(prisma, source, deniedText, true) ? 'done' as const : 'skipped' as const
+      const target = await resolveMaxTarget(prisma, source, new Date(), true)
+      if (target.kind !== 'target' || !options.api?.getMessage) return denyChannel()
+      const scope: FamilyScope = { familyId: target.target.familyId,
+        principal: { userId: target.target.userId, sessionId: `max:${source.id}` } }
+      const originalId = event.forwardedFrom.messageId
+      try {
+        await access.requireFull(scope)
+        await prisma.$transaction((tx) => assertMaxForwardBinding(tx, scope.familyId, BigInt(event.recipientId), true))
+        const resolved = await options.api.getMessage(event.messageId, signal)
+        verifiedForward = materializeMaxChannelForward(resolved, event)
+        const attachments = verifiedForward.attachments.map(toInboundAttachment)
+        const text = verifiedForward.text ?? null
+        if (attachments.length === 0 && !isPublishableText(text)) return denyChannel()
+        const claimed = await claimMaxEnvelopeSource(prisma, source, scope.familyId, originalId, attachments, source.botId)
+        if (claimed.kind === 'duplicate') return await completeForwardDuplicate(prisma, options.media, source, event.senderId) ? 'done' : 'skipped'
+        if (claimed.kind === 'published') return 'skipped'
+        verifiedForwardChannelId = BigInt(event.recipientId)
+        // Retain the outer channel/message identity for provider verification and
+        // playback, while the inner identity is the durable envelope dedupe key.
+        event = { ...event, forwardedFrom: undefined, text, attachments,
+          occurredAt: new Date(validForwardTimestamp(verifiedForward.timestamp) ?? inbox.receivedAt.getTime()).toISOString() }
+      } catch (error) {
+        if (signal?.aborted) throw error
+        if (isExpectedAuthorizationFailure(error) || error instanceof MaxProviderError && !error.retryable) return denyChannel()
+        throw error
+      }
+    }
     if (event.forwardedFrom) {
       const forwardedFrom = event.forwardedFrom
       const denyForward = async (text = deniedText, suppressResponse = false) => {
@@ -327,7 +356,7 @@ export function createMaxTaskProcessor(options: {
       sourcePublishedAt: new Date(event.occurredAt),
       mediaIds: [],
     }, async (tx, memoryId) => {
-        if (verifiedForwardChannelId !== undefined) await assertMaxForwardBinding(tx, admission.familyId, verifiedForwardChannelId)
+        if (verifiedForwardChannelId !== undefined) await assertMaxForwardBinding(tx, admission.familyId, verifiedForwardChannelId, event.isChannel === true)
         const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         await tx.maxSource.update({ where: { id: source.id }, data: {
           status: 'published', memoryId, userId: admission.userId, familyId: admission.familyId, childId: admission.childId,

@@ -864,7 +864,10 @@ rollback_source_compatibility_profile() {
 				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:ab7b198170fdbc5a62fdc45946bf97760fbf1f0178540883020dd4e5d4900646:max-video-retirement"
 				# Verified S3 migration tools retain filesystem-only d299 application
 				# recovery. Current S3 bytes must first be restored to filesystem.
-				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:9ebdb17ce7dad5bc3571c4ba5b5ebd9376c6e70d14fffdb82e7d059c57b79923:max-video-retirement") ;;
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:9ebdb17ce7dad5bc3571c4ba5b5ebd9376c6e70d14fffdb82e7d059c57b79923:max-video-retirement"
+				# Exact connected-channel forward import and single-source repair inputs.
+				# Retains filesystem-only recovery, retirement fences and the same ledger.
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:1540dbfda304a7bc05c96930702ef585adc0bae167a8dfbb7d85e9d64e67ed59:max-video-retirement") ;;
 		*) return 1 ;;
 	esac
 	for attestation in "${attestations[@]}"; do

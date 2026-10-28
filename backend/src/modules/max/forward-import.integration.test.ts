@@ -20,6 +20,8 @@ import { createMaxApi, MaxProviderError } from './infrastructure/max-api'
 import { chooseMaxTarget } from './infrastructure/source-target'
 import { createMaxChannelOnboarding } from './application/channel-onboarding'
 import { createMaxResponseDelivery } from './infrastructure/deliver-response'
+import { planMaxChannelForwardRecovery, queueMaxChannelForwardRecovery } from './infrastructure/channel-forward-recovery'
+import { createMaxVideoPlayback } from './infrastructure/video-playback'
 import { choicePayload } from '../../bot-family-target'
 import { MaxChannelProviderError } from './application/channel-protocol'
 
@@ -34,7 +36,7 @@ describe('MAX forward import integration', () => {
   const roots = new Set<string>()
   const channelId = -79560265048692n
 
-  beforeEach(async () => {
+  const clean = async () => {
     await prisma.maxOutgoingResponse.deleteMany()
     await prisma.maxSource.deleteMany()
     await prisma.maxInbox.deleteMany()
@@ -47,12 +49,13 @@ describe('MAX forward import integration', () => {
     await prisma.family.deleteMany()
     await prisma.externalIdentity.deleteMany()
     await prisma.user.deleteMany()
-  })
+  }
+  beforeEach(clean)
   afterEach(async () => {
     for (const root of roots) await rm(root, { recursive: true, force: true })
     roots.clear()
   })
-  afterAll(async () => { await prisma.$disconnect() })
+  afterAll(async () => { await clean(); await prisma.$disconnect() })
 
   test('recovers an unbound channel through consent before importing the forwarded video once', async () => {
     const fixture = await familyFixture('7001', 'forward-video')
@@ -1153,6 +1156,162 @@ describe('MAX forward import integration', () => {
     expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: decision.id } })).toMatchObject({ status: 'completed' })
   })
 
+  test('imports a senderless forwarded channel photo from the verified envelope once', async () => {
+    const fixture = await familyFixture('7091', 'channel-envelope-photo')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'connected' } })
+    const event = channelForwardEvent('channel-forward-photo', 'private-original-photo')
+    const pending = await accept(event)
+    const duplicate = await accept(event)
+    expect(duplicate).toMatchObject({ duplicate: true, inboxId: pending.inboxId })
+    const second = await accept({ ...event, messageId: 'channel-forward-photo-copy' })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
+      api: apiFor(async (messageId) => {
+        if (![event.messageId, 'channel-forward-photo-copy'].includes(messageId)) throw new Error('Must resolve the connected channel envelope only')
+        return channelForwardMessage(messageId, 'private-original-photo')
+      }),
+      download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }),
+    })
+    await Promise.allSettled([processor({ inboxId: pending.inboxId }), processor({ inboxId: second.inboxId })])
+    for (const inboxId of [pending.inboxId, second.inboxId]) await processor({ inboxId })
+    expect(await prisma.memory.count({ where: { familyId: fixture.familyId } })).toBe(1)
+    const memory = await prisma.memory.findFirstOrThrow({ where: { familyId: fixture.familyId }, include: { media: { include: { asset: true } } } })
+    expect(memory).toMatchObject({ kind: 'photo', body: 'Verified nested channel caption', status: 'published',
+      occurredAt: new Date('2025-05-06T07:08:09.000Z') })
+    expect(memory.media).toHaveLength(1)
+    expect(memory.media[0]!.asset).toMatchObject({ originalStatus: 'stored', familyId: fixture.familyId })
+    const stored = await fixture.runtime.privateStorage.storage.readObject({ key: memory.media[0]!.asset.originalKey })
+    expect(new Uint8Array(await new Response(stored!.body).arrayBuffer())).toEqual(pngFixture)
+    expect(await prisma.maxSource.count({ where: { status: 'published' } })).toBe(1)
+    expect(await prisma.maxSource.count({ where: { rejectionCode: 'duplicate' } })).toBe(1)
+    expect(await prisma.maxMemoryBackup.count()).toBe(0)
+    expect(await prisma.maxOutgoingResponse.count()).toBe(0)
+  })
+
+  for (const mismatch of ['channel', 'message', 'original', 'sender', 'binding_changed'] as const) {
+    test(`refuses a forwarded channel envelope when its ${mismatch} identity changes`, async () => {
+      const fixture = await familyFixture('7092', `channel-envelope-${mismatch}`)
+      await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+      await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'connected' } })
+      const event = channelForwardEvent(`channel-mismatch-${mismatch}`, 'private-original-mismatch')
+      const pending = await accept(event)
+      const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
+        api: apiFor(async () => {
+          const message = channelForwardMessage(event.messageId, 'private-original-mismatch')
+          if (mismatch === 'channel') message.recipientId = '-999'
+          if (mismatch === 'message') message.messageId = 'unrelated-channel-message'
+          if (mismatch === 'original') message.forwardedFrom = { messageId: 'unrelated-original' }
+          if (mismatch === 'sender') message.senderId = '7092'
+          if (mismatch === 'binding_changed') await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'disconnected' } })
+          return message
+        }),
+        download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }),
+      })
+      await expect(processor({ inboxId: pending.inboxId })).resolves.toBe('done')
+      expect(await prisma.memory.count()).toBe(0)
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: pending.inboxId } })).toMatchObject({ status: 'denied' })
+      expect(await prisma.maxOutgoingResponse.count()).toBe(0)
+    })
+  }
+
+  test('repairs one scrubbed denied channel forward atomically and repeated concurrent apply publishes once', async () => {
+    const fixture = await familyFixture('7093', 'channel-forward-repair')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'connected' } })
+    const event = channelForwardEvent('channel-repair-outer', 'private-repair-original')
+    const pending = await accept(event)
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: pending.inboxId } })
+    // Durable state left by the old worker: original source identity remains, payload was scrubbed.
+    await prisma.maxSource.update({ where: { id: source.id }, data: { status: 'denied', rejectionCode: 'denied' } })
+    await prisma.maxInbox.update({ where: { id: pending.inboxId }, data: { status: 'processed', processedAt: new Date(),
+      encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    const api = apiFor(async () => channelForwardMessage(event.messageId, 'private-repair-original'))
+    const options = { db: prisma, api, botId: '900', encrypt: crypto.encrypt }
+    const plan = await planMaxChannelForwardRecovery(options, source.id)
+    const applied = await Promise.all([
+      queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint),
+      queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint),
+    ])
+    expect(applied.map(({ status }) => status).sort()).toEqual(['already_queued', 'queued'])
+    const repairTasks = await prisma.taskOutbox.findMany({ where: { type: 'max:process', dedupeKey: { startsWith: 'max-channel-forward-repair:' } } })
+    expect(repairTasks).toHaveLength(1)
+    expect(repairTasks[0]!.payload).toEqual({ inboxId: source.inboxId })
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } }))
+      .toMatchObject({ status: 'accepted', plannedMemoryId: source.plannedMemoryId })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api, media: fixture.media,
+      download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }) })
+    await expect(processor(repairTasks[0]!.payload)).resolves.toBe('done')
+    await expect(queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint)).resolves.toEqual({ status: 'already_queued' })
+    await expect(processor(repairTasks[0]!.payload)).resolves.toBe('skipped')
+    expect(await prisma.memory.count({ where: { id: source.plannedMemoryId, familyId: fixture.familyId } })).toBe(1)
+    expect(await prisma.mediaAsset.count()).toBe(1)
+    const completed = await prisma.maxInbox.findUniqueOrThrow({ where: { id: source.inboxId } })
+    expect(completed.status).toBe('processed')
+    expect(completed.encryptedPayload.byteLength).toBe(0)
+  })
+
+  test('recovery rejects changed content, revoked binding and redacted sources without reopening the inbox', async () => {
+    const fixture = await familyFixture('7094', 'channel-forward-repair-deny')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'connected' } })
+    const event = channelForwardEvent('channel-repair-deny-outer', 'private-repair-deny-original')
+    const pending = await accept(event)
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: pending.inboxId } })
+    await prisma.maxSource.update({ where: { id: source.id }, data: { status: 'denied', rejectionCode: 'denied' } })
+    await prisma.maxInbox.update({ where: { id: pending.inboxId }, data: { status: 'processed', processedAt: new Date(),
+      encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    const outer = channelForwardMessage(event.messageId, 'private-repair-deny-original')
+    const options = { db: prisma, api: apiFor(async () => outer), botId: '900', encrypt: crypto.encrypt }
+    const plan = await planMaxChannelForwardRecovery(options, source.id)
+    outer.forwardedText = 'Changed after inspection'
+    await expect(queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint)).rejects.toThrow('plan_changed')
+    outer.forwardedText = 'Verified nested channel caption'
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'disconnected' } })
+    await expect(queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint)).rejects.toThrow('binding_unavailable')
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'connected' } })
+    await prisma.maxInbox.update({ where: { id: pending.inboxId }, data: { controlRedactedAt: new Date() } })
+    await expect(queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint)).rejects.toThrow('ineligible')
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } })).toMatchObject({ status: 'denied' })
+    const unchanged = await prisma.maxInbox.findUniqueOrThrow({ where: { id: pending.inboxId } })
+    expect(unchanged.status).toBe('processed')
+    expect(unchanged.encryptedPayload.byteLength).toBe(0)
+    expect(await prisma.taskOutbox.count({ where: { dedupeKey: { startsWith: 'max-channel-forward-repair:' } } })).toBe(0)
+    expect(await prisma.memory.count()).toBe(0)
+  })
+
+  for (const kind of ['note', 'video', 'media'] as const) {
+    test(`imports a forwarded channel ${kind} with working video readiness and no outbound loop`, async () => {
+      const fixture = await familyFixture('7095', `channel-forward-${kind}`)
+      await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+      await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'connected' } })
+      const event = channelForwardEvent(`channel-${kind}`, `nested-${kind}`)
+      const outer = channelForwardMessage(event.messageId, `nested-${kind}`)
+      const video = { kind: 'video' as const, providerAttachmentId: 'channel-forward-video', currentToken: 'synthetic-video-token',
+        inboundDurationSeconds: 2, width: 320, height: 240 }
+      outer.forwardedAttachments = kind === 'note' ? [] : kind === 'video' ? [video] : [...outer.forwardedAttachments!, video]
+      event.forwardedFrom!.attachments = outer.forwardedAttachments.map((attachment) => attachment.kind === 'video'
+        ? { kind: 'video', providerAttachmentId: attachment.providerAttachmentId, durationSeconds: 2, width: 320, height: 240 }
+        : { kind: 'image', providerAttachmentId: attachment.providerAttachmentId })
+      const api = apiFor(async () => outer, { getVideo: async () => ({ width: 320, height: 240, durationMs: 2_000, renditions: [
+        { url: 'https://maxvd123.okcdn.ru/synthetic-channel-forward', width: 320, height: 240, contentLength: 100 },
+      ] }) })
+      const pending = await accept(event)
+      const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api, media: fixture.media,
+        download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }) })
+      await expect(processor({ inboxId: pending.inboxId })).resolves.toBe('done')
+      const memory = await prisma.memory.findFirstOrThrow({ where: { familyId: fixture.familyId } })
+      expect(memory).toMatchObject({ kind, body: 'Verified nested channel caption', status: 'published' })
+      if (kind !== 'note') {
+        const reference = await prisma.maxVideoReference.findFirstOrThrow({ where: { memoryId: memory.id } })
+        await expect(createMaxVideoPlayback({ runtime: fixture.runtime, api }).readiness({ familyId: fixture.familyId,
+          principal: { userId: fixture.userId, sessionId: 'synthetic-channel-readiness' } }, reference.id))
+          .resolves.toEqual({ state: 'ready', recheckable: false })
+      }
+      expect(await prisma.maxMemoryBackup.count()).toBe(0)
+      expect(await prisma.maxOutgoingResponse.count()).toBe(0)
+    })
+  }
+
   async function familyFixture(subject: string, label: string) {
     const user = await prisma.user.create({ data: { displayName: `Synthetic ${label}` } })
     await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject } })
@@ -1176,6 +1335,21 @@ describe('MAX forward import integration', () => {
       cleanup: async () => { await rm(storageRoot, { recursive: true, force: true }); roots.delete(storageRoot) } }
   }
 })
+
+function channelForwardEvent(messageId: string, originalMessageId: string): Extract<MaxInboundEvent, { kind: 'message_created' }> {
+  return { kind: 'message_created', isChannel: true, senderId: '0', recipientId: '-79560265048692',
+    messageId, occurredAt: '2026-10-02T10:00:00.000Z', text: null, attachments: [],
+    forwardedFrom: { messageId: originalMessageId, attachments: [{ kind: 'image', providerAttachmentId: 'channel-nested-photo' }] } }
+}
+
+function channelForwardMessage(messageId: string, originalMessageId: string): MaxResolvedMessage {
+  return { messageId, senderId: '0', recipientId: '-79560265048692', recipientType: 'channel',
+    timestamp: Date.parse('2026-10-02T10:00:00.000Z'), text: null, attachments: [],
+    forwardedFrom: { messageId: originalMessageId, timestamp: Date.parse('2025-05-06T07:08:09.000Z') },
+    forwardedText: 'Verified nested channel caption', forwardedAttachments: [
+      { kind: 'image', providerAttachmentId: 'channel-nested-photo', url: 'https://image.example.invalid/channel-photo' },
+    ] }
+}
 
 function forwardedUpdate(timestamp: number) {
   return { update_type: 'message_created', timestamp, message: {
