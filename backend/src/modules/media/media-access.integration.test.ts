@@ -383,10 +383,11 @@ describe('Private media API', () => {
           validators.set(variant, etag)
           expect((await app.request(path, { headers: { Cookie: cookie } })).status).toBe(200)
         }
+        const headerVariants: Record<string, string>[] = [{}, { Range: 'bytes=0-3' }, { 'If-None-Match': etag }]
         for (const method of ['GET', 'HEAD']) {
           // Both callers have real access to their own family. A family-membership
           // check alone cannot reject a foreign asset placed under that family's URL.
-          for (const headers of [{}, { Range: 'bytes=0-3' }, { 'If-None-Match': etag }]) {
+          for (const headers of headerVariants) {
             const foreign = await app.request(path.replace(record.familyId, other.familyId), {
               method, headers: { Authorization: `Bearer ${other.owner.token}`, ...headers },
             })
@@ -407,8 +408,9 @@ describe('Private media API', () => {
     } } })).revokedAt).not.toBeNull()
     for (const variant of ['original', 'preview', 'display']) {
       const path = `/api/v1/families/${records[0]!.familyId}/media/${records[0]!.asset.id}/content?variant=${variant}`
+      const authentications: Record<string, string>[] = [{ Authorization: `Bearer ${viewer.token}` }, { Cookie: cookie }]
       for (const method of ['GET', 'HEAD']) {
-        for (const authentication of [{ Authorization: `Bearer ${viewer.token}` }, { Cookie: cookie }]) {
+        for (const authentication of authentications) {
           const response = await app.request(path, { method, headers: {
             ...authentication, Range: 'bytes=0-3', 'If-None-Match': validators.get(variant)!,
           } })
