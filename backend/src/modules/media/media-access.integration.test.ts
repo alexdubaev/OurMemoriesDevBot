@@ -379,7 +379,10 @@ describe('Private media API', () => {
         expect(own.headers.get('location')).toBeNull()
         const etag = own.headers.get('etag')!
         expect(etag).toBeTruthy()
-        if (index === 0) validators.set(variant, etag)
+        if (index === 0) {
+          validators.set(variant, etag)
+          expect((await app.request(path, { headers: { Cookie: cookie } })).status).toBe(200)
+        }
         for (const method of ['GET', 'HEAD']) {
           // Both callers have real access to their own family. A family-membership
           // check alone cannot reject a foreign asset placed under that family's URL.
@@ -445,7 +448,12 @@ describe('Private media API', () => {
     const wrongPublish = await jsonRequest(`/api/v1/families/${familyB.body.family.id}/memories`, second.token, 'POST', {
       kind: 'photo', childId: familyB.body.child.id, body: '', occurredAt: new Date().toISOString(), mediaIds: [assetId],
     }, randomUUID())
-    expect(wrongPublish.response.status).toBe(404)
+    expect(wrongPublish.response.status).toBe(409)
+    const nonexistentPublish = await jsonRequest(`/api/v1/families/${familyB.body.family.id}/memories`, second.token, 'POST', {
+      kind: 'photo', childId: familyB.body.child.id, body: '', occurredAt: new Date().toISOString(), mediaIds: [randomUUID()],
+    }, randomUUID())
+    expect(nonexistentPublish.response.status).toBe(wrongPublish.response.status)
+    expect(nonexistentPublish.body.error.code).toBe(wrongPublish.body.error.code)
     expect(await prisma.memory.count({ where: { familyId: familyB.body.family.id } })).toBe(0)
     expect(await prisma.memoryMedia.count({ where: { mediaId: assetId } })).toBe(0)
     expect(await prisma.mediaAsset.findUniqueOrThrow({ where: { id: assetId } }))
