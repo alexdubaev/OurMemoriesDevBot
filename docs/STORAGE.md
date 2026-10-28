@@ -6,6 +6,9 @@ Private file storage is built into this template and switched on. The reference 
 
 ## Two Drivers, One Contract
 
+For the current memoLy family access boundary and regression evidence, see
+[the family media isolation audit](development/FAMILY_MEDIA_ISOLATION.md).
+
 Everything above the storage layer talks to one provider-neutral port, `backend/src/storage/port.ts`. Two drivers implement it:
 
 | `PRIVATE_STORAGE_DRIVER` | What it is                                                         | What it needs                             |
