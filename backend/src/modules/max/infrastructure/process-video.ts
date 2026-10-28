@@ -77,7 +77,7 @@ export function createMaxVideoProcessor(options: { runtime: BackendRuntime; api:
         mediaIds: [],
         externalAttachment: 'max-video',
       }, async (tx, memoryId) => {
-        if (input.verifiedChannelId !== undefined) await assertMaxForwardBinding(tx, admission.familyId, input.verifiedChannelId)
+        if (input.verifiedChannelId !== undefined) await assertMaxForwardBinding(tx, admission.familyId, input.verifiedChannelId, input.event.isChannel === true)
         const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         const changed = await tx.maxSource.updateMany({ where: { id: source.id, status: 'accepted' }, data: {
           status: 'published', memoryId, userId: admission.userId, familyId: admission.familyId, childId: admission.childId,

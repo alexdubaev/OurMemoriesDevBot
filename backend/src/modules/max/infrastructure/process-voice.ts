@@ -61,7 +61,7 @@ export function createMaxVoiceProcessor(options: {
         id: source.plannedMemoryId, kind: 'voice', body: input.event.text ?? '',
         occurredAt: new Date(input.event.occurredAt), sourcePublishedAt: new Date(input.event.occurredAt), mediaIds: [mediaId],
       }, async (tx, memoryId) => {
-        if (input.verifiedChannelId !== undefined) await assertMaxForwardBinding(tx, admission.familyId, input.verifiedChannelId)
+        if (input.verifiedChannelId !== undefined) await assertMaxForwardBinding(tx, admission.familyId, input.verifiedChannelId, input.event.isChannel === true)
         const family = await tx.family.findUniqueOrThrow({ where: { id: admission.familyId }, select: { name: true } })
         await assertSourcePublicationTransition(tx, source.id)
         await tx.maxSource.update({ where: { id: source.id }, data: {
