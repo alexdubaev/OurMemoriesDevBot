@@ -454,6 +454,7 @@ describe('Private media API', () => {
     }, randomUUID())
     expect(nonexistentPublish.response.status).toBe(wrongPublish.response.status)
     expect(nonexistentPublish.body.error.code).toBe(wrongPublish.body.error.code)
+    expect(nonexistentPublish.body.error.message).toBe(wrongPublish.body.error.message)
     expect(await prisma.memory.count({ where: { familyId: familyB.body.family.id } })).toBe(0)
     expect(await prisma.memoryMedia.count({ where: { mediaId: assetId } })).toBe(0)
     expect(await prisma.mediaAsset.findUniqueOrThrow({ where: { id: assetId } }))
