@@ -164,6 +164,13 @@ then use the short lane. No product UI change is required merely to install tool
 
 ### Access and build inputs
 
+For disk-constrained production, build the accepted immutable images off-host and
+use the existing verified prebuilt-image path below by default. Keep current and
+designated recovery images locally; archive other unreferenced historical images
+only after verified restoration. Follow [Docker storage retention](../../docs/development/DOCKER_STORAGE_RETENTION.md)
+for the native build-cache policy and guarded host maintenance. This does not
+change application recovery, source/image checks or the S3 restore prerequisite.
+
 - Production is `app.memoly.ru`; run host commands from `/opt/memoly/app`.
 - SSH is supplied by the owner through a secure store or an already configured SSH
   agent. Check access without exposing credentials:
