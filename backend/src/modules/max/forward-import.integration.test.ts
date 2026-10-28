@@ -20,6 +20,7 @@ import { createMaxApi, MaxProviderError } from './infrastructure/max-api'
 import { chooseMaxTarget } from './infrastructure/source-target'
 import { createMaxChannelOnboarding } from './application/channel-onboarding'
 import { createMaxResponseDelivery } from './infrastructure/deliver-response'
+import { planMaxChannelForwardRecovery, queueMaxChannelForwardRecovery } from './infrastructure/channel-forward-recovery'
 import { choicePayload } from '../../bot-family-target'
 import { MaxChannelProviderError } from './application/channel-protocol'
 
@@ -1210,6 +1211,67 @@ describe('MAX forward import integration', () => {
       expect(await prisma.maxOutgoingResponse.count()).toBe(0)
     })
   }
+
+  test('repairs one scrubbed denied channel forward atomically and repeated concurrent apply publishes once', async () => {
+    const fixture = await familyFixture('7093', 'channel-forward-repair')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'connected' } })
+    const event = channelForwardEvent('channel-repair-outer', 'private-repair-original')
+    const pending = await accept(event)
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: pending.inboxId } })
+    // Durable state left by the old worker: original source identity remains, payload was scrubbed.
+    await prisma.maxSource.update({ where: { id: source.id }, data: { status: 'denied', rejectionCode: 'denied' } })
+    await prisma.maxInbox.update({ where: { id: pending.inboxId }, data: { status: 'processed', processedAt: new Date(),
+      encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    const api = apiFor(async () => channelForwardMessage(event.messageId, 'private-repair-original'))
+    const options = { db: prisma, api, botId: '900', encrypt: crypto.encrypt }
+    const plan = await planMaxChannelForwardRecovery(options, source.id)
+    const applied = await Promise.all([
+      queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint),
+      queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint),
+    ])
+    expect(applied.map(({ status }) => status).sort()).toEqual(['already_queued', 'queued'])
+    const repairTasks = await prisma.taskOutbox.findMany({ where: { type: 'max:process', dedupeKey: { startsWith: 'max-channel-forward-repair:' } } })
+    expect(repairTasks).toHaveLength(1)
+    expect(repairTasks[0]!.payload).toEqual({ inboxId: source.inboxId })
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } }))
+      .toMatchObject({ status: 'accepted', plannedMemoryId: source.plannedMemoryId })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api, media: fixture.media,
+      download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }) })
+    await expect(processor(repairTasks[0]!.payload)).resolves.toBe('done')
+    await expect(queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint)).resolves.toEqual({ status: 'already_queued' })
+    await expect(processor(repairTasks[0]!.payload)).resolves.toBe('skipped')
+    expect(await prisma.memory.count({ where: { id: source.plannedMemoryId, familyId: fixture.familyId } })).toBe(1)
+    expect(await prisma.mediaAsset.count()).toBe(1)
+    expect(await prisma.maxInbox.findUniqueOrThrow({ where: { id: source.inboxId } })).toMatchObject({ status: 'processed', encryptedPayload: Buffer.alloc(0) })
+  })
+
+  test('recovery rejects changed content, revoked binding and redacted sources without reopening the inbox', async () => {
+    const fixture = await familyFixture('7094', 'channel-forward-repair-deny')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'connected' } })
+    const event = channelForwardEvent('channel-repair-deny-outer', 'private-repair-deny-original')
+    const pending = await accept(event)
+    const source = await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: pending.inboxId } })
+    await prisma.maxSource.update({ where: { id: source.id }, data: { status: 'denied', rejectionCode: 'denied' } })
+    await prisma.maxInbox.update({ where: { id: pending.inboxId }, data: { status: 'processed', processedAt: new Date(),
+      encryptedPayload: Buffer.alloc(0), encryptionIv: Buffer.alloc(0), encryptionAuthTag: Buffer.alloc(0) } })
+    const outer = channelForwardMessage(event.messageId, 'private-repair-deny-original')
+    const options = { db: prisma, api: apiFor(async () => outer), botId: '900', encrypt: crypto.encrypt }
+    const plan = await planMaxChannelForwardRecovery(options, source.id)
+    outer.forwardedText = 'Changed after inspection'
+    await expect(queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint)).rejects.toThrow('plan_changed')
+    outer.forwardedText = 'Verified nested channel caption'
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'disconnected' } })
+    await expect(queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint)).rejects.toThrow('binding_unavailable')
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'connected' } })
+    await prisma.maxInbox.update({ where: { id: pending.inboxId }, data: { controlRedactedAt: new Date() } })
+    await expect(queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint)).rejects.toThrow('ineligible')
+    expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } })).toMatchObject({ status: 'denied' })
+    expect(await prisma.maxInbox.findUniqueOrThrow({ where: { id: pending.inboxId } })).toMatchObject({ status: 'processed', encryptedPayload: Buffer.alloc(0) })
+    expect(await prisma.taskOutbox.count({ where: { dedupeKey: { startsWith: 'max-channel-forward-repair:' } } })).toBe(0)
+    expect(await prisma.memory.count()).toBe(0)
+  })
 
   async function familyFixture(subject: string, label: string) {
     const user = await prisma.user.create({ data: { displayName: `Synthetic ${label}` } })
