@@ -333,6 +333,126 @@ describe('Private media API', () => {
     expect((await app.request(contentPath, { headers: { Cookie: mediaCookie! } })).status).toBe(404)
   })
 
+  test('family owners cannot read each other\'s stored photo variants by mixing family and media IDs', async () => {
+    const first = await admittedUser('First family owner', '43031')
+    const second = await admittedUser('Second family owner', '43032')
+    const viewer = await admittedUser('Revocable viewer', '43033')
+    const familyA = await createFamily(first.token, 'First private family')
+    const familyB = await createFamily(second.token, 'Second private family')
+    await inviteMember(first.token, viewer.token, familyA.body.family.id, 'viewer')
+    const membership = await prisma.familyMember.findUniqueOrThrow({
+      where: { familyId_userId: { familyId: familyA.body.family.id, userId: viewer.userId } },
+    })
+    const records = []
+    for (const [owner, family] of [[first, familyA], [second, familyB]] as const) {
+      const uploaded = await uploadPhoto(owner.token, family.body.family.id, 'memory', pngFixture)
+      expect(uploaded.finalized.response.status).toBe(200)
+      const published = await jsonRequest(`/api/v1/families/${family.body.family.id}/memories`, owner.token, 'POST', {
+        kind: 'photo', childId: family.body.child.id, body: '',
+        occurredAt: new Date().toISOString(), mediaIds: [uploaded.reserved.body.assetId],
+      }, randomUUID())
+      expect(published.response.status).toBe(201)
+      const asset = await prisma.mediaAsset.findUniqueOrThrow({
+        where: { id: uploaded.reserved.body.assetId }, include: { variants: true },
+      })
+      expect(asset.familyId).toBe(family.body.family.id)
+      expect(asset.variants.map(({ variant }) => variant).sort()).toEqual(['display', 'preview'])
+      records.push({ owner, familyId: family.body.family.id, asset })
+    }
+    const session = await app.request(`/api/v1/families/${records[0]!.familyId}/media/playback-session`, {
+      method: 'POST', headers: { Authorization: `Bearer ${viewer.token}` },
+    })
+    expect(session.status).toBe(204)
+    const cookie = session.headers.get('set-cookie')!.split(';')[0]!
+    const validators = new Map<string, string>()
+    for (const [index, record] of records.entries()) {
+      const other = records[1 - index]!
+      for (const variant of ['original', 'preview', 'display']) {
+        const path = `/api/v1/families/${record.familyId}/media/${record.asset.id}/content?variant=${variant}`
+        const own = await app.request(path, { headers: { Authorization: `Bearer ${record.owner.token}` } })
+        expect(own.status).toBe(200)
+        const key = variant === 'original' ? record.asset.originalKey
+          : record.asset.variants.find((row) => row.variant === variant)!.objectKey
+        const stored = await privateStorage.storage.readObject({ key })
+        expect(stored).not.toBeNull()
+        expect(new Uint8Array(await own.arrayBuffer())).toEqual(new Uint8Array(await new Response(stored!.body).arrayBuffer()))
+        expect(own.headers.get('location')).toBeNull()
+        const etag = own.headers.get('etag')!
+        expect(etag).toBeTruthy()
+        if (index === 0) validators.set(variant, etag)
+        for (const method of ['GET', 'HEAD']) {
+          // Both callers have real access to their own family. A family-membership
+          // check alone cannot reject a foreign asset placed under that family's URL.
+          for (const headers of [{}, { Range: 'bytes=0-3' }, { 'If-None-Match': etag }]) {
+            const foreign = await app.request(path.replace(record.familyId, other.familyId), {
+              method, headers: { Authorization: `Bearer ${other.owner.token}`, ...headers },
+            })
+            expect(foreign.status).toBe(404)
+            expect(foreign.headers.get('etag')).toBeNull()
+            expect(foreign.headers.get('location')).toBeNull()
+          }
+          expect((await app.request(path, { method })).status).toBe(401)
+          expect((await app.request(path, { method, headers: { Authorization: `Bearer ${other.owner.token}` } })).status).toBe(404)
+        }
+      }
+    }
+    const revoked = await jsonRequest(`/api/v1/families/${records[0]!.familyId}/members/${viewer.userId}`,
+      first.token, 'DELETE', { expectedVersion: membership.version })
+    expect(revoked.response.status).toBe(204)
+    expect((await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: {
+      familyId: records[0]!.familyId, userId: viewer.userId,
+    } } })).revokedAt).not.toBeNull()
+    for (const variant of ['original', 'preview', 'display']) {
+      const path = `/api/v1/families/${records[0]!.familyId}/media/${records[0]!.asset.id}/content?variant=${variant}`
+      for (const method of ['GET', 'HEAD']) {
+        for (const authentication of [{ Authorization: `Bearer ${viewer.token}` }, { Cookie: cookie }]) {
+          const response = await app.request(path, { method, headers: {
+            ...authentication, Range: 'bytes=0-3', 'If-None-Match': validators.get(variant)!,
+          } })
+          expect(response.status).toBe(404)
+          expect(response.headers.get('etag')).toBeNull()
+        }
+      }
+    }
+    // Access denial does not delete or move either family's published objects.
+    for (const { asset, familyId } of records) {
+      expect(await prisma.mediaAsset.findUniqueOrThrow({ where: { id: asset.id } }))
+        .toMatchObject({ familyId, originalStatus: 'stored', deletedAt: null })
+      expect(await privateStorage.storage.headObject(asset.originalKey)).not.toBeNull()
+    }
+  })
+
+  test('a foreign family cannot finalize or publish another family\'s pending upload', async () => {
+    const first = await admittedUser('Upload owner', '43041')
+    const second = await admittedUser('Foreign upload owner', '43042')
+    const familyA = await createFamily(first.token, 'Upload family')
+    const familyB = await createFamily(second.token, 'Foreign upload family')
+    const uploaded = await reserveAndPut(first.token, familyA.body.family.id, 'memory', pngFixture)
+    const assetId = uploaded.reserved.body.assetId
+    const before = await prisma.mediaAsset.findUniqueOrThrow({ where: { id: assetId } })
+    const wrongFinalize = await jsonRequest(
+      `/api/v1/families/${familyB.body.family.id}/uploads/${uploaded.reserved.body.upload.uploadId}/finalize`,
+      second.token, 'POST', {},
+    )
+    expect(wrongFinalize.response.status).toBe(404)
+    expect(await prisma.mediaAsset.findUniqueOrThrow({ where: { id: assetId } })).toEqual(before)
+    expect(await prisma.taskOutbox.count({ where: { type: 'media:delete' } })).toBe(0)
+    const finalized = await jsonRequest(
+      `/api/v1/families/${familyA.body.family.id}/uploads/${uploaded.reserved.body.upload.uploadId}/finalize`,
+      first.token, 'POST', {},
+    )
+    expect(finalized.response.status).toBe(200)
+    const wrongPublish = await jsonRequest(`/api/v1/families/${familyB.body.family.id}/memories`, second.token, 'POST', {
+      kind: 'photo', childId: familyB.body.child.id, body: '', occurredAt: new Date().toISOString(), mediaIds: [assetId],
+    }, randomUUID())
+    expect(wrongPublish.response.status).toBe(404)
+    expect(await prisma.memory.count({ where: { familyId: familyB.body.family.id } })).toBe(0)
+    expect(await prisma.memoryMedia.count({ where: { mediaId: assetId } })).toBe(0)
+    expect(await prisma.mediaAsset.findUniqueOrThrow({ where: { id: assetId } }))
+      .toMatchObject({ familyId: familyA.body.family.id, originalStatus: 'stored', deletedAt: null })
+    expect(await privateStorage.storage.headObject(before.originalKey)).not.toBeNull()
+  })
+
   test('finalized private videos enqueue and publish one authenticated poster without mutating playback state', async () => {
     const owner = await admittedUser('Video poster owner', '43020')
     const outsider = await admittedUser('Video poster outsider', '43021')
