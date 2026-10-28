@@ -26,6 +26,7 @@ images, updates PostgreSQL, or switches storage drivers.
 ## Archive before removing historical images
 
 Use the dedicated private `memoly-release-archives` bucket, not the media bucket.
+Existing protected credential locations are listed in [S3 operations access](S3_OPERATIONS_ACCESS.md).
 The media inventory/restore contract deliberately covers its entire bucket.
 The archive identity needs only GetObject, PutObject and ListBucket on this
 archive bucket. Keep credentials in the existing protected server configuration;

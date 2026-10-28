@@ -1,5 +1,7 @@
 # Selectel private media migration
 
+Existing protected credential locations are listed in [S3 operations access](S3_OPERATIONS_ACCESS.md).
+
 Scope: preserve every stored original, display/preview/poster/playback variant,
 avatar and durable retirement barrier. Keep PostgreSQL, object keys, ACLs, MAX
 delivery and the accepted UI unchanged. No SQL migration is needed.
