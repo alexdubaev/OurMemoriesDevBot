@@ -21,6 +21,7 @@ import { chooseMaxTarget } from './infrastructure/source-target'
 import { createMaxChannelOnboarding } from './application/channel-onboarding'
 import { createMaxResponseDelivery } from './infrastructure/deliver-response'
 import { planMaxChannelForwardRecovery, queueMaxChannelForwardRecovery } from './infrastructure/channel-forward-recovery'
+import { createMaxVideoPlayback } from './infrastructure/video-playback'
 import { choicePayload } from '../../bot-family-target'
 import { MaxChannelProviderError } from './application/channel-protocol'
 
@@ -1243,7 +1244,9 @@ describe('MAX forward import integration', () => {
     await expect(processor(repairTasks[0]!.payload)).resolves.toBe('skipped')
     expect(await prisma.memory.count({ where: { id: source.plannedMemoryId, familyId: fixture.familyId } })).toBe(1)
     expect(await prisma.mediaAsset.count()).toBe(1)
-    expect(await prisma.maxInbox.findUniqueOrThrow({ where: { id: source.inboxId } })).toMatchObject({ status: 'processed', encryptedPayload: Buffer.alloc(0) })
+    const completed = await prisma.maxInbox.findUniqueOrThrow({ where: { id: source.inboxId } })
+    expect(completed.status).toBe('processed')
+    expect(completed.encryptedPayload.byteLength).toBe(0)
   })
 
   test('recovery rejects changed content, revoked binding and redacted sources without reopening the inbox', async () => {
@@ -1268,10 +1271,45 @@ describe('MAX forward import integration', () => {
     await prisma.maxInbox.update({ where: { id: pending.inboxId }, data: { controlRedactedAt: new Date() } })
     await expect(queueMaxChannelForwardRecovery(options, source.id, plan.fingerprint)).rejects.toThrow('ineligible')
     expect(await prisma.maxSource.findUniqueOrThrow({ where: { id: source.id } })).toMatchObject({ status: 'denied' })
-    expect(await prisma.maxInbox.findUniqueOrThrow({ where: { id: pending.inboxId } })).toMatchObject({ status: 'processed', encryptedPayload: Buffer.alloc(0) })
+    const unchanged = await prisma.maxInbox.findUniqueOrThrow({ where: { id: pending.inboxId } })
+    expect(unchanged.status).toBe('processed')
+    expect(unchanged.encryptedPayload.byteLength).toBe(0)
     expect(await prisma.taskOutbox.count({ where: { dedupeKey: { startsWith: 'max-channel-forward-repair:' } } })).toBe(0)
     expect(await prisma.memory.count()).toBe(0)
   })
+
+  for (const kind of ['note', 'video', 'media'] as const) {
+    test(`imports a forwarded channel ${kind} with working video readiness and no outbound loop`, async () => {
+      const fixture = await familyFixture('7095', `channel-forward-${kind}`)
+      await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+      await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'connected' } })
+      const event = channelForwardEvent(`channel-${kind}`, `nested-${kind}`)
+      const outer = channelForwardMessage(event.messageId, `nested-${kind}`)
+      const video = { kind: 'video' as const, providerAttachmentId: 'channel-forward-video', currentToken: 'synthetic-video-token',
+        inboundDurationSeconds: 2, width: 320, height: 240 }
+      outer.forwardedAttachments = kind === 'note' ? [] : kind === 'video' ? [video] : [...outer.forwardedAttachments!, video]
+      event.forwardedFrom!.attachments = outer.forwardedAttachments.map((attachment) => attachment.kind === 'video'
+        ? { kind: 'video', providerAttachmentId: attachment.providerAttachmentId, durationSeconds: 2, width: 320, height: 240 }
+        : { kind: 'image', providerAttachmentId: attachment.providerAttachmentId })
+      const api = apiFor(async () => outer, { getVideo: async () => ({ renditions: [
+        { url: 'https://maxvd123.okcdn.ru/synthetic-channel-forward', width: 320, height: 240, contentLength: 100 },
+      ] }) })
+      const pending = await accept(event)
+      const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, api, media: fixture.media,
+        download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }) })
+      await expect(processor({ inboxId: pending.inboxId })).resolves.toBe('done')
+      const memory = await prisma.memory.findFirstOrThrow({ where: { familyId: fixture.familyId } })
+      expect(memory).toMatchObject({ kind, body: 'Verified nested channel caption', status: 'published' })
+      if (kind !== 'note') {
+        const reference = await prisma.maxVideoReference.findFirstOrThrow({ where: { memoryId: memory.id } })
+        await expect(createMaxVideoPlayback({ runtime: fixture.runtime, api }).readiness({ familyId: fixture.familyId,
+          principal: { userId: fixture.userId, sessionId: 'synthetic-channel-readiness' } }, reference.id))
+          .resolves.toEqual({ state: 'ready', recheckable: false })
+      }
+      expect(await prisma.maxMemoryBackup.count()).toBe(0)
+      expect(await prisma.maxOutgoingResponse.count()).toBe(0)
+    })
+  }
 
   async function familyFixture(subject: string, label: string) {
     const user = await prisma.user.create({ data: { displayName: `Synthetic ${label}` } })
