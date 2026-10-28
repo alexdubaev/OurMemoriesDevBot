@@ -3036,6 +3036,42 @@ test('S3 migration runtime retains exact filesystem recovery and rejects direct 
   assert.notEqual(profile(drift).status, 0)
 })
 
+test('channel forward runtime retains exact filesystem recovery and rejects source drift', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
+  const baseline = '54069fd7c66a2d8a30ccee7b18447e3056ee0742'
+  const blobs = [
+    ['backend/scripts/recover-max-channel-forward.ts', '3da79ccea51f85e677b7137493e9cfa092d71be2'],
+    ['backend/src/modules/max/application/ports.ts', 'b183dfe8c89efe1481208e2ab452b2d87e35e271'],
+    ['backend/src/modules/max/infrastructure/channel-forward-recovery.ts', '1bf66e18f43a8e28c5db77b5bba952fe3a6ea658'],
+    ['backend/src/modules/max/infrastructure/forward-import.ts', '1a34fd171cfd43c5a19fe10bd22d9dd57690d81d'],
+    ['backend/src/modules/max/infrastructure/process-image.ts', 'f809db5ed52e28da00bb3f377e08db523f15170b'],
+    ['backend/src/modules/max/infrastructure/process-task.ts', 'ad87b85570e72ab7b3dfd4cf8789079822fcebbe'],
+    ['backend/src/modules/max/infrastructure/process-video.ts', '84b549f2e39eeedf98d872543e5720f76ca5e1b0'],
+    ['backend/src/modules/max/infrastructure/process-voice.ts', '3547e3bfe8a68d2a281b72629106e036749ee941'],
+  ]
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const directory = mkdtempSync(resolve(root, '.scratch', 'rollback-channel-forward-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, baseline], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(directory)
+  const source = commitFrozenSourceFiles({ root: directory, sha: baseline }, blobs, 'freeze channel forward production inputs')
+  assert.equal(productionCompatibilityFingerprint(source.root), '1540dbfda304a7bc05c96930702ef585adc0bae167a8dfbb7d85e9d64e67ed59')
+  const profile = (candidate, driver = 'filesystem') => spawnSync(bashExecutable, ['-s'], {
+    cwd: root, encoding: 'utf8', timeout: 30_000,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\ncompose() { [ '${driver}' = filesystem ]; }\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${maxVideoRecoveryBackend}\n`,
+  })
+  const accepted = profile(source)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
+  assert.notEqual(profile(source, 's3').status, 0)
+  for (const path of ['backend/src/modules/max/infrastructure/process-task.ts',
+    'backend/src/modules/max/infrastructure/channel-forward-recovery.ts', 'backend/src/storage/s3-storage.ts']) {
+    const drift = commitSourceChange(source, path, '\n// unmeasured runtime drift\n', 'reject channel forward runtime drift')
+    assert.notEqual(profile(drift).status, 0)
+  }
+})
+
 test('owner-guide and disabled-instructions runtimes accept only their frozen d299 filesystem recovery profiles', {
   timeout: process.platform === 'win32' ? 240_000 : 90_000,
 }, () => {
