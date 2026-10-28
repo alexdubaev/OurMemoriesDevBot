@@ -1291,7 +1291,7 @@ describe('MAX forward import integration', () => {
       event.forwardedFrom!.attachments = outer.forwardedAttachments.map((attachment) => attachment.kind === 'video'
         ? { kind: 'video', providerAttachmentId: attachment.providerAttachmentId, durationSeconds: 2, width: 320, height: 240 }
         : { kind: 'image', providerAttachmentId: attachment.providerAttachmentId })
-      const api = apiFor(async () => outer, { getVideo: async () => ({ renditions: [
+      const api = apiFor(async () => outer, { getVideo: async () => ({ width: 320, height: 240, durationMs: 2_000, renditions: [
         { url: 'https://maxvd123.okcdn.ru/synthetic-channel-forward', width: 320, height: 240, contentLength: 100 },
       ] }) })
       const pending = await accept(event)
