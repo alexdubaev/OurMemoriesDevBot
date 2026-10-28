@@ -30,6 +30,7 @@ git rev-parse HEAD
 `app.memoly.ru`, рабочий каталог на нём — `/opt/memoly/app`. SSH-доступ должен быть
 заранее выдан владельцем через защищённое хранилище или SSH agent. Сборка и
 production-доставка выполняются вручную по Selectel runbook через этот доступ.
+Для работы с S3 читай [docs/development/S3_OPERATIONS_ACCESS.md](docs/development/S3_OPERATIONS_ACCESS.md): там указаны постоянные защищённые пути конфигурации и назначение бакетов, без значений секретов.
 Для выбора проверки следуй [малому workflow](docs/development/SMALL_CHANGE_WORKFLOW.md); проверка определяется риском и затронутой границей. Перед merge для применимого release/risk gate сохраняй evidence точного source SHA.
 FAST для косметических/документационных правок, STANDARD для обычной разработки,
 FULL для авторизации, сессий, ACL, приватных медиа, данных, контрактов и критической
