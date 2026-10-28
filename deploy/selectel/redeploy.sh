@@ -860,7 +860,7 @@ rollback_source_compatibility_profile() {
 				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:5fa0ba3bc8d6a3c6d1a67b8b2b557300a3a6487fd0e0649e92e44f515cef9d00:max-video-retirement"
 				# Exact owner-only notification pilot; retains d299 images, filesystem,
 				# Control/legacy-media guards and the measured 62-to-63 enum ledger.
-				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:5ba0f03f8a30fee1a4e25d6531b52c3d6fac46f0b363bd317cd07430f01bb07d:max-video-retirement") ;;
+				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:5ba0f03f8a30fee1a4e25d6531b52c3d6fac46f0b363bd317cd07430f01bb07d:max-video-retirement"
 				"d2999cca6e4e5980cc2277de7453440353f5b392:$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT:ab7b198170fdbc5a62fdc45946bf97760fbf1f0178540883020dd4e5d4900646:max-video-retirement") ;;
 		*) return 1 ;;
 	esac
