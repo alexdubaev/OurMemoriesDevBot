@@ -3008,6 +3008,34 @@ test('family notifications retain the exact measured d299 recovery source withou
   assert.notEqual(profile(drift).status, 0)
 })
 
+test('S3 migration runtime retains exact filesystem recovery and rejects direct S3 rollback', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
+  const baseline = 'dc37ef5f0136d7cd5a1d27d3976acb2d72ba344a'
+  const blobs = [
+    ['backend/scripts/migrate-private-storage.ts', '30fb61983469cccbcdb5cde7a8ac08d2195fc84a'],
+    ['backend/src/storage/s3-storage.ts', 'd8288c9db84b7fb166977b96dc63e299b29f2142'],
+    ['backend/src/storage/storage-migration.ts', '74cd83f8ff51fb7006af3559fb4d5adeb0ddaaa0'],
+  ]
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const directory = mkdtempSync(resolve(root, '.scratch', 'rollback-s3-migration-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, baseline], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(directory)
+  const source = commitFrozenSourceFiles({ root: directory, sha: baseline }, blobs, 'freeze verified S3 migration production inputs')
+  assert.equal(productionCompatibilityFingerprint(source.root), '9ebdb17ce7dad5bc3571c4ba5b5ebd9376c6e70d14fffdb82e7d059c57b79923')
+  const profile = (candidate, driver = 'filesystem') => spawnSync(bashExecutable, ['-s'], {
+    cwd: root, encoding: 'utf8', timeout: 30_000,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(candidate.root)}\nMEMOLY_PRODUCT_SHA=${candidate.sha}\ncompose() { [ '${driver}' = filesystem ]; }\nrollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" ${maxVideoRecoveryBackend}\n`,
+  })
+  const accepted = profile(source)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim().split('\n').at(-1), 'max-video-retirement')
+  assert.notEqual(profile(source, 's3').status, 0)
+  const drift = commitSourceChange(source, 'backend/src/storage/s3-storage.ts', '\n// unmeasured storage behavior\n', 'reject S3 migration runtime drift')
+  assert.notEqual(profile(drift).status, 0)
+})
+
 test('owner-guide and disabled-instructions runtimes accept only their frozen d299 filesystem recovery profiles', {
   timeout: process.platform === 'win32' ? 240_000 : 90_000,
 }, () => {
