@@ -39,6 +39,7 @@ describe('MAX notification pilot PostgreSQL integration', () => {
     MAX_INBOX_ENCRYPTION_KEY: 'B'.repeat(43),
     MAX_MINI_APP_URL: 'https://app.example.test',
     MAX_NOTIFICATIONS_PILOT_ENABLED: 'true',
+    MAX_NOTIFICATIONS_AUDIENCE: 'owner',
     MAX_NOTIFICATIONS_PILOT_SINCE: pilotSince,
     CORS_ORIGINS: 'http://localhost:5173',
   }
@@ -100,6 +101,33 @@ describe('MAX notification pilot PostgreSQL integration', () => {
     return { ...env, CONTROL_OWNER_USER_IDS: [owner] }
   }
 
+  function familyConfig(overrides: Record<string, string> = {}) {
+    return loadEnv({ ...envInput, CONTROL_OWNER_USER_IDS: '', MAX_NOTIFICATIONS_PILOT_SUBJECT: '',
+      MAX_NOTIFICATIONS_AUDIENCE: 'family', ...overrides })
+  }
+
+  async function addMember(role: 'full' | 'viewer' = 'full', displayName = 'Synthetic family member') {
+    const userId = randomUUID()
+    extraUserIds.push(userId)
+    await prisma.user.create({ data: { id: userId, displayName } })
+    await prisma.familyMember.create({ data: { familyId, userId, role } })
+    return userId
+  }
+
+  async function addOtherFamilyMember(displayName = 'Unrelated family member') {
+    const userId = randomUUID()
+    const otherFamilyId = randomUUID()
+    extraUserIds.push(userId)
+    extraFamilyIds.push(otherFamilyId)
+    await prisma.user.create({ data: { id: userId, displayName } })
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET CONSTRAINTS ALL DEFERRED`
+      await tx.family.create({ data: { id: otherFamilyId, ownerUserId: userId, name: 'Unrelated synthetic family', timezone: 'Europe/Moscow' } })
+      await tx.familyMember.create({ data: { familyId: otherFamilyId, userId, role: 'full' } })
+    })
+    return userId
+  }
+
   async function engage(owner = ownerId, startedAt = new Date(Date.now() - 60_000), identitySubject = subject) {
     await prisma.externalIdentity.create({ data: { userId: owner, provider: 'max', subject: identitySubject } })
     const inbox = await prisma.maxInbox.create({ data: {
@@ -156,6 +184,22 @@ describe('MAX notification pilot PostgreSQL integration', () => {
 
   async function outboxForFamily() {
     return prisma.taskOutbox.findMany({ where: { type: 'max:notify-pilot', dedupeKey: { contains: familyId } }, orderBy: { createdAt: 'asc' } })
+  }
+
+  async function drainPilot(config: ReturnType<typeof loadEnv>, api: ReturnType<typeof fakeApi>, now = new Date(Date.now() + 60_000)) {
+    const deliver = createPilotNotificationDelivery({ prisma, config, api })
+    const handler = { 'max:notify-pilot': { ...taskHandlers['max:notify-pilot'],
+      run: ({ payload }: TaskHandlerContext) => deliver(payload) } }
+    const { drainTaskOutbox } = await import('../../outbox')
+    return drainTaskOutbox({ prisma, env: config } as never, { handlers: handler, now, clock: () => now })
+  }
+
+  async function publishFamilyNote(config: ReturnType<typeof loadEnv>, body: string) {
+    const memoryId = randomUUID()
+    await createSourceMemoryPublisher(prisma, await access(), config).publish({
+      familyId, principal: { userId: ownerId, sessionId },
+    }, { id: memoryId, kind: 'note', body, occurredAt: new Date(), mediaIds: [] })
+    return prisma.taskOutbox.findMany({ where: { type: 'max:notify-pilot', dedupeKey: { startsWith: `feed:${familyId}:${memoryId}` } }, orderBy: { createdAt: 'asc' } })
   }
 
   function fakeApi(options: {
@@ -364,6 +408,170 @@ describe('MAX notification pilot PostgreSQL integration', () => {
       id: randomUUID(), kind: 'note', body: 'Other family publication', occurredAt: new Date(), mediaIds: [],
     })
     expect(await prisma.taskOutbox.count({ where: { type: 'max:notify-pilot', dedupeKey: { startsWith: `feed:${secondFamilyId}:` } } })).toBe(0)
+  })
+
+  test('family audience HTTP feed replay fans out once to each eligible active member', async () => {
+    await engage()
+    const viewerId = await addMember('viewer', 'Eligible viewer')
+    const viewerSubject = randomSubject()
+    await engage(viewerId, undefined, viewerSubject)
+
+    const ambiguousId = await addMember('full', 'Ambiguous identity member')
+    await engage(ambiguousId, undefined, randomSubject())
+    await engage(ambiguousId, undefined, randomSubject())
+    const inactiveId = await addMember('full', 'Inactive control user')
+    await engage(inactiveId, undefined, randomSubject())
+    await prisma.user.update({ where: { id: inactiveId }, data: { controlState: 'trashed' } })
+    const unengagedId = await addMember('full', 'Unengaged member')
+    await prisma.externalIdentity.create({ data: { userId: unengagedId, provider: 'max', subject: randomSubject() } })
+    const unrelatedId = await addOtherFamilyMember()
+    await engage(unrelatedId, undefined, randomSubject())
+
+    const config = familyConfig()
+    app = createApp({ env: config, prisma })
+    const token = await authToken()
+    const key = randomUUID()
+    const body = JSON.stringify({ kind: 'note', body: 'Family audience note', occurredAt: new Date().toISOString() })
+    const request = () => app.request(`/api/v1/families/${familyId}/memories`, {
+      method: 'POST', headers: { authorization: token, 'content-type': 'application/json', 'idempotency-key': key },
+      body,
+    })
+    const responses = await Promise.all([request(), request()])
+    expect(responses.map(({ status }) => status).every((status) => status === 200 || status === 201)).toBe(true)
+    const created = await Promise.all(responses.map(async (response) => await response.json() as { id: string }))
+    expect(new Set(created.map(({ id }) => id)).size).toBe(1)
+
+    const intents = await outboxForFamily()
+    expect(intents).toHaveLength(2)
+    const identities = await prisma.externalIdentity.findMany({ where: { userId: { in: [ownerId, viewerId] }, provider: 'max' }, select: { id: true, userId: true } })
+    expect(intents.map(({ dedupeKey }) => dedupeKey).sort()).toEqual(identities.map(({ id }) => `feed:${familyId}:${created[0]!.id}:recipient:${id}`).sort())
+    expect(intents.every(({ payload }) => (payload as { audience?: string }).audience === 'family')).toBe(true)
+
+    const sent: Array<{ destination: string | null; body: Record<string, unknown> }> = []
+    const metrics = await drainPilot(config, fakeApi({ onSend: async ({ url, body }) => {
+      sent.push({ destination: url.searchParams.get('user_id'), body })
+    } }))
+    expect(metrics.done).toBe(2)
+    expect(sent.map(({ destination }) => destination).sort()).toEqual([subject, viewerSubject].sort())
+    expect(sent.every(({ body }) => body.text === 'В семейной ленте — новая заметка ✨' &&
+      (body.attachments as Array<{ payload?: { buttons?: Array<Array<{ type?: string }>> } }>)[0]?.payload?.buttons?.[0]?.[0]?.type === 'open_app')).toBe(true)
+    const delivered = await prisma.taskOutbox.findMany({ where: { id: { in: intents.map(({ id }) => id) } } })
+    expect(delivered.every(({ status, payload, redactedAt }) => status === 'done' && JSON.stringify(payload) === '{}' && redactedAt !== null)).toBe(true)
+  })
+
+  test('family audience album batch replay creates one intent per recipient and skips a revoked member', async () => {
+    await engage()
+    const viewerId = await addMember('viewer', 'Album viewer')
+    const viewerSubject = randomSubject()
+    await engage(viewerId, undefined, viewerSubject)
+    const config = familyConfig()
+    app = createApp({ env: config, prisma })
+    const { album, entry } = await createAlbumRows('Family album')
+    const photos = await Promise.all([photo(), photo()])
+    const token = await authToken()
+    const key = randomUUID()
+    const path = `/api/v1/families/${familyId}/albums/${album.id}/entries/${entry.id}/sources`
+    const body = { expectedVersion: 1, sources: photos.map(({ id }) => ({ memoryId: null, sourceKind: 'private_storage', sourceId: id })) }
+    const sendSources = () => app.request(path, {
+      method: 'PUT', headers: { authorization: token, 'content-type': 'application/json', 'idempotency-key': key }, body: JSON.stringify(body),
+    })
+    const responses = await Promise.all([sendSources(), sendSources()])
+    expect(responses.map(({ status }) => status)).toEqual([200, 200])
+    await prisma.idempotencyRecord.deleteMany({ where: { actorUserId: ownerId, operation: `albums:${album.id}:entries:${entry.id}:sources`, key } })
+    expect((await sendSources()).status).toBe(200)
+
+    const intents = await prisma.taskOutbox.findMany({ where: { type: 'max:notify-pilot', dedupeKey: { startsWith: `album:${familyId}:${album.id}:${entry.id}:` } }, orderBy: { createdAt: 'asc' } })
+    expect(intents).toHaveLength(2)
+    expect(intents.every(({ payload }) => (payload as { photoCount?: number }).photoCount === 2)).toBe(true)
+    expect(await prisma.albumPhoto.count({ where: { familyId } })).toBe(2)
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId, userId: viewerId } }, data: { revokedAt: new Date() } })
+
+    const sent: Array<{ destination: string | null; body: Record<string, unknown> }> = []
+    const metrics = await drainPilot(config, fakeApi({ onSend: async ({ url, body: message }) => {
+      sent.push({ destination: url.searchParams.get('user_id'), body: message })
+    } }))
+    expect(metrics.done).toBe(1)
+    expect(metrics.skipped).toBe(1)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ destination: subject })
+    expect(sent[0]!.body.text).toBe('В альбоме «Family album» — 2 новых фото 📸')
+    expect((sent[0]!.body.attachments as Array<{ payload?: { buttons?: Array<Array<{ type?: string }>> } }>)[0]?.payload?.buttons?.[0]?.[0]?.type).toBe('open_app')
+    const finalized = await prisma.taskOutbox.findMany({ where: { id: { in: intents.map(({ id }) => id) } } })
+    expect(finalized.map(({ status }) => status).sort()).toEqual(['done', 'skipped'])
+  })
+
+  test('family audience retries only the recipient whose MAX send was rate limited', async () => {
+    await engage()
+    const viewerId = await addMember('viewer', 'Retry viewer')
+    const viewerSubject = randomSubject()
+    await engage(viewerId, undefined, viewerSubject)
+    const config = familyConfig()
+    const intents = await publishFamilyNote(config, 'Retry family note')
+    expect(intents).toHaveLength(2)
+    const identities = await prisma.externalIdentity.findMany({ where: { userId: { in: [ownerId, viewerId] }, provider: 'max' }, select: { id: true, userId: true } })
+    const ownerIdentity = identities.find(({ userId }) => userId === ownerId)!
+    const viewerIdentity = identities.find(({ userId }) => userId === viewerId)!
+    const intentFor = (identityId: string) => intents.find(({ payload }) => (payload as { identityId?: string }).identityId === identityId)!
+    const sends: string[] = []
+    let viewerAttempts = 0
+    const api = fakeApi({ onSend: async ({ url }) => {
+      const destination = url.searchParams.get('user_id')!
+      sends.push(destination)
+      if (destination === viewerSubject && ++viewerAttempts === 1) {
+        return Response.json({ code: 'rate_limited' }, { status: 429, headers: { 'retry-after': '7' } })
+      }
+    } })
+    const now = new Date(Date.now() + 60_000)
+    const first = await drainPilot(config, api, now)
+    expect(first.done).toBe(1)
+    expect(first.transientFailed).toBe(1)
+    expect(await prisma.taskOutbox.findUniqueOrThrow({ where: { id: intentFor(ownerIdentity.id).id } })).toMatchObject({ status: 'done', attempts: 1, payload: {} })
+    const pending = await prisma.taskOutbox.findUniqueOrThrow({ where: { id: intentFor(viewerIdentity.id).id } })
+    expect(pending).toMatchObject({ status: 'pending', attempts: 1 })
+    expect(pending.scheduledFor.getTime()).toBe(now.getTime() + 7_000)
+
+    const later = new Date(now.getTime() + 8_000)
+    const second = await drainPilot(config, api, later)
+    expect(second.done).toBe(1)
+    expect(await prisma.taskOutbox.findUniqueOrThrow({ where: { id: intentFor(viewerIdentity.id).id } })).toMatchObject({ status: 'done', attempts: 2, payload: {} })
+    expect(sends.filter((destination) => destination === subject)).toHaveLength(1)
+    expect(sends.filter((destination) => destination === viewerSubject)).toHaveLength(2)
+  })
+
+  test('family-targeted tasks skip audience, enablement, and generation changes without falling back; legacy owner payload still delivers', async () => {
+    await engage()
+    const viewerId = await addMember('viewer', 'Audience-change viewer')
+    await engage(viewerId, undefined, randomSubject())
+    const config = familyConfig()
+    const sent: string[] = []
+    const api = fakeApi({ onSend: async ({ url }) => { sent.push(url.searchParams.get('user_id')!) } })
+
+    const modeChanged = await publishFamilyNote(config, 'Mode changed')
+    expect(modeChanged).toHaveLength(2)
+    const ownerMode = loadEnv({ ...envInput, CONTROL_OWNER_USER_IDS: ownerId, MAX_NOTIFICATIONS_PILOT_SUBJECT: subject,
+      MAX_NOTIFICATIONS_AUDIENCE: 'owner' })
+    const modeMetrics = await drainPilot(ownerMode, api)
+    expect(modeMetrics.skipped).toBe(2)
+    expect(sent).toEqual([])
+    expect((await prisma.taskOutbox.findMany({ where: { id: { in: modeChanged.map(({ id }) => id) } } })).every(({ status }) => status === 'skipped')).toBe(true)
+
+    const disabledTasks = await publishFamilyNote(config, 'Disabled before drain')
+    const disabledConfig = familyConfig({ MAX_NOTIFICATIONS_PILOT_ENABLED: 'false' })
+    expect((await drainPilot(disabledConfig, api)).skipped).toBe(2)
+    expect((await prisma.taskOutbox.findMany({ where: { id: { in: disabledTasks.map(({ id }) => id) } } })).every(({ status }) => status === 'skipped')).toBe(true)
+
+    const oldGenerationTasks = await publishFamilyNote(config, 'Generation changed')
+    const changedGeneration = familyConfig({ MAX_NOTIFICATIONS_PILOT_SINCE: '2026-09-01T00:00:00.000Z' })
+    expect((await drainPilot(changedGeneration, api)).skipped).toBe(2)
+    expect((await prisma.taskOutbox.findMany({ where: { id: { in: oldGenerationTasks.map(({ id }) => id) } } })).every(({ status }) => status === 'skipped')).toBe(true)
+    expect(sent).toEqual([])
+
+    const [legacyOwnerTask] = await publishFamilyNote(pilotConfig(), 'Legacy owner payload')
+    const legacyPayload = { ...(legacyOwnerTask!.payload as Record<string, unknown>) }
+    delete legacyPayload.audience
+    expect(await createPilotNotificationDelivery({ prisma, config, api })(legacyPayload)).toBe('skipped')
+    expect(await createPilotNotificationDelivery({ prisma, config: pilotConfig(), api })(legacyPayload)).toBe('done')
+    expect(sent).toEqual([subject])
   })
 
   test('concurrent replay of one source publication leaves one intent; membership epoch change skips delivery', async () => {
