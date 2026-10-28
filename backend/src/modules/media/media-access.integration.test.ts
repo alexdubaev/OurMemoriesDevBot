@@ -950,6 +950,73 @@ describe('Private media API', () => {
     expect(ready.headers.get('cache-control')).toBe('private, no-store')
     expect(await ready.json()).toEqual({ state: 'ready', posterPath: `/api/v1/families/${family.body.family.id}/media/${assetId}/content?variant=display` })
 
+    const posterBytes = new Uint8Array(await sharp(pngFixture).webp().toBuffer())
+    await privateStorage.storage.writeObject({ key: `media-display/${assetId}`, body: new Response(posterBytes).body!,
+      contentLength: posterBytes.byteLength, contentType: 'image/webp' })
+    const videoBytes = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109])
+    const cdnUrl = 'https://maxvd123.okcdn.ru/synthetic-family-isolation-video'
+    const videoApp = createApp({ env, prisma, privateStorage, maxVideoPlayback: createMaxVideoPlayback({
+      runtime: { env, prisma, privateStorage } as never,
+      api: {
+        getMessage: async () => ({ messageId: source.messageId, senderId: source.senderSubject, recipientId: '900',
+          attachments: [{ kind: 'video', providerAttachmentId: reference.providerAttachmentId, currentToken: 'synthetic-token' }] }),
+        getVideo: async () => ({ renditions: [{ url: cdnUrl, width: 320, height: 240, contentLength: videoBytes.byteLength }] }),
+      } as never,
+    }) })
+    const root = path.replace('/poster-readiness', '')
+    const playbackSession = await videoApp.request(`/api/v1/families/${family.body.family.id}/media/playback-session`, {
+      method: 'POST', headers: { Authorization: `Bearer ${viewer.token}` },
+    })
+    expect(playbackSession.status).toBe(204)
+    const playbackCookie = playbackSession.headers.get('set-cookie')!.split(';')[0]!
+    const originalFetch = globalThis.fetch
+    // Only the external MAX CDN is replaced. Family/session authorization,
+    // reference lookup, the HTTP routes and private poster storage remain real.
+    globalThis.fetch = Object.assign(async (input: URL | RequestInfo, init?: RequestInit) => {
+      if (String(input) !== cdnUrl) throw new Error('Unexpected provider request in isolated media test')
+      const range = new Headers(init?.headers).get('range')
+      return new Response(init?.method === 'HEAD' ? null : range ? videoBytes.slice(0, 4) : videoBytes, {
+        status: range ? 206 : 200, headers: { 'Content-Type': 'video/mp4',
+          'Content-Length': String(range ? 4 : videoBytes.byteLength),
+          ...(range ? { 'Content-Range': `bytes 0-3/${videoBytes.byteLength}` } : {}),
+        },
+      })
+    }, { preconnect: originalFetch.preconnect })
+    try {
+      const playable = await videoApp.request(`${root}/content`, { headers: { Cookie: playbackCookie, Range: 'bytes=0-3' } })
+      expect(playable.status).toBe(206)
+      expect(new Uint8Array(await playable.arrayBuffer())).toEqual(videoBytes.slice(0, 4))
+      const videoHead = await videoApp.request(`${root}/content`, { method: 'HEAD', headers: { Cookie: playbackCookie } })
+      expect(videoHead.status).toBe(200)
+      expect(videoHead.headers.get('content-length')).toBe(String(videoBytes.byteLength))
+      const poster = await videoApp.request(`${root}/poster`, { headers: { Cookie: playbackCookie } })
+      expect(poster.status).toBe(200)
+      expect(new Uint8Array(await poster.arrayBuffer())).toEqual(posterBytes)
+      const posterEtag = poster.headers.get('etag')!
+      expect(await (await videoApp.request(`${root}/readiness`, { headers: { Cookie: playbackCookie } })).json())
+        .toEqual({ state: 'ready', recheckable: false })
+      for (const suffix of ['content', 'poster', 'readiness', 'poster-readiness']) {
+        expect((await videoApp.request(`${root}/${suffix}`)).status).toBe(401)
+        const mixedPath = `${root}/${suffix}`.replace(family.body.family.id, foreignFamily.body.family.id)
+        expect((await videoApp.request(mixedPath, { headers: { Authorization: `Bearer ${outsider.token}` } })).status).toBe(404)
+      }
+      await prisma.familyMember.update({ where: { familyId_userId: {
+        familyId: family.body.family.id, userId: viewer.userId,
+      } }, data: { revokedAt: new Date() } })
+      for (const suffix of ['content', 'poster', 'readiness', 'poster-readiness']) {
+        const denied = await videoApp.request(`${root}/${suffix}`, { headers: {
+          Cookie: playbackCookie, Range: 'bytes=0-3', 'If-None-Match': posterEtag,
+        } })
+        expect(denied.status).toBe(404)
+        expect(denied.headers.get('etag')).toBeNull()
+        expect(denied.headers.get('location')).toBeNull()
+      }
+      expect((await prisma.maxVideoReference.findUniqueOrThrow({ where: { id: reference.id } })).thumbnailMediaId).toBe(assetId)
+      expect(await privateStorage.storage.headObject(`media-display/${assetId}`)).not.toBeNull()
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
     await prisma.memory.update({ where: { id: created.body.id }, data: { status: 'deleted', deletedAt: new Date() } })
     expect((await posterApp.request(path, { headers: { Authorization: `Bearer ${owner.token}` } })).status).toBe(404)
   })
