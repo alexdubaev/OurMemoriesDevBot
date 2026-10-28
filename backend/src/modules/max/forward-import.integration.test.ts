@@ -1153,6 +1153,64 @@ describe('MAX forward import integration', () => {
     expect(await prisma.maxChannelDecision.findUniqueOrThrow({ where: { id: decision.id } })).toMatchObject({ status: 'completed' })
   })
 
+  test('imports a senderless forwarded channel photo from the verified envelope once', async () => {
+    const fixture = await familyFixture('7091', 'channel-envelope-photo')
+    await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+    await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'connected' } })
+    const event = channelForwardEvent('channel-forward-photo', 'private-original-photo')
+    const pending = await accept(event)
+    const duplicate = await accept(event)
+    expect(duplicate).toMatchObject({ duplicate: true, inboxId: pending.inboxId })
+    const second = await accept({ ...event, messageId: 'channel-forward-photo-copy' })
+    const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
+      api: apiFor(async (messageId) => {
+        if (![event.messageId, 'channel-forward-photo-copy'].includes(messageId)) throw new Error('Must resolve the connected channel envelope only')
+        return channelForwardMessage(messageId, 'private-original-photo')
+      }),
+      download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }),
+    })
+    await Promise.allSettled([processor({ inboxId: pending.inboxId }), processor({ inboxId: second.inboxId })])
+    for (const inboxId of [pending.inboxId, second.inboxId]) await processor({ inboxId })
+    expect(await prisma.memory.count({ where: { familyId: fixture.familyId } })).toBe(1)
+    const memory = await prisma.memory.findFirstOrThrow({ where: { familyId: fixture.familyId }, include: { media: { include: { asset: true } } } })
+    expect(memory).toMatchObject({ kind: 'photo', body: 'Verified nested channel caption', status: 'published',
+      occurredAt: new Date('2025-05-06T07:08:09.000Z') })
+    expect(memory.media).toHaveLength(1)
+    expect(memory.media[0]!.asset).toMatchObject({ originalStatus: 'stored', familyId: fixture.familyId })
+    const stored = await fixture.runtime.privateStorage.storage.readObject({ key: memory.media[0]!.asset.originalKey })
+    expect(new Uint8Array(await new Response(stored!.body).arrayBuffer())).toEqual(pngFixture)
+    expect(await prisma.maxSource.count({ where: { status: 'published' } })).toBe(1)
+    expect(await prisma.maxSource.count({ where: { rejectionCode: 'duplicate' } })).toBe(1)
+    expect(await prisma.maxMemoryBackup.count()).toBe(0)
+    expect(await prisma.maxOutgoingResponse.count()).toBe(0)
+  })
+
+  for (const mismatch of ['channel', 'message', 'original', 'sender', 'binding_changed'] as const) {
+    test(`refuses a forwarded channel envelope when its ${mismatch} identity changes`, async () => {
+      const fixture = await familyFixture('7092', `channel-envelope-${mismatch}`)
+      await prisma.family.update({ where: { id: fixture.familyId }, data: { maxBackupChatId: channelId } })
+      await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'connected' } })
+      const event = channelForwardEvent(`channel-mismatch-${mismatch}`, 'private-original-mismatch')
+      const pending = await accept(event)
+      const processor = createMaxTaskProcessor({ runtime: fixture.runtime, crypto, media: fixture.media,
+        api: apiFor(async () => {
+          const message = channelForwardMessage(event.messageId, 'private-original-mismatch')
+          if (mismatch === 'channel') message.recipientId = '-999'
+          if (mismatch === 'message') message.messageId = 'unrelated-channel-message'
+          if (mismatch === 'original') message.forwardedFrom = { messageId: 'unrelated-original' }
+          if (mismatch === 'sender') message.senderId = '7092'
+          if (mismatch === 'binding_changed') await prisma.maxChannelBinding.update({ where: { chatId: channelId }, data: { state: 'disconnected' } })
+          return message
+        }),
+        download: async () => ({ bytes: pngFixture, contentType: 'image/png', contentLength: pngFixture.byteLength }),
+      })
+      await expect(processor({ inboxId: pending.inboxId })).resolves.toBe('done')
+      expect(await prisma.memory.count()).toBe(0)
+      expect(await prisma.maxSource.findUniqueOrThrow({ where: { inboxId: pending.inboxId } })).toMatchObject({ status: 'denied' })
+      expect(await prisma.maxOutgoingResponse.count()).toBe(0)
+    })
+  }
+
   async function familyFixture(subject: string, label: string) {
     const user = await prisma.user.create({ data: { displayName: `Synthetic ${label}` } })
     await prisma.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject } })
@@ -1176,6 +1234,21 @@ describe('MAX forward import integration', () => {
       cleanup: async () => { await rm(storageRoot, { recursive: true, force: true }); roots.delete(storageRoot) } }
   }
 })
+
+function channelForwardEvent(messageId: string, originalMessageId: string): Extract<MaxInboundEvent, { kind: 'message_created' }> {
+  return { kind: 'message_created', isChannel: true, senderId: '0', recipientId: '-79560265048692',
+    messageId, occurredAt: '2026-10-02T10:00:00.000Z', text: null, attachments: [],
+    forwardedFrom: { messageId: originalMessageId, attachments: [{ kind: 'image', providerAttachmentId: 'channel-nested-photo' }] } }
+}
+
+function channelForwardMessage(messageId: string, originalMessageId: string): MaxResolvedMessage {
+  return { messageId, senderId: '0', recipientId: '-79560265048692', recipientType: 'channel',
+    timestamp: Date.parse('2026-10-02T10:00:00.000Z'), text: null, attachments: [],
+    forwardedFrom: { messageId: originalMessageId, timestamp: Date.parse('2025-05-06T07:08:09.000Z') },
+    forwardedText: 'Verified nested channel caption', forwardedAttachments: [
+      { kind: 'image', providerAttachmentId: 'channel-nested-photo', url: 'https://image.example.invalid/channel-photo' },
+    ] }
+}
 
 function forwardedUpdate(timestamp: number) {
   return { update_type: 'message_created', timestamp, message: {
