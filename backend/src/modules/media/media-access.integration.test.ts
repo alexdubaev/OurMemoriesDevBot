@@ -989,11 +989,14 @@ describe('Private media API', () => {
       const videoHead = await videoApp.request(`${root}/content`, { method: 'HEAD', headers: { Cookie: playbackCookie } })
       expect(videoHead.status).toBe(200)
       expect(videoHead.headers.get('content-length')).toBe(String(videoBytes.byteLength))
-      const poster = await videoApp.request(`${root}/poster`, { headers: { Cookie: playbackCookie } })
+      // Only /content bypasses the family's Bearer middleware for native video
+      // elements. Poster/readiness API requests still require a Bearer token.
+      expect((await videoApp.request(`${root}/poster`, { headers: { Cookie: playbackCookie } })).status).toBe(401)
+      const poster = await videoApp.request(`${root}/poster`, { headers: { Authorization: `Bearer ${viewer.token}` } })
       expect(poster.status).toBe(200)
       expect(new Uint8Array(await poster.arrayBuffer())).toEqual(posterBytes)
       const posterEtag = poster.headers.get('etag')!
-      expect(await (await videoApp.request(`${root}/readiness`, { headers: { Cookie: playbackCookie } })).json())
+      expect(await (await videoApp.request(`${root}/readiness`, { headers: { Authorization: `Bearer ${viewer.token}` } })).json())
         .toEqual({ state: 'ready', recheckable: false })
       for (const suffix of ['content', 'poster', 'readiness', 'poster-readiness']) {
         expect((await videoApp.request(`${root}/${suffix}`)).status).toBe(401)
@@ -1004,12 +1007,16 @@ describe('Private media API', () => {
         familyId: family.body.family.id, userId: viewer.userId,
       } }, data: { revokedAt: new Date() } })
       for (const suffix of ['content', 'poster', 'readiness', 'poster-readiness']) {
-        const denied = await videoApp.request(`${root}/${suffix}`, { headers: {
-          Cookie: playbackCookie, Range: 'bytes=0-3', 'If-None-Match': posterEtag,
-        } })
-        expect(denied.status).toBe(404)
-        expect(denied.headers.get('etag')).toBeNull()
-        expect(denied.headers.get('location')).toBeNull()
+        const credentials: Record<string, string>[] = [{ Authorization: `Bearer ${viewer.token}` }]
+        if (suffix === 'content') credentials.push({ Cookie: playbackCookie })
+        for (const authentication of credentials) {
+          const denied = await videoApp.request(`${root}/${suffix}`, { headers: {
+            ...authentication, Range: 'bytes=0-3', 'If-None-Match': posterEtag,
+          } })
+          expect(denied.status).toBe(404)
+          expect(denied.headers.get('etag')).toBeNull()
+          expect(denied.headers.get('location')).toBeNull()
+        }
       }
       expect((await prisma.maxVideoReference.findUniqueOrThrow({ where: { id: reference.id } })).thumbnailMediaId).toBe(assetId)
       expect(await privateStorage.storage.headObject(`media-display/${assetId}`)).not.toBeNull()
