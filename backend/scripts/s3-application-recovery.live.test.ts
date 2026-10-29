@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { Client } from 'pg'
@@ -22,6 +22,7 @@ test('current → pinned S3 runtime → current preserves media, ACLs, in-flight
     requestChecksumCalculation: 'WHEN_REQUIRED' as const }
   const s3 = new S3Client(config), bucket = process.env.TEST_S3_RECOVERY_BUCKET!
   const prefix = `recovery-checks/${randomUUID()}/`
+  console.log(JSON.stringify({ technicalTestNamespace: prefix }))
   const name = `s3_recovery_${process.pid}_${randomUUID().replaceAll('-', '').slice(0, 8)}_test`
   const ownUrl = new URL(baseUrl); ownUrl.pathname = `/${name}`
   const admin = new Client({ connectionString: baseUrl.toString() })

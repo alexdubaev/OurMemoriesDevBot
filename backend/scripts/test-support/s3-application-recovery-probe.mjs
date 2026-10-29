@@ -34,9 +34,10 @@ const photo = async (state, actor, expected) => {
   if (expected === 200) { assert.equal(r.status, 200); assert.equal(digest(Buffer.from(await r.arrayBuffer())), digest(bytes)) }
   else assert.ok([403, 404].includes(r.status), 'foreign or revoked member read private media')
 }
+let subjectSequence = 7_900_000_000
 async function actor() {
   const user = await db.user.create({ data: { displayName: 'S3 recovery synthetic' } })
-  const subject = randomUUID()
+  const subject = String(++subjectSequence)
   const identity = await db.externalIdentity.create({ data: { userId: user.id, provider: 'max', subject } })
   await db.pilotAdmission.create({ data: { provider: 'max', subject } })
   const session = await db.authSession.create({ data: { userId: user.id, externalIdentityId: identity.id,
@@ -135,6 +136,7 @@ try {
   console.log(JSON.stringify({ phase, success: true }))
 } catch (error) {
   // Provider exceptions can contain signed capabilities. Never emit raw errors.
-  console.error(JSON.stringify({ phase, success: false, type: error?.name ?? 'Error', assertion: error?.code === 'ERR_ASSERTION' ? error.message : undefined }))
+  console.error(JSON.stringify({ phase, success: false, type: error?.name ?? 'Error', code: error?.code,
+    assertion: error?.code === 'ERR_ASSERTION' ? error.message : undefined }))
   process.exitCode = 1
 } finally { await db.$disconnect() }
