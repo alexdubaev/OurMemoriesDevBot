@@ -125,7 +125,10 @@ try {
     } else {
       assert.equal(phase, 'current-after')
       await assertBytes(state.inFlightKey)
-      assert.equal(await db.family.findUnique({ where: { id: state.purgeFamily.id } }), null)
+      const purgedFamily = await db.family.findUniqueOrThrow({ where: { id: state.purgeFamily.id } })
+      assert.equal(purgedFamily.status, 'deleted'); assert.equal(purgedFamily.storageUsedBytes, 0n)
+      assert.equal(await db.mediaAsset.findUnique({ where: { id: state.purged.id } }), null)
+      assert.equal(await storage.headObject(state.purged.key), null)
       assert.ok((await db.controlFamilyDeletion.findUniqueOrThrow({ where: { id: state.purgeId } })).purgedAt)
       assert.equal((await db.memory.findUniqueOrThrow({ where: { id: state.baselineMemoryId } })).body, 'Synthetic baseline write')
       const memory = await db.memory.findUniqueOrThrow({ where: { id: state.memoryId }, include: { media: true } })

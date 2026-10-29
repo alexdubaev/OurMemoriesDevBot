@@ -1712,10 +1712,10 @@ verify_application_rollback() {
 	if [ "$profile" = comments ] || [ "$profile" = s3 ]; then
 		local expected_migration_checksums
 		expected_migration_checksums=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") ||
-			die 'cannot fingerprint the verified comments migration catalog'
+			die "cannot fingerprint the verified $profile migration catalog"
 		[[ -n "$expected_migration_checksums" ]] || die 'verified comments migration catalog is empty'
 		rollback_verify_migration_history "$expected_migration_checksums" ||
-			die 'comments rollback requires the exact completed migration history'
+			die "$profile rollback requires the exact completed migration history"
 		if [ "$profile" = s3 ]; then rollback_verify_s3_storage_readiness; fi
 	elif [ "$profile" = albums ]; then
 		rollback_verify_albums_migration_history "$migration_phase" ||
