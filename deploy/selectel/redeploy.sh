@@ -16,6 +16,10 @@ MAX_VIDEO_RECOVERY_WEBAPP_SHA=d2999cca6e4e5980cc2277de7453440353f5b392
 MAX_VIDEO_RECOVERY_BACKEND_IMAGE_ID=sha256:cb1f1e3aca79452701d7410e5bccef7e93a1eda08de5c36cfab19202f0632309
 MAX_VIDEO_RECOVERY_WEBAPP_IMAGE_ID=sha256:6d77034ed1be4f8fea0d86ee7f0fb8fdfebb5706c5c4358d8b608d7e32f1e62d
 MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT=b3afd175383307713f5a86470db755b621c9eec0ff93fcfff4e97e1150d41dc9
+S3_RECOVERY_SHA=26cfab9ce35fd1a42279fc0d9dd3637c340eec6a
+S3_RECOVERY_BACKEND_IMAGE_ID=sha256:0c20d3089050a00214bb51dac3ac6961622ef5d90f38a8212143851769b6662d
+S3_RECOVERY_WEBAPP_IMAGE_ID=sha256:a53f4c8b54e723d518ff70ec7051045e99708804f541c78d163984f9a43b673e
+S3_RECOVERY_RUNTIME_FINGERPRINT=d16c128505122bae2ca7536f7557dc72f45aafee15907e2419f231259272c2d2
 MAX_VIDEO_COMPATIBILITY_FINGERPRINT=ff5758a7a3adb23b028a96e56c6deda68e83bd2f7cad6b2e54c0bd8b5cfa5ca4
 MAX_INVITE_ENTRY_COMPATIBILITY_FINGERPRINT=cda103e46f3e415d92ddcf1b7dcbe44269ccac991bc6d52534a05e8e242d1179
 MAX_VIDEO_PIN_INSTALLER_BLOB=d34a87ec84df49987dc01339481750320f10f203
@@ -799,6 +803,9 @@ rollback_source_compatibility_profile() {
 	local -a exact_compatibility_attestations=()
 	candidate_hash=$(rollback_compatibility_fingerprint "$revision") || return 1
 	case "$target" in
+		26cfab9ce35fd1a42279fc0d9dd3637c340eec6a)
+			# Independent S3-safe baseline. Never grant the old d299 pair S3 access.
+			exact_compatibility_attestations=("$S3_RECOVERY_SHA:$S3_RECOVERY_RUNTIME_FINGERPRINT:1540dbfda304a7bc05c96930702ef585adc0bae167a8dfbb7d85e9d64e67ed59:s3") ;;
 		e383d79269a3595f4c6cabedf167335aea042cf3)
 			attestations=("3fce2739205da927b95eb3379b1d066b61282965:3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857:candidate") ;;
 		3fce2739205da927b95eb3379b1d066b61282965)
@@ -886,6 +893,7 @@ rollback_source_compatibility_profile() {
 			control) rollback_control_host_inputs_match "$revision" || continue ;;
 			max-video) rollback_max_video_host_inputs_match "$revision" || continue ;;
 			max-video-retirement) rollback_max_video_retirement_host_inputs_match "$revision" || continue ;;
+			s3) rollback_s3_host_inputs_match "$revision" || continue ;;
 		esac
 			printf '%s\n' "$profile"
 			return 0
@@ -936,6 +944,42 @@ rollback_max_video_retirement_host_inputs_match() {
 	local revision=$1
 	rollback_max_video_host_inputs_match "$revision" || return 1
 	compose run --rm --no-deps backend bun -e 'const { loadEnv } = await import("./src/env.ts"); const env = loadEnv(process.env); if (env.PRIVATE_STORAGE_DRIVER !== "filesystem") process.exit(1)' >/dev/null 2>&1
+}
+
+rollback_s3_host_inputs_match() {
+	rollback_max_video_host_inputs_match "$1" || return 1
+	compose run --rm --no-deps backend bun -e 'const { loadEnv } = await import("./src/env.ts"); const env = loadEnv(process.env); if (env.PRIVATE_STORAGE_DRIVER !== "s3") process.exit(1)' >/dev/null 2>&1
+}
+
+rollback_verify_s3_storage_readiness() {
+	# Read-only in the exact target image: no copy, migration, PUT, DELETE or sleep.
+	compose run --rm --no-deps backend bun -e "$(cat <<'MEMOLY_S3_READINESS_JS'
+import { S3Client, GetBucketVersioningCommand } from '@aws-sdk/client-s3';
+import { Client } from 'pg';
+import { loadEnv } from './src/env.ts';
+import { privateStorageConfigFromEnv } from './src/storage/config.ts';
+import { S3PrivateStorage } from './src/storage/s3-storage.ts';
+const env = loadEnv(process.env), config = privateStorageConfigFromEnv(env);
+if (config.driver !== 's3') process.exit(1);
+const s3 = new S3Client({ endpoint: config.endpoint, region: config.region, forcePathStyle: config.forcePathStyle,
+  credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey }, requestChecksumCalculation: 'WHEN_REQUIRED' });
+const db = new Client({ connectionString: env.DATABASE_URL });
+try {
+  const versioning = await s3.send(new GetBucketVersioningCommand({ Bucket: config.bucket }));
+  if (versioning.Status !== undefined) throw Error('unsupported_versioning');
+  await db.connect();
+  await db.query('BEGIN READ ONLY');
+  const result = await db.query("SELECT a.original_key AS key, a.byte_size::text AS bytes FROM media_assets a JOIN families f ON f.id=a.family_id WHERE f.status='active' AND a.deleted_at IS NULL AND a.original_status='stored' AND a.storage_deleted_at IS NULL AND a.legacy_video_retained_at IS NULL ORDER BY a.created_at LIMIT 1");
+  await db.query('COMMIT');
+  if (result.rows.length) {
+    const row = result.rows[0], storage = new S3PrivateStorage(config, s3);
+    const head = await storage.headObject(row.key), bytes = await storage.readRange(row.key, { start: 0, end: Math.min(Number(row.bytes) - 1, 31) });
+    if (!head || String(head.contentLength) !== row.bytes || !bytes?.length) throw Error('stored_media_unavailable');
+  }
+} catch { process.exitCode = 1; }
+finally { await db.end().catch(() => {}); s3.destroy(); }
+MEMOLY_S3_READINESS_JS
+)" >/dev/null 2>&1 || die 'S3 recovery storage is unavailable, versioned or inconsistent'
 }
 
 rollback_assert_root_owned_path() {
@@ -1466,6 +1510,7 @@ rollback_auth_gate_for_verified_pair() {
 		gate=false
 			;;
 		"$max_video_backend_target:$max_video_webapp_target") gate=false ;;
+		"$S3_RECOVERY_SHA:$S3_RECOVERY_SHA") gate=false ;;
 		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
 	esac
 	[[ "${MEMOLY_PRODUCT_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || die 'rollback source SHA is unknown'
@@ -1538,6 +1583,11 @@ verify_application_rollback() {
 			expected_target_runtime=$MAX_VIDEO_RECOVERY_RUNTIME_FINGERPRINT
 			profile=max-video
 			;;
+		"$S3_RECOVERY_SHA:$S3_RECOVERY_SHA")
+			target=$S3_RECOVERY_SHA
+			expected_target_runtime=$S3_RECOVERY_RUNTIME_FINGERPRINT
+			profile=s3
+			;;
 		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
 	esac
 	[[ "$MEMOLY_PRODUCT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'rollback source SHA is unknown'
@@ -1573,7 +1623,7 @@ verify_application_rollback() {
 	fi
 	target_runtime=$(rollback_runtime_fingerprint "$target_runtime_revision") || die 'cannot fingerprint rollback target runtime'
 	[ "$target_runtime" = "$expected_target_runtime" ] || die 'rollback target runtime differs from the verified compatibility target'
-	if [ "$profile" = control ] || [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ]; then
+	if [ "$profile" = control ] || [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ] || [ "$profile" = s3 ]; then
 		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
 			backend/Dockerfile bunfig.toml \
 			deploy/selectel/Dockerfile.webapp deploy/selectel/Caddyfile.edge.template deploy/selectel/in-place-file.sh ||
@@ -1584,6 +1634,9 @@ verify_application_rollback() {
 		elif [ "$profile" = max-video-retirement ]; then
 			rollback_max_video_retirement_host_inputs_match "$MEMOLY_PRODUCT_SHA" ||
 				die 'MAX video retirement rollback requires the exact filesystem-backed host inputs'
+		elif [ "$profile" = s3 ]; then
+			[ "$migration_phase" = complete ] || die 'S3 recovery requires the exact completed migration catalog'
+			rollback_s3_host_inputs_match "$MEMOLY_PRODUCT_SHA" || die 'S3 recovery requires the exact S3-backed host inputs'
 		else
 			rollback_max_video_host_inputs_match "$MEMOLY_PRODUCT_SHA" ||
 				die 'MAX video rollback installer and host inputs differ from the exact reviewed blobs'
@@ -1631,6 +1684,10 @@ verify_application_rollback() {
 			expected_backend_id=$MAX_VIDEO_RECOVERY_BACKEND_IMAGE_ID
 			expected_webapp_id=$MAX_VIDEO_RECOVERY_WEBAPP_IMAGE_ID
 			;;
+		"$S3_RECOVERY_SHA")
+			expected_backend_id=$S3_RECOVERY_BACKEND_IMAGE_ID
+			expected_webapp_id=$S3_RECOVERY_WEBAPP_IMAGE_ID
+			;;
 	esac
 	[ "$(docker image inspect --format '{{.Id}}' "memoly-backend:$target")" = "$expected_backend_id" ] ||
 		die 'rollback backend image differs from the verified production artifact'
@@ -1652,13 +1709,14 @@ verify_application_rollback() {
 	# Missing tables, unknown result types, unfinished migrations and read errors fail closed.
 	compose run --rm --no-deps backend bun -e 'import { Client } from "pg"; const client = new Client({ connectionString: process.env.DATABASE_URL }); try { await client.connect(); const result = await client.query("SELECT EXISTS (SELECT 1 FROM families WHERE unread_tracking_activated_at IS NOT NULL) AS unread, EXISTS (SELECT 1 FROM family_members m JOIN families f ON f.id = m.family_id WHERE m.revoked_at IS NULL AND f.status = '\''active'\'' GROUP BY m.user_id HAVING COUNT(*) > 1) AS multiple, EXISTS (SELECT 1 FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL) AS unfinished"); const state=result.rows[0]; const capabilities={unread:true,multiple:true}; const valid=state && typeof state.unread==="boolean" && typeof state.multiple==="boolean" && typeof state.unfinished==="boolean" && !state.unfinished && (!state.unread || capabilities.unread) && (!state.multiple || capabilities.multiple); await client.end(); process.exit(valid ? 0 : 1) } catch { await client.end().catch(() => {}); process.exit(1) }' >/dev/null 2>&1 ||
 		die 'rollback data compatibility state is unknown or migration is unfinished'
-	if [ "$profile" = comments ]; then
+	if [ "$profile" = comments ] || [ "$profile" = s3 ]; then
 		local expected_migration_checksums
 		expected_migration_checksums=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") ||
 			die 'cannot fingerprint the verified comments migration catalog'
 		[[ -n "$expected_migration_checksums" ]] || die 'verified comments migration catalog is empty'
 		rollback_verify_migration_history "$expected_migration_checksums" ||
 			die 'comments rollback requires the exact completed migration history'
+		if [ "$profile" = s3 ]; then rollback_verify_s3_storage_readiness; fi
 	elif [ "$profile" = albums ]; then
 		rollback_verify_albums_migration_history "$migration_phase" ||
 			die 'albums rollback requires the exact reviewed migration history for this phase'
@@ -1685,14 +1743,16 @@ rollback() {
 	# The application verifier loads secrets in a subshell. Initialize the parent
 	# Compose credential context before recovery history/readiness and inverse.
 	load_runtime_secrets
-	if rollback_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA"); then
+	set -a
+	. "$ROLLBACK_ENV"
+	set +a
+	if [ "$PREVIOUS_BACKEND_IMAGE_TAG" = "$MAX_VIDEO_RECOVERY_BACKEND_SHA" ] &&
+		[ "$PREVIOUS_WEBAPP_IMAGE_TAG" = "$MAX_VIDEO_RECOVERY_WEBAPP_SHA" ] &&
+		rollback_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA"); then
 		if [ "$rollback_profile" = max-video ] || [ "$rollback_profile" = max-video-retirement ]; then
 			rollback_apply_max_video_recovery
 		fi
 	fi
-	set -a
-	. "$ROLLBACK_ENV"
-	set +a
 	require_accepted_ui_target "$PREVIOUS_WEBAPP_IMAGE_TAG"
 	export MEMOLY_BACKEND_IMAGE_TAG="$PREVIOUS_BACKEND_IMAGE_TAG"
 	export MEMOLY_WEBAPP_IMAGE_TAG="$PREVIOUS_WEBAPP_IMAGE_TAG"
@@ -1714,6 +1774,13 @@ rollback() {
 	ROLLBACK_AUTH_GATE=$gate_policy render_edge_candidate
 	local running_backend backend_count backend_started=false running_backend_tag
 	if [ "$gate_policy" = false ]; then
+		if [ "$PREVIOUS_BACKEND_IMAGE_TAG" = "$S3_RECOVERY_SHA" ] && [ "$PREVIOUS_WEBAPP_IMAGE_TAG" = "$S3_RECOVERY_SHA" ]; then
+			# Verify normal routing against the proven target, including when the
+			# failed release's backend is absent. Storage and database stay in place.
+			compose up -d --no-deps --force-recreate backend || die 'S3 rollback backend promotion failed'
+			wait_backend_internal
+			backend_started=true
+		else
 		running_backend=$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
 			--filter 'label=com.docker.compose.service=backend') || die 'cannot enumerate running backend service before rollback routing'
 		backend_count=$(printf '%s\n' "$running_backend" | awk 'NF { count += 1 } END { print count + 0 }')
@@ -1736,6 +1803,7 @@ rollback() {
 			[ "$running_backend_tag" = "$PREVIOUS_BACKEND_IMAGE_TAG" ] ||
 				die 'running backend differs from the pinned MAX recovery target'
 			wait_backend_internal
+		fi
 		fi
 	fi
 	activate_gateway
