@@ -49,6 +49,11 @@ defined in the [Selectel runbook](../deploy/selectel/README.md).
 Production deployment remains a separate manual operation under the owner's
 standing authorization unless the task restricts it. PR merge does not invoke
 local hooks; attach the applicable source-bound evidence to the PR.
+Ordinary compatible S3 application updates use the independently pinned S3
+recovery pair documented in [media recovery](development/S3_MEDIA_MIGRATION.md).
+They retain S3 throughout promotion/rollback, with no temporary filesystem copy
+or upload URL expiry wait. Historical d299 recovery remains filesystem-only;
+unknown executable/schema changes remain blocked until independently measured.
 Never store private key paths, key values, database passwords, MAX tokens,
 webhook secrets, or encryption keys in the repository.
 

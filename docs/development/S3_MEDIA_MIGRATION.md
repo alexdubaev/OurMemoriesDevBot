@@ -74,10 +74,58 @@ bytes; app reads treat them as missing.
 
 ## Recovery and later application releases
 
+### Ordinary releases with the accepted S3 recovery baseline
+
+The independently pinned S3 application recovery pair is
+`26cfab9ce35fd1a42279fc0d9dd3637c340eec6a`. Its exact backend/webapp IDs,
+runtime fingerprint and executable compatibility attestations are enforced by
+`redeploy.sh`; the older d299 profile remains filesystem-only.
+
+For an ordinary compatible application update, keep the current protected S3
+configuration. Use the normal versioned `ci-release.sh` full entry point, with
+migration `false` when the exact catalog is already complete. The entry point
+verifies and records the running S3 pair before replacing `rollback.env`.
+Readiness checks the target images/labels, lineage, source and host inputs,
+installed Control protections, exact completed SQL ledger, unversioned bucket
+and a read-only stored-object HEAD/range GET. Unknown runtime/schema changes
+still require their own measured compatibility attestation.
+
+Media stays in S3 during both promotion and application rollback. Existing
+signed uploads continue using the same keys and endpoint; retirement markers
+continue rejecting late uploads. No filesystem inventory, restore, storage
+driver switch or upload-URL expiry wait belongs to this ordinary release path.
+PostgreSQL stays current; the rollback does not execute legacy-video recovery
+SQL or restore a database. The normal release lock, disk floor, DB backup,
+immutable artifact, gateway, smoke and configuration guards remain mandatory.
+
+Validate the exact candidate and frozen baseline with the real PostgreSQL/S3
+test before accepting a new S3 compatibility profile:
+
+```sh
+bun test --timeout 300000 backend/scripts/s3-application-recovery.live.test.ts
+```
+
+Provide matching loopback `DATABASE_URL`/`TEST_DATABASE_URL` pointing to an isolated
+`*_test` database, and explicit `TEST_S3_RECOVERY_ENDPOINT`, `_REGION`, `_BUCKET`,
+`_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`, `_FORCE_PATH_STYLE`. Load credentials only
+from the protected operations file. The test creates its own PostgreSQL database
+and one random `recovery-checks/<UUID>/` technical object prefix, then verifies
+media/caption bytes, foreign/revoked family access, an upload issued before
+rollback, durable retirement, partial purge continuation and the unchanged
+ledger through current → baseline → current. It also executes the actual deploy
+readiness program in both sources. Cleanup deletes only that technical prefix;
+no production family rows are created or edited. The test is explicit and fails
+without its required dependencies; a skipped live suite is not recovery proof.
+
+An S3 application rollback handles a bad application release. S3 availability
+and independent data-backup retention remain separate operational requirements.
+
+### Historical filesystem-only recovery
+
 The existing pinned d299 **application rollback is filesystem-only**. It must
 continue rejecting an S3 runtime. Never bypass this guard or run d299 against S3.
-Until a separate S3 application recovery baseline is accepted, application
-rollback or another ordinary application release first uses this storage restore:
+If deliberately using this historical target, application rollback first uses
+this storage restore. Ordinary releases with the accepted S3 pair above omit it:
 
 1. Hold the same release lock, stop every writer, back up the current env and
    wait for all issued direct S3 upload tickets to expire (configured maximum

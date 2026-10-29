@@ -651,6 +651,31 @@ forward-recovery release flow instead.
 
 ## Measured application rollback compatibility
 
+The current S3 recovery baseline is the already accepted v4 runtime
+`26cfab9ce35fd1a42279fc0d9dd3637c340eec6a`:
+
+- backend image `sha256:0c20d3089050a00214bb51dac3ac6961622ef5d90f38a8212143851769b6662d`;
+- webapp image `sha256:a53f4c8b54e723d518ff70ec7051045e99708804f541c78d163984f9a43b673e`;
+- frozen runtime `d16c128505122bae2ca7536f7557dc72f45aafee15907e2419f231259272c2d2`;
+- initial executable profile `1540dbfda304a7bc05c96930702ef585adc0bae167a8dfbb7d85e9d64e67ed59`.
+
+Its independent `s3` profile requires effective S3, unchanged measured host
+inputs and installed Control protections, exact image/OCI/source identities,
+the complete matching migration catalog, never-enabled bucket versioning and
+read-only media access from the target. It preserves the database and private
+object keys, runs no legacy-video inverse and can restore an absent backend
+before checking normal auth routing. The existing source/config/ancestry/UI v4,
+lock, immutable pair, backup, gateway, failure exit status and smoke guards stay
+in force. A new unmeasured executable or SQL change is not implicitly compatible.
+
+The normal `ci-release.sh` entry point verifies the captured S3 pair and records
+it in the root-owned `rollback.env`. A compatible release and its application
+rollback keep S3 active; do not run the historical filesystem restore or wait
+for signed uploads to expire. Follow the exact real PostgreSQL/S3 proof and
+operations boundaries in [S3 media recovery](../../docs/development/S3_MEDIA_MIGRATION.md).
+Keep this pair locally as the designated recovery artifact. No S3 policy,
+credentials, versioning or media migration change is needed for its acceptance.
+
 The guarded rollback supports these exact measured backend + webapp target pairs and source profiles:
 
 - `e383d79269a3595f4c6cabedf167335aea042cf3`, with its exact production image
