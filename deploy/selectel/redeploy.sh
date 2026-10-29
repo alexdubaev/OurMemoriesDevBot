@@ -805,7 +805,8 @@ rollback_source_compatibility_profile() {
 	case "$target" in
 		26cfab9ce35fd1a42279fc0d9dd3637c340eec6a)
 			# Independent S3-safe baseline. Never grant the old d299 pair S3 access.
-			exact_compatibility_attestations=("$S3_RECOVERY_SHA:$S3_RECOVERY_RUNTIME_FINGERPRINT:1540dbfda304a7bc05c96930702ef585adc0bae167a8dfbb7d85e9d64e67ed59:s3") ;;
+			exact_compatibility_attestations=("$S3_RECOVERY_SHA:$S3_RECOVERY_RUNTIME_FINGERPRINT:1540dbfda304a7bc05c96930702ef585adc0bae167a8dfbb7d85e9d64e67ed59:s3"
+				"$S3_RECOVERY_SHA:$S3_RECOVERY_RUNTIME_FINGERPRINT:852e88d542cd38550bcf8b0fab48701a6691be7a20469f9ed807fed4853fe7db:s3") ;;
 		e383d79269a3595f4c6cabedf167335aea042cf3)
 			attestations=("3fce2739205da927b95eb3379b1d066b61282965:3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857:candidate") ;;
 		3fce2739205da927b95eb3379b1d066b61282965)

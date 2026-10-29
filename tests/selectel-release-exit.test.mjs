@@ -3061,6 +3061,19 @@ slowTest('S3 baseline rejects unsafe storage, artifacts and migration state befo
   }
 })
 
+slowTest('S3 baseline accepts the exact Seroval security patch and rejects additional dependency drift', () => {
+  const source = commitFrozenSourceFiles(s3RecoverySource(), [
+    ['package.json', '3ddd8bacc50040aff9e4c940b970efba885fe334'],
+    ['bun.lock', '66123fc0128f82e1048ac083016c65aaaa6f1732'],
+  ], 'apply exact Seroval 1.6.11 security patch')
+  assert.equal(productionCompatibilityFingerprint(source.root), '852e88d542cd38550bcf8b0fab48701a6691be7a20469f9ed807fed4853fe7db')
+  const result = runS3Recovery(source, { action: 'rollback_readiness' })
+  assert.equal(result.status, 0, result.output)
+  assert.match(result.events, /S3_READINESS/)
+  const drift = commitSourceChange(source, 'package.json', '\n', 'reject unmeasured dependency input')
+  assert.notEqual(runS3Recovery(drift, { action: 'rollback_readiness' }).status, 0)
+})
+
 slowTest('S3 baseline rollback restores a stopped backend with normal auth and no legacy recovery SQL', () => {
   const source = s3RecoverySource()
   for (const stoppedBackend of [false, true]) {

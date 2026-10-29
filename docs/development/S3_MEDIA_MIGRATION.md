@@ -120,6 +120,16 @@ without its required dependencies; a skipped live suite is not recovery proof.
 An S3 application rollback handles a bad application release. S3 availability
 and independent data-backup retention remain separate operational requirements.
 
+The initial recovery release also updates the existing Seroval override from
+1.6.3 to 1.6.11 to satisfy the dependency audit. Its measured executable source
+fingerprint is `852e88d542cd38550bcf8b0fab48701a6691be7a20469f9ed807fed4853fe7db`;
+the baseline artifacts remain immutable. The baseline backend image does not
+contain Seroval. The frontend is a client-rendered Vite SPA served by Caddy,
+without SSR serialization or an untrusted Seroval deserialization endpoint;
+the advisory input paths are absent. This scoped exposure assessment permits
+temporary application recovery to the baseline, not an audit exception for the
+new release. The real S3 round trip covers the patched source and exact baseline.
+
 ### Historical filesystem-only recovery
 
 The existing pinned d299 **application rollback is filesystem-only**. It must
