@@ -53,7 +53,7 @@ async function family(owner) {
 async function asset(family, owner, label) {
   const key = prefix + label + '.png'
   await storage.writeObject({ key, body: new Response(bytes).body, contentLength: bytes.length, contentType: 'image/png' })
-  const row = await db.mediaAsset.create({ data: { familyId: family.id, uploaderId: owner.id, sourceKind: 'web', purpose: 'memory',
+  const row = await db.mediaAsset.create({ data: { familyId: family.id, uploaderId: owner.id, sourceKind: 'upload', purpose: 'memory',
     mediaKind: 'photo', originalKey: key, declaredMime: 'image/png', verifiedMime: 'image/png', sha256: digest(bytes), byteSize: BigInt(bytes.length),
     width: 1, height: 1, originalStatus: 'stored', renditionStatus: 'ready' } })
   for (const variant of ['preview', 'display']) {
