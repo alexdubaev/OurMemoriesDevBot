@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { Client } from 'pg'
@@ -31,8 +31,8 @@ test('current → pinned S3 runtime → current preserves media, ACLs, in-flight
   const archived = resolve(fixture, 'baseline'), state = resolve(fixture, 'state.json')
   const env = { ...process.env, NODE_ENV: 'test', CHECKPOINT_DISABLE: '1', TEST_SKIP_DOCKER: '1',
     DATABASE_URL: ownUrl.toString(), TEST_DATABASE_URL: ownUrl.toString() }
-  const checked = (label: string, args: string[], cwd: string) => {
-    const r = spawnSync('bun', args, { cwd, env, encoding: 'utf8', timeout: 180_000, maxBuffer: 4 * 1024 * 1024 })
+  const checked = (label: string, args: string[], cwd: string, executionEnv = env) => {
+    const r = spawnSync('bun', args, { cwd, env: executionEnv, encoding: 'utf8', timeout: 180_000, maxBuffer: 4 * 1024 * 1024 })
     if (r.status !== 0) throw Error(`${label} failed: ${r.stdout.slice(-2000)}\n${r.stderr.slice(-2000)}`)
     return r.stdout
   }
@@ -63,9 +63,16 @@ test('current → pinned S3 runtime → current preserves media, ACLs, in-flight
     await admin.connect(); connected = true
     await admin.query(`CREATE DATABASE "${name}"`); created = true
     checked('current exact schema deploy into isolated database', ['run', 'prisma:deploy'], resolve(root, 'backend'))
+    const program = readFileSync(resolve(root, 'deploy/selectel/redeploy.sh'), 'utf8').replaceAll('\r\n', '\n')
+      .match(/MEMOLY_S3_READINESS_JS'\n([\s\S]*?)\nMEMOLY_S3_READINESS_JS/)?.[1]
+    if (!program) throw Error('Executable S3 readiness program is missing')
+    const readinessEnv = { ...env, JWT_SECRET: 's3-recovery-synthetic-secret-0123456789', PRIVATE_STORAGE_DRIVER: 's3',
+      PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true', PRIVATE_STORAGE_FORCE_PATH_STYLE: process.env.TEST_S3_RECOVERY_FORCE_PATH_STYLE!,
+      ...Object.fromEntries(['ENDPOINT', 'REGION', 'BUCKET', 'ACCESS_KEY_ID', 'SECRET_ACCESS_KEY'].map(k => [`PRIVATE_STORAGE_${k}`, process.env[`TEST_S3_RECOVERY_${k}`]!])) }
     for (const [runtime, phase] of [[root, 'seed-current'], [archived, 'baseline'], [root, 'current-after']] as const) {
       const output = checked(phase, [resolve(root, 'backend/scripts/test-support/s3-application-recovery-probe.mjs'), runtime, phase, state, prefix], resolve(root, 'backend'))
       expect(JSON.parse(output.trim().split('\n').at(-1)!)).toEqual({ phase, success: true })
+      checked(`${phase} actual deploy readiness program`, ['-e', program], resolve(runtime, 'backend'), readinessEnv)
     }
     expect((await keys()).length).toBeGreaterThan(0)
   } finally {
