@@ -459,6 +459,9 @@ const maxVideoRecoveryWebapp = 'd2999cca6e4e5980cc2277de7453440353f5b392'
 const maxVideoRecoveryBackendId = 'sha256:cb1f1e3aca79452701d7410e5bccef7e93a1eda08de5c36cfab19202f0632309'
 const maxVideoRecoveryWebappId = 'sha256:6d77034ed1be4f8fea0d86ee7f0fb8fdfebb5706c5c4358d8b608d7e32f1e62d'
 const maxVideoRecoveryRuntime = 'b3afd175383307713f5a86470db755b621c9eec0ff93fcfff4e97e1150d41dc9'
+const s3RecoveryTarget = '26cfab9ce35fd1a42279fc0d9dd3637c340eec6a'
+const s3RecoveryBackendId = 'sha256:0c20d3089050a00214bb51dac3ac6961622ef5d90f38a8212143851769b6662d'
+const s3RecoveryWebappId = 'sha256:a53f4c8b54e723d518ff70ec7051045e99708804f541c78d163984f9a43b673e'
 const legacyBackendId = 'sha256:0f461127ce0c7a6438a0fd36b91a1c5252c3f3b35adaf72162f476f1142e93c9'
 const legacyWebappId = 'sha256:3bc840c248da2c13d93f7d307c2f52e1104af43d49bf0bad9c00d11377cc236a'
 const candidateBackendId = 'sha256:d8fada3265507cc8ee1ae76b83bf851187aaad19c126b3f4fec4cead92c9106c'
@@ -1066,6 +1069,7 @@ function runApplicationRollback(options = {}) {
   const v4Pair = target === rollbackV4
   const healthyPair = target === rollbackHealthy
   const maxVideoPair = target === maxVideoRecoveryBackend && options.webappTarget === maxVideoRecoveryWebapp
+  const s3Pair = target === s3RecoveryTarget && options.webappTarget === s3RecoveryTarget
   if (options.marker) writeFileSync(resolve(server, options.marker), 'unfinished\n')
   if (options.noBackup) rmSync(resolve(backup, 'compose.yml'))
   const backendTargetLabel = options.badLabel || options.badBackendLabel ? 'wrong' : target
@@ -1092,8 +1096,11 @@ function runApplicationRollback(options = {}) {
     FIXTURE_UNREAD: String(options.unread ?? true), FIXTURE_MULTIPLE: String(options.multiple ?? true),
     FIXTURE_MIGRATION_HISTORY_MISMATCH: String(options.historyMismatch ?? false),
     FIXTURE_MIGRATION_HISTORY_ERROR: String(options.historyError ?? false),
-    FIXTURE_BACKEND_ID: options.badImage ? 'sha256:' + 'f'.repeat(64) : (maxVideoPair ? maxVideoRecoveryBackendId : healthyPair ? healthyBackendId : v4Pair ? v4BackendId : candidatePair ? candidateBackendId : legacyBackendId),
-    FIXTURE_WEBAPP_ID: options.badWebappImage ? 'sha256:' + 'e'.repeat(64) : maxVideoPair ? maxVideoRecoveryWebappId : healthyPair ? healthyWebappId : v4Pair ? v4WebappId : candidatePair ? candidateWebappId : legacyWebappId,
+    FIXTURE_BACKEND_ID: options.badImage ? 'sha256:' + 'f'.repeat(64) : (s3Pair ? s3RecoveryBackendId : maxVideoPair ? maxVideoRecoveryBackendId : healthyPair ? healthyBackendId : v4Pair ? v4BackendId : candidatePair ? candidateBackendId : legacyBackendId),
+    FIXTURE_WEBAPP_ID: options.badWebappImage ? 'sha256:' + 'e'.repeat(64) : s3Pair ? s3RecoveryWebappId : maxVideoPair ? maxVideoRecoveryWebappId : healthyPair ? healthyWebappId : v4Pair ? v4WebappId : candidatePair ? candidateWebappId : legacyWebappId,
+    FIXTURE_STORAGE_DRIVER: options.storageDriver ?? 'filesystem',
+    FIXTURE_S3_ERROR: String(options.s3Error ?? false),
+    FIXTURE_S3_VERSIONED: String(options.s3Versioned ?? false),
     FIXTURE_LABEL: backendTargetLabel, FIXTURE_BACKEND_LABEL: backendTargetLabel, FIXTURE_WEBAPP_LABEL: webappTargetLabel,
     FIXTURE_AUTH_RESPONSE: options.badAuthResponse ? '502' : '',
     FIXTURE_BACKEND_STOPPED: String(options.stoppedBackend ?? false),
@@ -1122,6 +1129,8 @@ function runApplicationRollback(options = {}) {
     ' esac',
     '}',
     'compose() {',
+    ' if [[ "$*" == *"GetBucketVersioningCommand"* ]]; then echo S3_READINESS >> "$FIXTURE_EVENTS"; [ "$FIXTURE_S3_ERROR" = false ] && [ "$FIXTURE_S3_VERSIONED" = false ]; return; fi',
+    ' if [[ "$*" == *"loadEnv(process.env)"* && "$*" == *"PRIVATE_STORAGE_DRIVER"* ]]; then if [[ "$*" == *\'!== "s3"\'* ]]; then [ "$FIXTURE_STORAGE_DRIVER" = s3 ]; else [ "$FIXTURE_STORAGE_DRIVER" = filesystem ]; fi; return; fi',
     ' if [[ "$*" == *config* || "$1" = up ]]; then',
     '   [ -n "${MAX_BOT_TOKEN:-}" ] && [ -n "${MAX_WEBHOOK_SECRET:-}" ] && [ -n "${MAX_INBOX_ENCRYPTION_KEY:-}" ] || { echo COMPOSE_SECRET_MISSING >> "$FIXTURE_EVENTS"; return 1; }',
     ' fi',
@@ -1145,6 +1154,10 @@ function runApplicationRollback(options = {}) {
       'rollback_verify_max_video_recovery_readiness() { echo MAX_READINESS >> "$FIXTURE_EVENTS"; }',
       'rollback_apply_max_video_recovery() { [ -n "${MAX_BOT_TOKEN:-}" ] || { echo RECOVERY_SECRET_MISSING >> "$FIXTURE_EVENTS"; return 1; }; echo MAX_INVERSE >> "$FIXTURE_EVENTS"; }',
     ] : []),
+    ...(options.s3Mocks ? [
+      'rollback_control_installed_inputs_match() { :; }',
+      'rollback_apply_max_video_recovery() { echo UNEXPECTED_MAX_INVERSE >> "$FIXTURE_EVENTS"; return 1; }',
+    ] : []),
     ...(options.trackRollbackOrder ? [
       'wait_backend_internal() { echo BACKEND_INTERNAL_READY >> "$FIXTURE_EVENTS"; }',
     ] : []),
@@ -1159,7 +1172,7 @@ function runApplicationRollback(options = {}) {
       'bash() {',
       ' if [ "$1" = "$APP_ROOT/deploy/selectel/redeploy.sh" ]; then',
       '   shift',
-      `   ( . "${options.redeployFromScriptDir ? '$SCRIPT_DIR/redeploy.sh' : '$APP_ROOT/deploy/selectel/redeploy.sh'}"; ${options.maxVideoMocks ? 'rollback_control_installed_inputs_match() { :; }; rollback_verify_max_video_migration_history() { echo present; }; rollback_verify_max_video_recovery_readiness() { echo MAX_READINESS >> "$FIXTURE_EVENTS"; }; rollback_apply_max_video_recovery() { echo MAX_INVERSE >> "$FIXTURE_EVENTS"; };' : ''} ${options.albumHistoryMocks ? 'rollback_verify_albums_migration_history() { echo "ALBUM_HISTORY:$1" >> "$FIXTURE_EVENTS"; return 0; };' : ''} require_command() { case "$1" in curl|flock|git|readlink|stat|docker) return 0 ;; *) command -v "$1" >/dev/null ;; esac; }; acquire_deploy_lock() { :; }; load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }; main "$@" )`,
+      `   ( . "${options.redeployFromScriptDir ? '$SCRIPT_DIR/redeploy.sh' : '$APP_ROOT/deploy/selectel/redeploy.sh'}"; ${options.s3Mocks ? 'rollback_control_installed_inputs_match() { :; };' : ''} ${options.maxVideoMocks ? 'rollback_control_installed_inputs_match() { :; }; rollback_verify_max_video_migration_history() { echo present; }; rollback_verify_max_video_recovery_readiness() { echo MAX_READINESS >> "$FIXTURE_EVENTS"; }; rollback_apply_max_video_recovery() { echo MAX_INVERSE >> "$FIXTURE_EVENTS"; };' : ''} ${options.albumHistoryMocks ? 'rollback_verify_albums_migration_history() { echo "ALBUM_HISTORY:$1" >> "$FIXTURE_EVENTS"; return 0; };' : ''} require_command() { case "$1" in curl|flock|git|readlink|stat|docker) return 0 ;; *) command -v "$1" >/dev/null ;; esac; }; acquire_deploy_lock() { :; }; load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }; main "$@" )`,
       ' else command bash "$@"; fi',
       '}',
     ] : []),
@@ -3006,6 +3019,77 @@ test('family notifications retain the exact measured d299 recovery source withou
   assert.notEqual(profile(source, 'filesystem', rollbackHealthy).status, 0)
   const drift = commitSourceChange(source, 'backend/src/max-notifications-pilot.ts', '\n// changed family recipient policy\n', 'reject family notification source drift')
   assert.notEqual(profile(drift).status, 0)
+})
+
+function s3RecoverySource() {
+  mkdirSync(resolve(root, '.scratch'), { recursive: true })
+  const directory = mkdtempSync(resolve(root, '.scratch', 's3-recovery-source-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, s3RecoveryTarget], { cwd: root, encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(added.stdout + added.stderr)
+  fixtureWorktrees.push(directory)
+  return { root: directory, sha: s3RecoveryTarget }
+}
+
+function runS3Recovery(source, options = {}) {
+  return runApplicationRollback({ target: s3RecoveryTarget, webappTarget: s3RecoveryTarget,
+    sourceRootOverride: source.root, sourceShaOverride: source.sha,
+    storageDriver: 's3', s3Mocks: true, trackRollbackOrder: true, ...options })
+}
+
+slowTest('S3 baseline readiness checks the exact pair, ledger and storage without promotion', () => {
+  const source = s3RecoverySource()
+  assert.equal(productionRuntimeFingerprint(source.root), 'd16c128505122bae2ca7536f7557dc72f45aafee15907e2419f231259272c2d2')
+  const result = runS3Recovery(source, { action: 'rollback_readiness' })
+  assert.equal(result.status, 0, result.output)
+  assert.match(result.events, /HISTORY_ATTESTATION:present/)
+  assert.match(result.events, /S3_READINESS/)
+  assert.doesNotMatch(result.events, /UP:|GATE|INVERSE/)
+  const drift = commitSourceChange(source, 'backend/src/storage/s3-storage.ts', '\n// unmeasured storage drift\n', 'reject unmeasured S3 recovery source')
+  const rejected = runS3Recovery(drift, { action: 'rollback_readiness' })
+  assert.notEqual(rejected.status, 0)
+  assert.doesNotMatch(rejected.events, /UP:|GATE/)
+})
+
+slowTest('S3 baseline rejects unsafe storage, artifacts and migration state before promotion', () => {
+  const source = s3RecoverySource()
+  for (const options of [{ storageDriver: 'filesystem' }, { badImage: true }, { badWebappImage: true },
+    { badLabel: true }, { historyMismatch: true }, { pending: true }, { s3Error: true }, { s3Versioned: true },
+    { marker: 'b2.marker' }, { marker: 'mm0.marker' }]) {
+    const result = runS3Recovery(source, { action: 'rollback_readiness', ...options })
+    assert.notEqual(result.status, 0, JSON.stringify(options) + result.output)
+    assert.doesNotMatch(result.events, /UP:|GATE/)
+  }
+})
+
+slowTest('S3 baseline rollback restores a stopped backend with normal auth and no legacy recovery SQL', () => {
+  const source = s3RecoverySource()
+  for (const stoppedBackend of [false, true]) {
+    const result = runS3Recovery(source, { stoppedBackend })
+    assert.equal(result.status, 0, result.output)
+    assert.match(result.events, new RegExp(`PAIR:${s3RecoveryTarget}:${s3RecoveryTarget}`))
+    assert.match(result.events, /S3_READINESS/)
+    assert.doesNotMatch(result.events, /INVERSE|RECOVERY_SECRET_MISSING/)
+    assert.doesNotMatch(result.caddy, /rollback_auth_maintenance/)
+    if (stoppedBackend) assert.ok(result.events.indexOf('BACKEND_INTERNAL_READY') < result.events.indexOf('AUTH_ROUTE_CHECK'))
+  }
+})
+
+slowTest('S3 baseline remains designated when the running pair is not an attested recovery target', () => {
+  const source = s3RecoverySource()
+  const result = runS3Recovery(source, { action: 'prepare_rollback', redeployFromScriptDir: true,
+    runningBackend: 'f6'.repeat(20), runningWebapp: 'f6'.repeat(20) })
+  assert.equal(result.status, 0, result.output)
+  assert.match(result.rollbackEnv, new RegExp(`^PREVIOUS_BACKEND_IMAGE_TAG=${s3RecoveryTarget}$`, 'm'))
+  assert.match(result.output, /preserving the verified designated rollback pair/)
+  assert.doesNotMatch(result.events, /UP:|GATE|INVERSE/)
+})
+
+slowTest('S3 baseline automatic recovery preserves the failed release exit code', () => {
+  const source = s3RecoverySource()
+  const result = runS3Recovery(source, { failure: true })
+  assert.equal(result.status, 42, result.output)
+  assert.match(result.output, /Application rollback complete/)
+  assert.doesNotMatch(result.events, /INVERSE/)
 })
 
 test('S3 migration runtime retains exact filesystem recovery and rejects direct S3 rollback', {
