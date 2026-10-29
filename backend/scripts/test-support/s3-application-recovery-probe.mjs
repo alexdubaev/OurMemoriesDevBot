@@ -75,9 +75,9 @@ try {
   const lifecycle = await load('modules/control/infrastructure/control-lifecycle.ts')
   const { runControlDeletionMaintenance } = await load('modules/control/infrastructure/control-purge.ts')
   if (phase === 'seed-current') {
-    const owner = await actor(), foreign = await actor(), guest = await actor()
-    const ownFamily = await family(owner), foreignFamily = await family(foreign), purgeFamily = await family(owner)
-    const active = await asset(ownFamily, owner, 'active'), purged = await asset(purgeFamily, owner, 'purge')
+    const owner = await actor(), foreign = await actor(), guest = await actor(), purgeOwner = await actor()
+    const ownFamily = await family(owner), foreignFamily = await family(foreign), purgeFamily = await family(purgeOwner)
+    const active = await asset(ownFamily, owner, 'active'), purged = await asset(purgeFamily, purgeOwner, 'purge')
     const memory = await json(`/families/${ownFamily.id}/memories`, owner, { kind: 'photo', childId: ownFamily.childId,
       occurredAt: new Date().toISOString(), body: 'Synthetic preserved caption', mediaIds: [active.id] })
     await db.familyMember.create({ data: { familyId: ownFamily.id, userId: guest.id, role: 'viewer' } })
