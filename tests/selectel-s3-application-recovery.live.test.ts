@@ -5,9 +5,9 @@ import { resolve, sep } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { Client } from 'pg'
 import { S3Client, ListObjectsV2Command, DeleteObjectCommand, GetBucketVersioningCommand } from '@aws-sdk/client-s3'
-import { requireIntegrationDatabaseUrl } from '../src/test-support/integration-database'
+import { requireIntegrationDatabaseUrl } from '../backend/src/test-support/integration-database'
 
-const root = resolve(import.meta.dir, '../..')
+const root = resolve(import.meta.dir, '..')
 const baseline = '26cfab9ce35fd1a42279fc0d9dd3637c340eec6a'
 
 test('current → pinned S3 runtime → current preserves media, ACLs, in-flight uploads, retirement and partial purge', async () => {
@@ -70,7 +70,7 @@ test('current → pinned S3 runtime → current preserves media, ACLs, in-flight
       PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT: 'true', PRIVATE_STORAGE_FORCE_PATH_STYLE: process.env.TEST_S3_RECOVERY_FORCE_PATH_STYLE!,
       ...Object.fromEntries(['ENDPOINT', 'REGION', 'BUCKET', 'ACCESS_KEY_ID', 'SECRET_ACCESS_KEY'].map(k => [`PRIVATE_STORAGE_${k}`, process.env[`TEST_S3_RECOVERY_${k}`]!])) }
     for (const [runtime, phase] of [[root, 'seed-current'], [archived, 'baseline'], [root, 'current-after']] as const) {
-      const output = checked(phase, [resolve(root, 'backend/scripts/test-support/s3-application-recovery-probe.mjs'), runtime, phase, state, prefix], resolve(root, 'backend'))
+      const output = checked(phase, [resolve(root, 'tests/test-support-selectel-s3-recovery.mjs'), runtime, phase, state, prefix], resolve(root, 'backend'))
       expect(JSON.parse(output.trim().split('\n').at(-1)!)).toEqual({ phase, success: true })
       checked(`${phase} actual deploy readiness program`, ['-e', program], resolve(runtime, 'backend'), readinessEnv)
     }

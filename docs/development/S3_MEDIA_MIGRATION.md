@@ -102,7 +102,7 @@ Validate the exact candidate and frozen baseline with the real PostgreSQL/S3
 test before accepting a new S3 compatibility profile:
 
 ```sh
-bun test --timeout 300000 backend/scripts/s3-application-recovery.live.test.ts
+bun test --timeout 300000 tests/selectel-s3-application-recovery.live.test.ts
 ```
 
 Provide matching loopback `DATABASE_URL`/`TEST_DATABASE_URL` pointing to an isolated
