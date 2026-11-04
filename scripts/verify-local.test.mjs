@@ -287,6 +287,30 @@ describe('risk based verification', () => {
     }
   })
 
+  test('Telegram auth-only exact metadata requires FULL while adjacent state and configs remain unresolved', () => {
+    const paths = [
+      '.autopilot/2026-11-04-memoly-albums-watercolor-social--wip/state.js',
+      '.env.example',
+      'webapp/e2e/telegram-auth-only.playwright.config.ts',
+    ]
+    for (const path of paths) {
+      expect(classifyChanges([path])).toBe('full')
+      expect(selectProfile({ paths: [path] }).profile).toBe('full')
+      for (const requested of ['fast', 'standard']) {
+        expect(() => selectProfile({ paths: [path], requested })).toThrow('Profile downgrade refused')
+      }
+    }
+    for (const path of [
+      '.autopilot/2026-11-04-memoly-albums-watercolor-social--wip/new-state.js',
+      '.autopilot/2026-11-05-new-run/state.js',
+      '.env.example.next',
+      'webapp/e2e/telegram-auth-next.playwright.config.ts',
+    ]) {
+      expect(classifyChanges([path])).toBe('review-required')
+      expect(() => selectProfile({ paths: [...paths, path], requested: 'full' })).toThrow('REVIEW_REQUIRED')
+    }
+  })
+
   test('a requested profile cannot lower the inferred minimum', () => {
     expect(() => selectProfile({ paths: ['backend/src/modules/auth/login.ts'], requested: 'fast' }))
       .toThrow('Profile downgrade refused')

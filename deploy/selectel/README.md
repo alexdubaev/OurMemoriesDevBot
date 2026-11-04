@@ -690,6 +690,23 @@ backup, target identity, host inputs, installed Control protections, read-only S
 readiness, gateway/auth, smoke and database-preservation guards are unchanged.
 Neither profile authorizes a database restore or storage switch.
 
+The Telegram auth-only source measured at `1675b040c1f2be8a28fbd27993fa2f642c707f2e`
+has the additional exact executable fingerprint
+`2cd72b36e5fb2ccd01b9533d353419931ccf8d62d919c63a79e29c283b59a63f`.
+It is bound to the same `s3-album-social` profile and the same immutable
+`26cfab9ce35fd1a42279fc0d9dd3637c340eec6a` backend/webapp pair. The prior exact
+source binding remains accepted. Schema, migration catalog, data, family ACL and
+storage model are unchanged; this adds no target, profile or permissive source range.
+On the actual designated recovery image, an isolated network-disabled parse of
+the protected runtime env with a synthetic `TELEGRAM_AUTH_BOT_TOKEN` confirmed
+configuration acceptance, the new key ignored, `TELEGRAM_ENABLED=false` and no
+legacy token. This establishes environment compatibility, not restored auth-only
+login on the old image. Preserve the protected previous env for recovery. The
+exact-source regression requires normal readiness and rejects additional auth
+or S3 source drift before mutation. All existing readiness, catalog, image,
+host-lock and storage guards still apply; final FULL and independent review remain
+required before delivery.
+
 Canonical `test:tools` covers this profile's source/phase/lock/rollback boundaries;
 canonical backend integration includes
 `album-social-release-guard.integration.test.ts`, which executes the actual

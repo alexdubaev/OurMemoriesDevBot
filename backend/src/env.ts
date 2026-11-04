@@ -58,6 +58,7 @@ const envSchema = z.object({
   MAX_FILE_MAX_BYTES: z.coerce.number().int().positive().max(20_000_000).default(20_000_000),
   MAX_VIDEO_MAX_BYTES: z.coerce.number().int().positive().max(MAX_DIRECT_VIDEO_MAX_BYTES).default(MAX_DIRECT_VIDEO_MAX_BYTES),
   TELEGRAM_ENABLED: booleanStringSchema,
+  TELEGRAM_AUTH_BOT_TOKEN: optionalStringSchema,
   TELEGRAM_BOT_TOKEN: optionalStringSchema,
   TELEGRAM_BOT_EXPECTED_USERNAME: stringWithDefault('OurMemoriesDevBot')
     .pipe(z.string().regex(/^[A-Za-z0-9_]{5,32}$/)),
@@ -264,6 +265,14 @@ function validateProductionRuntime(env: z.infer<typeof envSchema>, ctx: z.Refine
 }
 
 function validateTelegramEnv(env: z.infer<typeof envSchema>, ctx: z.RefinementCtx) {
+  if (env.TELEGRAM_AUTH_BOT_TOKEN && env.TELEGRAM_BOT_TOKEN
+    && env.TELEGRAM_AUTH_BOT_TOKEN !== env.TELEGRAM_BOT_TOKEN) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['TELEGRAM_AUTH_BOT_TOKEN'],
+      message: 'TELEGRAM_AUTH_BOT_TOKEN must match TELEGRAM_BOT_TOKEN when both are configured',
+    })
+  }
   if (!env.TELEGRAM_ENABLED) {
     for (const [key, value] of [
       ['TELEGRAM_BOT_TOKEN', env.TELEGRAM_BOT_TOKEN],
