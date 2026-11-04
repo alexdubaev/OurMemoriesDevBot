@@ -582,7 +582,9 @@ test('MAX owner retries a lost invite response with one idempotency key and invi
   })
   await page.getByRole('button', { name: 'Создать приглашение' }).click()
   await expect(page.getByRole('heading', { name: 'Ссылка готова' })).toBeVisible()
-  await expect(page.getByLabel('Ссылка приглашения')).toHaveValue(/https?:\/\//)
+  expect(committedInvite?.rawToken).toBeTruthy()
+  await expect(page.getByLabel('Ссылка приглашения MAX', { exact: true })).toHaveValue(`https://max.ru/OurMemoriesMaxBot?start=invite_${committedInvite!.rawToken}`)
+  await expect(page.getByLabel('Ссылка приглашения Telegram', { exact: true })).toHaveValue(`https://t.me/OurMemoriesDevBot?startapp=invite_${committedInvite!.rawToken}`)
   const postsBeforeReadRetry = keys.length
   await page.getByRole('button', { name: 'Готово' }).click()
   await expect(page.getByText('Изменение сохранено, но данные семьи не удалось обновить. Повторите только обновление данных.')).toBeVisible()
