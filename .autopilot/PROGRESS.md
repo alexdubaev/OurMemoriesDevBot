@@ -1,27 +1,28 @@
 <!-- autopilot:progress -->
-# memoLy — альбомные истории: обсуждения и акварель
+# memoLy — Telegram-вход
 
-Текущая сборка: `.autopilot/2026-11-04-memoly-albums-watercolor-social--wip/`. Сервер, общий social adapter и четыре внутренних экрана реализованы. Одно независимое review без подтверждённых P0/P1/P2 и clean-clone social3/3 пройдены. Первый FULL выявил public-import boundary; адресное исправление проверено. Затем закрыты Bun JSX scanner и реальные glob/minimatch audit blockers; affected checks пройдены, final source rebind/recovery proof выполняются. Финальный FULL/merge/release ещё выполняются; это не отчёт об успешном выпуске.
+Текущая сборка: `.autopilot/2026-11-04-memoly-telegram-launch-restore--wip/`.
+Canonical FULL на чистом 091d0145 прошёл; независимое review — без блокеров. Это снимок подготовки PR, а не доказательство deployment. Фактический выпуск, точный main SHA и production smoke записываются в этом же PR и защищённом release manifest после merge.
 
 ## Договорились — не пересматривать
 
-- 2026-11-04 — «Докер и образы перенесены на диск D; всё необходимое искать и делать на D». Ubuntu VHD подтверждён в D:/WSL/Ubuntu; native Linux working files тоже на D.
-
-- Обсуждаем AlbumEntry: все ракурсы одной работы используют одно обсуждение; обсуждения ленты и разных историй разделены.
-- Подлинная акварель первого варианта PR270; полный безопасный reference и assets — commit1906f549. Каталог и пять пунктов навигации сохраняются.
-- Owner/Full/Viewer с действующим членством могут обсуждать историю; только Owner модерирует чужие комментарии, чужой текст никто не редактирует.
-- Одна задача, ветка и implementation PR, один общий выпуск. Никаких промежуточных production этапов.
-- Владелец разрешил точечное дополнение recovery guard для двух album-social миграций и точного итогового source. Backup, S3, locks и запрет отката БД сохраняются.
-- Старые записи wishlist/children/Control из предыдущего PROGRESS были историческими снимками; accepted main a3b128a3 уже содержит принятые функции. Эти независимые задачи не возобновляются.
+- R10: автоматически не объединять MAX и Telegram identities; членства и роли не менять административно.
+- R11/G01: «Да, обновить только URL меню» на https://app.memoly.ru/. Текст сохранён; webhook отсутствует; сообщения не отправляются.
+- Telegram auth-only использует TELEGRAM_AUTH_BOT_TOKEN; TELEGRAM_ENABLED=false сохраняет выключенный message lifecycle.
+- Из carried.md: Docker/образы/локальные среды находятся на D; одна задача, одна ветка/PR, один общий выпуск.
+- Принятые акварельные альбомы, пять пунктов навигации, AlbumEntry discussions и Owner/Full/Viewer policy сохраняются.
+- Recovery/S3/locks и запрет отката БД сохраняются. Legacy recovery pair не меняется.
 
 ## Не доделано
 
-- Завершить итоговый canonical FULL на исправленном чистом source, squash merge и guarded deploy/smoke; факты публикуются в PR и внешнем HANDOFF.
-- Физический iPhone/MAX: клавиатура/safe-area/Back, pinch и возврат к плитке остаются ручной проверкой; desktop/CDP не являются device acceptance.
+- На момент подготовки PR publication/deploy и реальный Telegram-вход после обновления ещё pending; не читать этот снимок как подтверждение их успеха.
+- R08/R09: синтетические фото/карусель/MAX-video play/pause/seek/unmuted decode подтверждены. Production media требуют законного действующего семейного доступа; не создавать fixture пользователей/семьи или членства на production.
+- Реальный iPhone и слышимый звук не подтверждаются Chromium/WebKit/Desktop. Ручная приёмка предыдущей album задачи тоже не объявляется выполненной этим запуском.
 
 ## Известные баги
 
-— Подтверждённые projection500 при одном файле в двух историях и legacy-clear resurrection исправлены и проверены реальной PostgreSQL. Итоговое review ещё впереди.
+- Test-only fixture server при bind failure может оставить синтетические строки/storage; независимое ревью признало report-only, production не затронут.
+- CUA getApp auto-output включил временный signed native URL. Bot token не раскрыт; payload больше не сохранять/не выводить; включение production auth защищено ожиданием полного истечения пяти минут. Дальнейшее чтение AX только emit:false с редактированием адресной строки до вывода.
 
 ## Правки без автопилота
 
