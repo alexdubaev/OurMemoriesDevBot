@@ -45,6 +45,13 @@
 .invitation-linkbox { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 8px; border-radius: 22px; background: var(--theme-inset-hi, #f6f7f3); box-shadow: var(--theme-inset-shadow, inset 0 1px 4px #0001); }
 .invitation-linkbox input { min-width: 0; height: 42px; padding: 0 6px; border: 0; outline: 0; color: inherit; background: transparent; font-size: 13px; text-overflow: ellipsis; }
 .invitation-linkbox button { min-height: 42px; padding: 0 12px; border: 0; border-radius: 15px; color: inherit; background: var(--theme-surface-hi, white); }
+.invitation-provider { margin: 14px 0; padding: 12px; border-radius: 20px; background: var(--theme-surface-hi, white); box-shadow: var(--theme-raised-shadow, 0 2px 10px #0001); text-align: left; }
+.invitation-provider h3 { margin: 0 0 8px; font-size: 14px; font-weight: 780; }
+.invitation-provider .invitation-linkbox { padding: 6px; }
+.invitation-provider .invitation-linkbox input { width: 100%; }
+.invitation-share { display: block; width: 100%; min-height: 42px; margin-top: 8px; padding: 0 12px; border: 0; border-radius: 15px; color: var(--theme-accent-text, #527262); background: var(--theme-accent-soft, #e9eee9); font-weight: 700; }
+.invitation-share:focus-visible, .invitation-linkbox button:focus-visible { outline: 2px solid var(--theme-accent, #527262); outline-offset: 2px; }
+.invitation-provider .invitation-feedback, .invitation-provider .invitation-alert { margin: 8px 2px 0; }
 .invitation-feedback, .invitation-alert { margin: 12px 0; font-size: 13px; line-height: 1.4; }
 .invitation-feedback { color: var(--theme-accent-text, #527262); }
 .invitation-alert { color: var(--memory-danger, #b4233a); }

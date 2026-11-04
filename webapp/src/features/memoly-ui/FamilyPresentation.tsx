@@ -28,14 +28,14 @@ export type FamilyPresentationProps = {
   familyResponse: FamilyResponse; hostBridge: Pick<HostBridge, 'onBack'>; invites: FamilyInviteDto[]; members: FamilyMemberDto[]; childAvatarUrl: string | null; childAvatarStatus?: 'absent' | 'loading' | 'ready' | 'error'
   currentUserId: string
   maxChannelStatus: import('@web-app-demo/contracts').FamilyMaxChannelStatus | null; maxChannelLoading: boolean; maxChannelError: boolean; canManageMaxChannel: boolean; onRetryMaxChannel: () => void
-  usage: { usedBytes: number; quotaBytes: number | null } | null; usageFailed: boolean; inviteReady: { url: string; expiresAt: string; inviteeDisplayName?: string } | null
-  copyState: 'idle' | 'copied' | 'failed'; busy: boolean; hasError?: boolean; inviteError?: boolean; savedRefreshFailed?: boolean; canInvite: boolean; canEditChild: boolean; canLeaveFamily: boolean; canManageFamily: boolean
+  usage: { usedBytes: number; quotaBytes: number | null } | null; usageFailed: boolean; inviteReady: { maxUrl: string | null; telegramUrl: string; expiresAt: string; inviteeDisplayName?: string } | null
+  inviteActions: InviteActions; busy: boolean; hasError?: boolean; inviteError?: boolean; savedRefreshFailed?: boolean; canInvite: boolean; canEditChild: boolean; canLeaveFamily: boolean; canManageFamily: boolean
   memberActions: Record<string, FamilyMemberActions>; onRefresh: () => void; onRefreshUsage: () => void; onEditChild: (childId: string) => void
   /** Owner-only «Добавить ребёнка»; absent when the family is full or the viewer is not the owner. */
   onAddChild?: () => void
   /** Live avatar for one child row; letters are shown when the screen supplies none. */
   renderChildAvatar?: (child: ChildDto) => ReactNode
-  onCreateInvite: (input: { role: 'viewer' | 'full'; inviteeDisplayName?: string; idempotencyKey?: string }) => Promise<void>; onCopyInvite: () => Promise<void>; onShareInvite: () => Promise<void>
+  onCreateInvite: (input: { role: 'viewer' | 'full'; inviteeDisplayName?: string; idempotencyKey?: string }) => Promise<void>; onCopyInvite: (provider: InviteProvider) => Promise<void>; onShareInvite: (provider: InviteProvider) => Promise<void>
   onCloseInvite: () => void; onRevokeInvite: (invite: FamilyInviteDto) => Promise<void>; onUpdateMember: (member: FamilyMemberDto, input: { familyDisplayName?: string | null; role?: 'full' | 'viewer' }) => Promise<void>
   onAllFamilies?: () => void
   onRemoveMember: (member: FamilyMemberDto) => Promise<void>; onLeaveFamily: () => Promise<void>
@@ -45,8 +45,11 @@ export type FamilyPresentationProps = {
   onSettingsRequestHandled?: () => void
 }
 type FamilyView = 'overview' | 'member' | 'invite' | 'invite-ready' | 'family-settings' | 'archive' | 'invites' | 'leave-confirm'
+type InviteProvider = 'max' | 'telegram'
+type InviteActionStatus = 'idle' | 'copied' | 'failed' | 'shared' | 'cancelled'
+type InviteActions = Record<InviteProvider, { copyState: InviteActionStatus; shareState: InviteActionStatus }>
 
-export function FamilyPresentation({ active = true, familyResponse, hostBridge, invites, members, currentUserId, childAvatarUrl, childAvatarStatus, usage, usageFailed, inviteReady, copyState, busy, hasError = false, inviteError = false, savedRefreshFailed = false, canInvite, canEditChild, canLeaveFamily, canManageFamily, memberActions, maxChannelStatus, maxChannelLoading, maxChannelError, canManageMaxChannel, onRetryMaxChannel, onRefresh, onRefreshUsage, onEditChild, onAddChild, renderChildAvatar, onAllFamilies, onCreateInvite, onCopyInvite, onShareInvite, onCloseInvite, onRevokeInvite, onUpdateMember, onRemoveMember, onLeaveFamily, onUpdateFamily, canOpenInstall, installLabel, onOpenInstall, settingsRequest, onSettingsRequestHandled }: FamilyPresentationProps) {
+export function FamilyPresentation({ active = true, familyResponse, hostBridge, invites, members, currentUserId, childAvatarUrl, childAvatarStatus, usage, usageFailed, inviteReady, inviteActions, busy, hasError = false, inviteError = false, savedRefreshFailed = false, canInvite, canEditChild, canLeaveFamily, canManageFamily, memberActions, maxChannelStatus, maxChannelLoading, maxChannelError, canManageMaxChannel, onRetryMaxChannel, onRefresh, onRefreshUsage, onEditChild, onAddChild, renderChildAvatar, onAllFamilies, onCreateInvite, onCopyInvite, onShareInvite, onCloseInvite, onRevokeInvite, onUpdateMember, onRemoveMember, onLeaveFamily, onUpdateFamily, canOpenInstall, installLabel, onOpenInstall, settingsRequest, onSettingsRequestHandled }: FamilyPresentationProps) {
   const [view, setView] = useState<FamilyView>('overview')
   const [selectedMember, setSelectedMember] = useState<FamilyMemberDto | null>(null)
   const [inviteReturnView, setInviteReturnView] = useState<'overview' | 'invites'>('overview')
@@ -112,7 +115,7 @@ export function FamilyPresentation({ active = true, familyResponse, hostBridge, 
       {view === 'invites' && canInvite ? <FamilyInvitesPage busy={busy} invites={invites} onBack={goOverview} onInvite={() => { setInviteReturnView('invites'); setView('invite') }} onRevoke={onRevokeInvite} /> : null}
       {view === 'leave-confirm' && canLeaveFamily ? <FamilyLeavePage busy={busy} onBack={goOverview} onLeave={onLeaveFamily} /> : null}
       {view === 'invite' ? <InviteFlow busy={busy} errorMessage={inviteError ? 'Не удалось создать приглашение. Попробуйте ещё раз.' : null} hasError={hasError} onBack={goInviteSource} onCreate={async (role, inviteeDisplayName, idempotencyKey) => { try { await onCreateInvite({ role, inviteeDisplayName, idempotencyKey }); setView('invite-ready') } catch { /* FamilyScreen exposes the actionable error state. */ } }} onRefresh={onRefresh} /> : null}
-      {view === 'invite-ready' && inviteReady ? <InviteReady busy={busy} copyState={copyState} invite={inviteReady} onBack={() => setView('invite')} onClose={() => { onCloseInvite(); goInviteSource() }} onCopy={onCopyInvite} onShare={onShareInvite} /> : null}
+      {view === 'invite-ready' && inviteReady ? <InviteReady busy={busy} invite={inviteReady} actions={inviteActions} onBack={() => setView('invite')} onClose={() => { onCloseInvite(); goInviteSource() }} onCopy={onCopyInvite} onShare={onShareInvite} /> : null}
     </div>
     <SettingsSheet canManageFamily={canManageFamily} canOpenInstall={canOpenInstall} installLabel={installLabel} hostBridge={hostBridge} onArchive={() => setView('archive')} onFamilySettings={() => setView('family-settings')} onOpenChange={setSettingsOpen} onOpenInstall={onOpenInstall} open={active && settingsOpen} returnFocusRef={active ? settingsTriggerRef : undefined} />
     {canLeaveFamily && view === 'overview' ? <button className="family-leave-action" disabled={busy} onClick={() => setView('leave-confirm')} type="button">Выйти из семьи</button> : null}

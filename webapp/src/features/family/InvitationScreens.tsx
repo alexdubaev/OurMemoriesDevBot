@@ -70,18 +70,54 @@ export function InviteFlow({ busy, errorMessage, hasError, onBack, onCreate, onR
   </section>
 }
 
-export function InviteReady({ invite, busy, copyState, onBack, onClose, onCopy, onShare }: { invite: { url: string; expiresAt: string; inviteeDisplayName?: string }; busy: boolean; copyState: 'idle' | 'copied' | 'failed'; onBack: () => void; onClose: () => void; onCopy: () => Promise<void>; onShare: () => Promise<void> }) {
+type InviteProvider = 'max' | 'telegram'
+type InviteActionStatus = 'idle' | 'copied' | 'failed' | 'shared' | 'cancelled'
+type InviteActions = Record<InviteProvider, { copyState: InviteActionStatus; shareState: InviteActionStatus }>
+
+// eslint-disable-next-line react-refresh/only-export-components -- pure share fallback is tested independently.
+export async function shareInviteWithFallback(url: string, share?: (url: string) => Promise<void>, copy?: (url: string) => Promise<void>): Promise<'shared' | 'copied' | 'failed' | 'cancelled'> {
+  if (share) {
+    try {
+      await share(url)
+      return 'shared'
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError') return 'cancelled'
+    }
+  }
+  try {
+    if (!copy) return 'failed'
+    await copy(url)
+    return 'copied'
+  } catch {
+    return 'failed'
+  }
+}
+
+export function InviteReady({ invite, busy, actions, onBack, onClose, onCopy, onShare }: { invite: { maxUrl: string | null; telegramUrl: string; expiresAt: string; inviteeDisplayName?: string }; busy: boolean; actions: InviteActions; onBack: () => void; onClose: () => void; onCopy: (provider: InviteProvider) => Promise<void>; onShare: (provider: InviteProvider) => Promise<void> }) {
   return <section aria-label="Ссылка готова" className="invitation-screen invitation-ready">
     <InvitationHeader onBack={onBack} title="Ссылка готова" />
     <div className="invitation-result-symbol" aria-hidden="true"><WebpIcon decorative name="lock" size={40} /></div>
     <h2>Приглашение готово!</h2>
-    <p className="invitation-result-copy">Отправьте ссылку родственнику. Срок действия — до {new Date(invite.expiresAt).toLocaleDateString('ru-RU')}.</p>
+    <p className="invitation-result-copy">Это одно приглашение для одного родственника. Выберите ссылку для приложения, которым ему удобнее пользоваться. Срок действия — до {new Date(invite.expiresAt).toLocaleDateString('ru-RU')}.</p>
     {invite.inviteeDisplayName ? <div className="invitation-recipient"><span className="invitation-recipient-avatar" aria-hidden="true">{invite.inviteeDisplayName.charAt(0).toLocaleUpperCase('ru-RU')}</span><span><strong>{invite.inviteeDisplayName}</strong><small>Имя в семье после вступления</small></span></div> : null}
-    <div className="invitation-linkbox"><input aria-label="Ссылка приглашения" readOnly value={invite.url} /><button disabled={busy} onClick={() => void onCopy()} type="button">Скопировать</button></div>
-    {copyState === 'copied' ? <p className="invitation-feedback" role="status">Ссылка скопирована</p> : null}
-    {copyState === 'failed' ? <p className="invitation-alert" role="alert">Не удалось скопировать. Выделите ссылку в поле выше.</p> : null}
-    {typeof navigator !== 'undefined' && typeof navigator.share === 'function' ? <button className="invitation-primary" disabled={busy} onClick={() => void onShare()} type="button">Поделиться ссылкой</button> : null}
+    <InviteLinkActions actions={actions.max} busy={busy} label="MAX" onCopy={() => onCopy('max')} onShare={() => onShare('max')} url={invite.maxUrl} />
+    <InviteLinkActions actions={actions.telegram} busy={busy} label="Telegram" onCopy={() => onCopy('telegram')} onShare={() => onShare('telegram')} url={invite.telegramUrl} />
     <button className="invitation-secondary" onClick={onClose} type="button">Готово</button>
+  </section>
+}
+
+function InviteLinkActions({ label, url, actions, busy, onCopy, onShare }: { label: string; url: string | null; actions: InviteActions[InviteProvider]; busy: boolean; onCopy: () => Promise<void>; onShare: () => Promise<void> }) {
+  const unavailable = !url || busy
+  return <section aria-label={`Пригласить через ${label}`} className="invitation-provider">
+    <h3>Пригласить через {label}</h3>
+    {url ? <div className="invitation-linkbox"><input aria-label={`Ссылка приглашения ${label}`} onFocus={(event) => event.currentTarget.select()} readOnly value={url} /><button disabled={unavailable} onClick={() => void onCopy()} type="button">Скопировать</button></div> : <p className="invitation-alert" role="alert">Ссылка MAX недоступна: проверьте настройки бота.</p>}
+    {actions.copyState === 'copied' ? <p className="invitation-feedback" role="status">Ссылка {label} скопирована</p> : null}
+    {actions.copyState === 'failed' ? <p className="invitation-alert" role="alert">Не удалось скопировать ссылку {label}. Выделите её в поле выше.</p> : null}
+    {url ? <button className="invitation-share" disabled={unavailable} onClick={() => void onShare()} type="button">Поделиться ссылкой {label}</button> : null}
+    {actions.shareState === 'shared' ? <p className="invitation-feedback" role="status">Открыто меню отправки {label}</p> : null}
+    {actions.shareState === 'copied' ? <p className="invitation-feedback" role="status">Меню отправки недоступно. Ссылка {label} скопирована</p> : null}
+    {actions.shareState === 'cancelled' ? <p className="invitation-feedback" role="status">Отправка отменена</p> : null}
+    {actions.shareState === 'failed' ? <p className="invitation-alert" role="alert">Не удалось отправить или скопировать ссылку {label}. Выделите её в поле выше.</p> : null}
   </section>
 }
 
