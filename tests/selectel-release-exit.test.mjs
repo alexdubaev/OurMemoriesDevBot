@@ -3819,6 +3819,43 @@ test('Telegram auth-only exact S3 source passes readiness and rejects unmeasured
   }
 })
 
+test('MAX Telegram identity-link exact S3 source passes readiness and rejects unmeasured token logic', { timeout: 90000 }, () => {
+  const directory = mkdtempSync(resolve(root, '.scratch', 'identity-link-s3-source-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, '7679a9de70f798e6d495569c27fc6751e53c9b8e'], { cwd: root, encoding: 'utf8' })
+  assert.equal(added.status, 0, added.stderr)
+  fixtureWorktrees.push(directory)
+  const source = commitFrozenSourceFiles({ root: directory, sha: '7679a9de70f798e6d495569c27fc6751e53c9b8e' }, [
+    ['backend/src/modules/auth/application/ports.ts', '29f372454f84c80b30d3036f76816319b1c96ba2'],
+    ['backend/src/modules/auth/application/telegram-auth-service.ts', '000d5890ce0ee0aba9f01ebf2d41ba84f8cc2a8d'],
+    ['backend/src/modules/auth/application/telegram-link-service.ts', 'bccebb400c820ec95fb9b75cfadb9bdb6cf47d2c'],
+    ['backend/src/modules/auth/domain/errors.ts', '37a10c0f0f92d758dbf4260c55bb2edeae3b0ff6'],
+    ['backend/src/modules/auth/index.ts', '6ff7d721b76caba3f3be1888524c36660c0b6e10'],
+    ['backend/src/modules/auth/infrastructure/auth-repository.ts', 'cba2331ecbe1e46c9eb4e13798c7ee8a54915dd4'],
+    ['backend/src/modules/auth/infrastructure/telegram-init-data.ts', '296ec60893531b46f5ee717319f79ab26f6d9f23'],
+    ['backend/src/modules/auth/infrastructure/telegram-link-repository.ts', '9120fbc903af07e52c10d85b71d709e583dce8b7'],
+    ['backend/src/modules/auth/infrastructure/telegram-link-tokens.ts', '0b38044d5211aff03d249839cab76fb40352d333'],
+    ['backend/src/modules/auth/transport/errors.ts', 'ccbb868e066edb50bb09e66d51302e29fca4fd78'],
+    ['backend/src/modules/auth/transport/routes.ts', 'ef06f7293e06a30b87447d3c72403c24091ba949'],
+    ['packages/contracts/src/auth.ts', '4032801699e84c1ddf86424e9fa70c1400f8f6d8'],
+    ['webapp/src/App.tsx', '6b061b8faafdd49cde37f44653c7680282775baa'],
+    ['webapp/src/features/auth/TelegramLinkCard.tsx', 'bb477cc607107e567df2172a0f4f63b7a351e092'],
+    ['webapp/src/features/auth/index.ts', 'f3a8101fdd36ff3cc059dd2220593dde637de834'],
+    ['webapp/src/features/auth/provider.tsx', '853f70e4cf6093493317aec6c36274a3be3155b6'],
+    ['webapp/src/features/memoly-ui/MemberProfile.tsx', 'a68626668d7c511c31c5fd22fe4f2c90805522e4'],
+  ], 'reconstruct exact measured MAX Telegram identity-link source')
+  assert.equal(productionCompatibilityFingerprint(source.root), '6432b47cca29849707ee916f7fcdf442d687b67e4c44c33e47e73e6ed8a5b027')
+  const ready = runS3Recovery(source, { action: 'rollback_readiness', s3SocialHistoryMocks: true })
+  assert.equal(ready.status, 0, ready.output)
+  assert.match(ready.events, /S3_SOCIAL_HISTORY:complete/)
+  assert.match(ready.events, /S3_READINESS/)
+  assert.doesNotMatch(ready.events, /UP:|GATE|INVERSE/)
+  const drift = commitSourceChange(source, 'backend/src/modules/auth/infrastructure/telegram-link-tokens.ts',
+    '\n// unmeasured token-logic drift\n', 'reject unmeasured identity-link source')
+  const rejected = runS3Recovery(drift, { action: 'rollback_readiness', s3SocialHistoryMocks: true })
+  assert.notEqual(rejected.status, 0, rejected.output)
+  assert.doesNotMatch(rejected.events, /UP:|GATE|INVERSE/)
+})
+
 test('S3 album-social exact executable profile rejects unmeasured source changes', {
   timeout: process.platform === 'win32' ? 180_000 : 60_000,
 }, () => {

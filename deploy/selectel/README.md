@@ -1294,3 +1294,14 @@ the real PostgreSQL current → d299 → current probe remains required. This bi
 not enable sending. See [family notification operation](../../docs/development/MAX_FAMILY_NOTIFICATIONS.md).
 
 For review preparation only, the local `teamlead-development` skill includes `scripts/prepare-selectel-release.mjs` (use the installed skill path). Example: `node <skill-path>/scripts/prepare-selectel-release.mjs --repo <checkout> --base <full-base-sha> [--candidate <full-candidate-sha>]`. The helper reads the accepted `origin/main` fingerprint function and produces exact source-bound metadata without modifying Git or touching the host. Its output is preparation only: it is not approval, a gate, a patch, a deployment, or a compatibility decision. All existing review and release safeguards still apply.
+
+The MAX → Telegram identity-link source has exact executable compatibility fingerprint
+`6432b47cca29849707ee916f7fcdf442d687b67e4c44c33e47e73e6ed8a5b027` for the unchanged
+`26cfab9ce35fd1a42279fc0d9dd3637c340eec6a` S3 recovery pair and `s3-album-social` profile.
+No schema or migration changes are introduced. The real PostgreSQL
+`identity-link.integration.test.ts` recovery case executes the frozen pinned application,
+then current code: linked owner identity, both family access checks, refresh, one-use
+fingerprint, family/membership rows and migration ledger are preserved. The release
+regression reconstructs the exact measured blobs over accepted `7679a9de` and rejects
+unmeasured auth drift. This registration changes no target, image, storage, ledger,
+promotion or rollback safeguards and does not authorize a database restore.
