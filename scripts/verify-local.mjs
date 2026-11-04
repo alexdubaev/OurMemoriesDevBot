@@ -14,6 +14,16 @@ const RASTER_ASSET = /\.(webp|png|jpe?g|avif|ico)$/i
 const FRONTEND_SCOPE_CLI = 'deploy/selectel/frontend-scope.sh'
 const BASH_EXECUTABLE = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
 const ACCEPTED_UI_V4_SHA = 'afdb408f8bbf22b564c86bb8d33a83261f55cc48'
+// Reviewed individual executable metadata and browser infrastructure inputs.
+// Keep exact identities: adjacent/new files still require their own classification.
+const REVIEWED_FULL_PATHS = new Set([
+  '.autopilot/2026-10-23-wishlist/state.js',
+  '.autopilot/dashboard.html',
+  '.autopilot/state.js',
+  'assets/manifest.json',
+  'webapp/e2e/album-social.playwright.config.ts',
+  'webapp/e2e/fixtures/albums.ts',
+])
 
 function isFastSafe(path) {
   return FAST_SAFE.test(path) || (FRONTEND_ASSET.test(path) && RASTER_ASSET.test(path))
@@ -212,6 +222,9 @@ export function explainChanges(paths, { repositoryRoot = process.cwd() } = {}) {
     const result = (profile, rule, message) => ({ path, profile, rule, message })
     if (!path || /[\\\r\n\t]/.test(path) || path.startsWith('/') || path.split('/').some((part) => !part || part === '.' || part === '..')) {
       return result('review-required', 'invalid-path', 'Ambiguous changed path; establish its repository-relative identity.')
+    }
+    if (REVIEWED_FULL_PATHS.has(path)) {
+      return result('full', 'reviewed-exact-critical-path', 'Reviewed executable metadata or browser infrastructure; retain FULL verification.')
     }
     if (CRITICAL.test(path) && !DOCS.test(path)) {
       return result('full', 'critical-path', 'Sensitive source, contracts, configuration or verification/release tooling.')
