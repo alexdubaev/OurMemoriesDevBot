@@ -78,7 +78,7 @@ describe('Cross-provider identity linking', () => {
     expect(await db.externalIdentity.count({ where: { userId: owner.id } })).toBe(2)
   })
 
-  test('does not merge an occupied Telegram or change its sessions, authors or memberships', async () => {
+  test('does not merge an occupied Telegram or change its user identity and sessions', async () => {
     const subject = nextSubject()
     const telegram = await exchange('telegram', signed(telegramToken, {}, subject))
     const other = await telegram.json()
