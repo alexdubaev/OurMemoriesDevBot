@@ -526,6 +526,7 @@ test('MAX owner retries a lost invite response with one idempotency key and invi
 
   const keys: string[] = []
   let committedInvite: { rawToken: string } | undefined
+  let latestInviteRawToken = ''
   let failFirstResponse = true
   let inviteCommitted!: () => void
   let releaseInvite!: () => void
@@ -536,6 +537,7 @@ test('MAX owner retries a lost invite response with one idempotency key and invi
     keys.push(route.request().headers()['idempotency-key'] ?? '')
     const committed = await route.fetch()
     const payload = await committed.json()
+    latestInviteRawToken = payload.rawToken as string
     if (failFirstResponse) {
       failFirstResponse = false
       committedInvite = payload
@@ -582,9 +584,9 @@ test('MAX owner retries a lost invite response with one idempotency key and invi
   })
   await page.getByRole('button', { name: 'Создать приглашение' }).click()
   await expect(page.getByRole('heading', { name: 'Ссылка готова' })).toBeVisible()
-  expect(committedInvite?.rawToken).toBeTruthy()
-  await expect(page.getByLabel('Ссылка приглашения MAX', { exact: true })).toHaveValue(`https://max.ru/OurMemoriesMaxBot?start=invite_${committedInvite!.rawToken}`)
-  await expect(page.getByLabel('Ссылка приглашения Telegram', { exact: true })).toHaveValue(`https://t.me/OurMemoriesDevBot?startapp=invite_${committedInvite!.rawToken}`)
+  expect(latestInviteRawToken).toBeTruthy()
+  await expect(page.getByLabel('Ссылка приглашения MAX', { exact: true })).toHaveValue(`https://max.ru/OurMemoriesMaxBot?start=invite_${latestInviteRawToken}`)
+  await expect(page.getByLabel('Ссылка приглашения Telegram', { exact: true })).toHaveValue(`https://t.me/OurMemoriesDevBot?startapp=invite_${latestInviteRawToken}`)
   const postsBeforeReadRetry = keys.length
   await page.getByRole('button', { name: 'Готово' }).click()
   await expect(page.getByText('Изменение сохранено, но данные семьи не удалось обновить. Повторите только обновление данных.')).toBeVisible()
