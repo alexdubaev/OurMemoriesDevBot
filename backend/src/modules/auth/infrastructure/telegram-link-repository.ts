@@ -14,7 +14,7 @@ export function createPrismaTelegramLinkRepository(db: DbClient): TelegramLinkRe
         await acquireUserAuthenticationAuthorityLock(tx, input.userId)
         await lockSourceSession(tx, input.sessionId)
         const now = await databaseNow(tx)
-        const source = await activeMaxSource(tx, input.sessionId, now, input.createdAfter)
+        const source = await activeMaxSource(tx, input.sessionId, now, new Date(now.getTime() - input.absoluteTtlMs))
         if (!source || source.userId !== input.userId || source.externalIdentityId !== input.identityId) return null
         if (await tx.externalIdentity.count({ where: { userId: input.userId, provider: 'telegram' } })) {
           return { connected: true as const }
@@ -35,7 +35,7 @@ export function createPrismaTelegramLinkRepository(db: DbClient): TelegramLinkRe
 export async function resolveTelegramLink(tx: Transaction, input: {
   tokenHash: string
   authDateSeconds: number
-  sourceCreatedAfter: Date
+  sourceAbsoluteTtlMs: number
 }, subject: string) {
   const candidate = await tx.telegramIdentityLink.findUnique({
     where: { tokenHash: input.tokenHash }, include: { sourceSession: true },
@@ -49,7 +49,7 @@ export async function resolveTelegramLink(tx: Transaction, input: {
   if (!link || link.consumedAt || link.expiresAt <= now || input.authDateSeconds < Math.floor(link.createdAt.getTime() / 1000)) {
     return { state: 'link_invalid' as const }
   }
-  const source = await activeMaxSource(tx, link.sourceSessionId, now, input.sourceCreatedAfter)
+  const source = await activeMaxSource(tx, link.sourceSessionId, now, new Date(now.getTime() - input.sourceAbsoluteTtlMs))
   if (!source || source.userId !== candidate.sourceSession.userId) return { state: 'link_invalid' as const }
   const identity = await tx.externalIdentity.findUnique({ where: { provider_subject: { provider: 'telegram', subject } } })
   const connected = await tx.externalIdentity.findFirst({ where: { provider: 'telegram', userId: source.userId } })

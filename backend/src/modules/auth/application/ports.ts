@@ -123,7 +123,7 @@ export type TelegramAuthRepository = Pick<AuthRepository, 'findActiveRefreshSess
     fingerprintHash: string
     replayExpiresAt: Date
     existingSessionId?: string
-    link?: { tokenHash: string; authDateSeconds: number; sourceCreatedAfter: Date }
+    link?: { tokenHash: string; authDateSeconds: number; sourceAbsoluteTtlMs: number }
     now: Date
     session: {
       refreshTokenHash: string
@@ -134,14 +134,15 @@ export type TelegramAuthRepository = Pick<AuthRepository, 'findActiveRefreshSess
   }): Promise<
     | { state: 'issued' | 'same_session'; user: AuthUserRecord; session: { id: string } }
     | { state: 'invalid_account' }
-    | { state: 'link_invalid' | 'link_conflict' }
+    | { state: 'link_invalid' }
+    | { state: 'link_conflict' }
     | { state: 'replayed' }
   >
 }
 
 export type TelegramLinkRepository = {
   isConnected(userId: string): Promise<boolean>
-  start(input: { userId: string; sessionId: string; identityId: string; tokenHash: string; createdAfter: Date }): Promise<
+  start(input: { userId: string; sessionId: string; identityId: string; tokenHash: string; absoluteTtlMs: number }): Promise<
     | { connected: true }
     | { connected: false; expiresAt: Date }
     | null

@@ -49,6 +49,8 @@ const telegramRoute = createRoute({
       content: { 'application/json': { schema: cookieAuthResponseSchema } },
       description: 'Verified Telegram identity and application session',
     },
+    400: { content: errorResponseContent, description: 'Identity link expired or consumed' },
+    409: { content: errorResponseContent, description: 'Telegram already belongs to an account' },
     422: { content: errorResponseContent, description: 'Invalid payload' },
     401: { content: errorResponseContent, description: 'Invalid, expired, or replayed initData' },
     403: { content: errorResponseContent, description: 'Untrusted browser origin' },

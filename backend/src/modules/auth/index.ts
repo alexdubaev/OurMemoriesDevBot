@@ -69,7 +69,6 @@ export function createAuthModule({
   const maxService = buildMaxAuthService({ clock, db, env, projectUser })
   const browserLinkService = buildBrowserLinkService({ clock, db, env, maxService, projectUser })
   const telegramLinkService = new TelegramLinkService({
-    clock,
     repository: createPrismaTelegramLinkRepository(db),
     sessionAbsoluteTtlDays: env.SESSION_ABSOLUTE_TTL_DAYS,
     configured: Boolean(env.TELEGRAM_AUTH_BOT_TOKEN ?? env.TELEGRAM_BOT_TOKEN),

@@ -33,6 +33,8 @@ describe('Telegram Mini App initData verification', () => {
         displayName: 'Алекс Тестов',
       },
       replayFingerprintHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      authDateSeconds: Math.floor(now.getTime() / 1000),
+      startParam: undefined,
     })
   })
 

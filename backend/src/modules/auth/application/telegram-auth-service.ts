@@ -51,7 +51,7 @@ export class TelegramAuthService {
       link: linkToken ? {
         tokenHash: hashTelegramLinkToken(linkToken),
         authDateSeconds: verified.authDateSeconds,
-        sourceCreatedAfter: new Date(now.getTime() - this.dependencies.sessionAbsoluteTtlDays * 86400_000),
+        sourceAbsoluteTtlMs: this.dependencies.sessionAbsoluteTtlDays * 86400_000,
       } : undefined,
       now,
       session: {
