@@ -71,7 +71,7 @@
 | R65 | «320/390/430px, увеличенный текст, пустые/заполненные состояния,» | done | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 → 73dad576 |
 | R66 | «Физический iPhone не объявлять проверенным по эмуляции.» | done | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 → 73dad576 |
 | R67 | «Итоговый профиль — FULL:» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T01 |
-| R68 | «Одно независимое техническое review итогового diff:» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
+| R68 | «Одно независимое техническое review итогового diff:» | done | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
 | R69 | «Новый объединённый source не считать проверенным старым логом.» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
 | R70 | «Не выпускать в production каждый внутренний этап отдельно.» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
 | R71 | «актуализировать main обычным merge в своей ветке;» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
@@ -79,11 +79,11 @@
 | R73 | «выполнить разрешённый squash merge;» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
 | R74 | «выполнить штатный guarded deploy и smoke.» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
 | R75 | «backup, disk, host lock, immutable images;» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
-| R76 | «не предполагать совместимость отката только по слову «additive».» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
+| R76 | «не предполагать совместимость отката только по слову «additive».» | done | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
 | R77 | «Чужую блокировку не снимать.» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
 | R78 | «Production smoke — без автоматического создания настоящих» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
 | R79 | «Не останавливаться на «готово к следующему этапу»,» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
 | D01 | Legacy S3 runtime clear не знает discussionGeneration | in-spec | В реальной PostgreSQL после точных old clear mutations и refill возвращается comments.count=1; обслуживает R36/R37/R76 | interfaces.md: совместимость очистки |
 | D02 | S3 release guard разрешает только complete catalog | in-spec | Синтетический prepare_rollback RUN_MIGRATION=true отклонён до SQL/публикации, 1 pass; R74/R76 | spec.md: выпуск, без обхода guard |
-| G01 | «Да, разрешаю точечное дополнение» | in-ticket | Владелец разрешил подготовленный exact-source S3 album-social recovery profile для ровно двух миграций; прежние guards/backup/S3/no-DB-restore сохранены | spec.md: ограниченное разрешение → T03 |
+| G01 | «Да, разрешаю точечное дополнение» | done | Владелец разрешил подготовленный exact-source S3 album-social recovery profile для ровно двух миграций; прежние guards/backup/S3/no-DB-restore сохранены | spec.md: ограниченное разрешение → T03 |
 | D03 | Projection dedup по media identity теряет association id при одном файле в двух историях | in-spec | Real API browser: second entry POST201 then GET entries500 (sourceDto undefined). R08/R64 require same-file independent stories | interfaces.md: source association identity |

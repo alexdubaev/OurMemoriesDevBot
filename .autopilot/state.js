@@ -65,8 +65,8 @@ window.STATE =
   ],
   "requirements": {
     "total": 80,
-    "done": 64,
-    "inTicket": 16,
+    "done": 67,
+    "inTicket": 13,
     "inSpec": 0,
     "placeholder": 0,
     "deferred": 0,
@@ -285,7 +285,7 @@ window.STATE =
     "2026-11-04T13:39:32+03:00",
     "2026-11-04T14:09:54+03:00"
   ],
-  "rev": 29,
+  "rev": 30,
   "waiting": null,
   "waits": [
     {
@@ -814,7 +814,7 @@ window.STATE =
     {
       "id": "R68",
       "text": "«Одно независимое техническое review итогового diff:»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R69",
@@ -854,7 +854,7 @@ window.STATE =
     {
       "id": "R76",
       "text": "«не предполагать совместимость отката только по слову «additive».»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R77",
@@ -874,7 +874,7 @@ window.STATE =
     {
       "id": "G01",
       "text": "«Да, разрешаю точечное дополнение»",
-      "status": "in-ticket"
+      "status": "done"
     }
   ],
   "gates": {
