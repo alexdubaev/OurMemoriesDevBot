@@ -1,15 +1,11 @@
-import { createHash, randomBytes } from 'node:crypto'
 import type { AuthenticatedPrincipal } from '../domain/user'
 import { AuthFailure } from '../domain/errors'
-import type { TelegramLinkRepository } from './ports'
-
-export function hashTelegramLinkToken(token: string) {
-  return createHash('sha256').update(token).digest('hex')
-}
+import type { TelegramLinkRepository, TelegramLinkTokens } from './ports'
 
 export class TelegramLinkService {
   constructor(private readonly dependencies: {
     repository: TelegramLinkRepository
+    tokens: TelegramLinkTokens
     sessionAbsoluteTtlDays: number
     configured: boolean
   }) {}
@@ -21,19 +17,17 @@ export class TelegramLinkService {
 
   async start(principal: AuthenticatedPrincipal) {
     this.assertMax(principal)
-    const token = randomBytes(32).toString('base64url')
     const result = await this.dependencies.repository.start({
       userId: principal.id,
       sessionId: principal.sessionId,
       identityId: principal.externalIdentity!.id,
-      tokenHash: hashTelegramLinkToken(token),
       absoluteTtlMs: this.dependencies.sessionAbsoluteTtlDays * 86400_000,
     })
     if (!result) throw new AuthFailure('session_invalid', 'MAX session is invalid or expired')
     return result.connected ? result : {
       connected: false as const,
-      startParam: `link_${token}`,
-      expiresAt: result.expiresAt.toISOString(),
+      startParam: `link_${this.dependencies.tokens.create(principal.sessionId, result.issuedAt)}`,
+      expiresAt: new Date(result.issuedAt.getTime() + 15_000).toISOString(),
     }
   }
 

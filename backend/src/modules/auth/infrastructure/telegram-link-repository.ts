@@ -19,13 +19,7 @@ export function createPrismaTelegramLinkRepository(db: DbClient): TelegramLinkRe
         if (await tx.externalIdentity.count({ where: { userId: input.userId, provider: 'telegram' } })) {
           return { connected: true as const }
         }
-        const expiresAt = new Date(now.getTime() + 15_000)
-        await tx.telegramIdentityLink.upsert({
-          where: { sourceSessionId: input.sessionId },
-          create: { sourceSessionId: input.sessionId, tokenHash: input.tokenHash, createdAt: now, expiresAt },
-          update: { tokenHash: input.tokenHash, createdAt: now, expiresAt, consumedAt: null },
-        })
-        return { connected: false as const, expiresAt }
+        return { connected: false as const, issuedAt: now }
       }, userAuthenticationSessionTransactionOptions)
     },
   }
@@ -33,38 +27,35 @@ export function createPrismaTelegramLinkRepository(db: DbClient): TelegramLinkRe
 
 // Called only inside the identity + session + replay transaction. No account is ever reparented.
 export async function resolveTelegramLink(tx: Transaction, input: {
+  sourceSessionId: string
+  issuedAt: number
   tokenHash: string
   authDateSeconds: number
   sourceAbsoluteTtlMs: number
 }, subject: string) {
-  const candidate = await tx.telegramIdentityLink.findUnique({
-    where: { tokenHash: input.tokenHash }, include: { sourceSession: true },
-  })
+  const candidate = await tx.authSession.findUnique({ where: { id: input.sourceSessionId } })
   if (!candidate) return { state: 'link_invalid' as const }
-  await acquireUserAuthenticationAuthorityLock(tx, candidate.sourceSession.userId)
-  await lockSourceSession(tx, candidate.sourceSessionId)
-  await tx.$queryRaw`SELECT source_session_id FROM telegram_identity_links WHERE token_hash = ${input.tokenHash} FOR UPDATE`
+  await acquireUserAuthenticationAuthorityLock(tx, candidate.userId)
+  await lockSourceSession(tx, candidate.id)
   const now = await databaseNow(tx)
-  const link = await tx.telegramIdentityLink.findUnique({ where: { tokenHash: input.tokenHash } })
-  if (!link || link.consumedAt || link.expiresAt <= now || input.authDateSeconds < Math.floor(link.createdAt.getTime() / 1000)) {
+  if (input.issuedAt > now.getTime() || input.issuedAt + 15_000 <= now.getTime() || input.authDateSeconds < Math.floor(input.issuedAt / 1000)) {
     return { state: 'link_invalid' as const }
   }
-  const source = await activeMaxSource(tx, link.sourceSessionId, now, new Date(now.getTime() - input.sourceAbsoluteTtlMs))
-  if (!source || source.userId !== candidate.sourceSession.userId) return { state: 'link_invalid' as const }
+  const source = await activeMaxSource(tx, candidate.id, now, new Date(now.getTime() - input.sourceAbsoluteTtlMs))
+  if (!source || source.userId !== candidate.userId) return { state: 'link_invalid' as const }
+  const fingerprintHash = `telegram-link:${input.tokenHash}`
+  if (await tx.telegramAuthReplay.findUnique({ where: { fingerprintHash } })) return { state: 'link_invalid' as const }
   const identity = await tx.externalIdentity.findUnique({ where: { provider_subject: { provider: 'telegram', subject } } })
   const connected = await tx.externalIdentity.findFirst({ where: { provider: 'telegram', userId: source.userId } })
-  if (identity && identity.userId !== source.userId || connected && connected.subject !== subject) {
+  if (identity || connected) {
     return { state: 'link_conflict' as const }
   }
-  // Recheck the deadline in SQL at consumption, after all potentially blocking reads.
-  const consumed = await tx.$executeRaw`
-    UPDATE telegram_identity_links SET consumed_at = clock_timestamp()
-    WHERE token_hash = ${input.tokenHash} AND consumed_at IS NULL AND expires_at > clock_timestamp()
-  `
-  if (consumed !== 1) return { state: 'link_invalid' as const }
-  const externalIdentity = identity
-    ? await tx.externalIdentity.findUniqueOrThrow({ where: { id: identity.id }, include: { user: true } })
-    : await tx.externalIdentity.create({ data: { provider: 'telegram', subject, userId: source.userId }, include: { user: true } })
+  // Recheck after potentially blocking reads. The tagged fingerprint is a one-use Telegram
+  // authorization capability, stored atomically with the identity/session in the existing registry.
+  const consumeAt = await databaseNow(tx)
+  if (input.issuedAt + 15_000 <= consumeAt.getTime()) return { state: 'link_invalid' as const }
+  await tx.telegramAuthReplay.create({ data: { fingerprintHash, expiresAt: new Date(input.issuedAt + 315_000) } })
+  const externalIdentity = await tx.externalIdentity.create({ data: { provider: 'telegram', subject, userId: source.userId }, include: { user: true } })
   return { state: 'linked' as const, externalIdentity }
 }
 

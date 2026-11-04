@@ -76,11 +76,14 @@ function AppContent({ hostBridge }: AppProps) {
     ? hostBridge.kind
     : null
   const initData = hostBridge.rawAuthData()
+  // This is only a UI routing hint from the raw signed-data envelope. The server verifies
+  // Telegram's HMAC and the one-use link token before changing account identity.
+  const telegramLinkIntent = hostBridge.kind === 'telegram' && hasTelegramLinkIntent(initData)
   const { authAttemptKey, hostAuthError, hasStartedHostAuth, isHostAuthPending, resetHostAuth, startedHostAuthKey } = useHostAuthHandoff({
     auth,
     initData,
     isHostAvailable: hostBridge.isAvailable,
-    forceAuth: Boolean(maxBrowserChallengeId || explicitInviteIntent),
+    forceAuth: Boolean(maxBrowserChallengeId || explicitInviteIntent || telegramLinkIntent),
     provider: hostAuthProvider,
   })
   const hostAuthState = useMemo(() => auth && hostAuthProvider ? {
@@ -92,8 +95,8 @@ function AppContent({ hostBridge }: AppProps) {
     isAuthBootstrapping: auth.isBootstrapping,
     isAuthPending: isHostAuthPending,
     isHostAvailable: hostBridge.isAvailable,
-    forceAuth: Boolean(maxBrowserChallengeId || explicitInviteIntent),
-  } : null, [auth, authAttemptKey, explicitInviteIntent, hasStartedHostAuth, hostAuthProvider, initData, isHostAuthPending, maxBrowserChallengeId, startedHostAuthKey, hostBridge.isAvailable])
+    forceAuth: Boolean(maxBrowserChallengeId || explicitInviteIntent || telegramLinkIntent),
+  } : null, [auth, authAttemptKey, explicitInviteIntent, hasStartedHostAuth, hostAuthProvider, initData, isHostAuthPending, maxBrowserChallengeId, startedHostAuthKey, hostBridge.isAvailable, telegramLinkIntent])
 
   const [hostLayout, setHostLayout] = useState<HostLayoutSnapshot>(() => readHostLayout(hostBridge))
   useEffect(() => {
@@ -137,6 +140,13 @@ function AppContent({ hostBridge }: AppProps) {
     '--host-inset-top': `${insets.top}px`,
   } as CSSProperties
   if (!auth || auth.isBootstrapping || (hostAuthState && shouldKeepHostAuthPreloader(hostAuthState))) return <BootPreloader style={style} />
+  if (telegramLinkIntent && initData && hostAuthError) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" role="alert" style={style}>
+    <BrandLogo className="w-[148px]" />
+    <section className="mx-auto mt-12 max-w-md rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]">
+      <Typography variant="memoryScreen">Не удалось подключить Telegram</Typography>
+      <Typography className="mt-4" tone="muted" variant="memoryBody">{telegramLinkAuthFailureMessage(hostAuthError)}</Typography>
+    </section>
+  </main>
   if (auth.sessionError) return <main className="mx-auto min-h-screen min-h-dvh max-w-[var(--layout-max-width)] px-7 py-10" role="alert" style={style}>
     <BrandLogo className="w-[148px]" />
     <section className="mx-auto mt-12 max-w-md rounded-[var(--radius-card)] bg-card p-[var(--layout-card-padding)] shadow-[var(--shadow-card)]">
@@ -184,6 +194,19 @@ function AppContent({ hostBridge }: AppProps) {
     && isMaxVideoUploadAcceptanceLaunch(typeof window === 'undefined' ? undefined : window)
   const inviteEntryKey = inviteToken ? `invite:${inviteToken}` : invalidInviteIntent ? 'invite:invalid' : ''
   return <FamilyController key={`${auth.user.id}:${inviteEntryKey}`} currentUserId={auth.user.id} hostBridge={hostBridge} insets={insets} insetsStyle={style} inviteIntentInvalid={invalidInviteIntent} inviteToken={inviteToken} maxVideoUploadAcceptance={maxVideoUploadAcceptance} transport={auth.transport} />
+}
+
+function hasTelegramLinkIntent(initData: string | null) {
+  if (!initData) return false
+  const params = new URLSearchParams(initData)
+  return params.getAll('start_param').some((value) => value.startsWith('link_'))
+}
+
+function telegramLinkAuthFailureMessage(error: unknown) {
+  if (error instanceof ApiRequestError && error.status === 400) return 'Ссылка привязки истекла или уже использована. Вернитесь в MAX и создайте новую.'
+  if (error instanceof ApiRequestError && error.status === 409) return 'Этот Telegram-аккаунт уже связан с другим аккаунтом memoLy. Автоматическое объединение невозможно.'
+  if (error instanceof ApiRequestError && error.status === 401) return 'Не удалось подтвердить запуск Telegram. Закройте это окно, вернитесь в MAX и начните подключение заново.'
+  return 'Не удалось связаться с сервером. Проверьте соединение и повторите подключение из MAX.'
 }
 
 function MaxRuntimeDiagnosticPanel({ diagnostic, style }: { diagnostic: MaxRuntimeDiagnostic; style: CSSProperties }) {

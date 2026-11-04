@@ -71,18 +71,6 @@ model TelegramAuthReplay {
   @@map("telegram_auth_replays")
 }
 
-// One pending, hashed, short-lived link per originating MAX session. Never reassign identities.
-model TelegramIdentityLink {
-  sourceSessionId String      @id @map("source_session_id") @db.Uuid
-  tokenHash       String      @unique(map: "telegram_identity_links_token_hash_key") @map("token_hash") @db.VarChar(64)
-  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  expiresAt       DateTime    @map("expires_at") @db.Timestamptz(6)
-  consumedAt      DateTime?   @map("consumed_at") @db.Timestamptz(6)
-  sourceSession   AuthSession @relation(fields: [sourceSessionId], references: [id], onDelete: Cascade)
-
-  @@map("telegram_identity_links")
-}
-
 model MaxAuthReplay {
   fingerprintHash String       @id @map("fingerprint_hash")
   sessionId       String?      @map("session_id") @db.Uuid
@@ -1695,7 +1683,6 @@ enum TelegramAlbumStatus {
 }
 
 model AuthSession {
-  telegramIdentityLink     TelegramIdentityLink?
   id                       String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
   userId                   String               @map("user_id") @db.Uuid
   externalIdentityId       String?              @map("external_identity_id") @db.Uuid

@@ -4,7 +4,7 @@ import { createApp } from '../../app'
 import { createPrisma } from '../../db'
 import { loadEnv } from '../../env'
 import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
-import { hashTelegramLinkToken } from './application/telegram-link-service'
+import { createTelegramLinkTokens } from './infrastructure/telegram-link-tokens'
 
 const databaseUrl = requireIntegrationDatabaseUrl()
 const origin = 'http://localhost:5173'
@@ -19,7 +19,8 @@ describe('Cross-provider identity linking', () => {
     MAX_INBOX_ENCRYPTION_KEY: 'B'.repeat(43), MAX_MINI_APP_URL: 'https://app.example.com',
     TELEGRAM_ENABLED: 'false', TELEGRAM_AUTH_BOT_TOKEN: telegramToken,
     TELEGRAM_BOT_EXPECTED_USERNAME: 'OurMemoriesDevBot', CORS_ORIGINS: origin,
-    AUTH_RATE_LIMIT_MAX: '10000', MULTI_FAMILY_ACTIVATION: 'on' })
+    AUTH_RATE_LIMIT_MAX: '10000', MULTI_FAMILY_ACTIVATION: 'on', COOKIE_SECURE: 'true' })
+  const tokens = createTelegramLinkTokens(env.JWT_SECRET)
   const app = createApp({ env, prisma: db })
   const users = new Set<string>()
   const families: string[] = []
@@ -50,10 +51,10 @@ describe('Cross-provider identity linking', () => {
   test('links a free signed Telegram to the same owner, family and permissions without changing MAX sessions', async () => {
     const before = await db.family.findUniqueOrThrow({ where: { id: familyId }, include: { members: true } })
     const launch = await start()
-    expect(launch.startParam).toMatch(/^link_[A-Za-z0-9_-]{43}$/)
-    const record = await db.telegramIdentityLink.findUniqueOrThrow({ where: { sourceSessionId: owner.sessionId } })
-    expect(record.expiresAt.getTime() - record.createdAt.getTime()).toBe(15000)
-    expect(record.tokenHash).toBe(hashTelegramLinkToken(launch.startParam.slice(5)))
+    expect(launch.startParam).toMatch(/^link_[A-Za-z0-9_-]{70}$/)
+    const record = tokens.verify(launch.startParam.slice(5))
+    expect(new Date(launch.expiresAt).getTime() - record.issuedAt).toBe(15000)
+    expect(record.sourceSessionId).toBe(owner.sessionId)
     const initData = signed(telegramToken, { start_param: launch.startParam })
     const result = await exchange('telegram', initData)
     expect(result.status).toBe(200)
@@ -85,22 +86,23 @@ describe('Cross-provider identity linking', () => {
     expect(result.headers.get('set-cookie')).toBeNull()
     expect(await db.authSession.findMany({ where: { userId: other.user.id } })).toEqual(before)
     expect((await db.externalIdentity.findUniqueOrThrow({ where: { provider_subject: { provider: 'telegram', subject: String(subject) } } })).userId).toBe(other.user.id)
-    expect((await db.telegramIdentityLink.findUniqueOrThrow({ where: { sourceSessionId: owner.sessionId } })).consumedAt).toBeNull()
+    expect(await db.telegramAuthReplay.count({ where: { fingerprintHash: `telegram-link:${tokens.verify(launch.startParam.slice(5)).tokenHash}` } })).toBe(0)
     expect(await status()).toEqual({ connected: false })
   })
 
-  test('expired, superseded, forged and unsigned link payloads never create users or identities', async () => {
-    const old = await start()
+  test('expired, forged, stale-auth and unsigned link payloads never create users or identities', async () => {
     const current = await start()
     const initialUsers = await db.user.count()
-    expect((await exchange('telegram', signed(telegramToken, { start_param: old.startParam }))).status).toBe(400)
     expect((await exchange('telegram', `${signed(telegramToken, { start_param: current.startParam })}x`)).status).toBe(401)
     expect((await exchange('telegram', signed(telegramToken, { start_param: 'link_invalid' }))).status).toBe(400)
     const missingSignature = new URLSearchParams(signed(telegramToken))
     missingSignature.set('start_param', current.startParam)
     expect((await exchange('telegram', missingSignature.toString())).status).toBe(401)
-    await db.telegramIdentityLink.update({ where: { sourceSessionId: owner.sessionId }, data: { expiresAt: new Date(0) } })
-    expect((await exchange('telegram', signed(telegramToken, { start_param: current.startParam }))).status).toBe(400)
+    const expired = `link_${tokens.create(owner.sessionId, new Date(Date.now() - 15_000))}`
+    expect((await exchange('telegram', signed(telegramToken, { start_param: expired }))).status).toBe(400)
+    expect((await exchange('telegram', signed(telegramToken, { start_param: current.startParam, auth_date: String(Math.floor(Date.now() / 1000) - 60) }))).status).toBe(400)
+    const modified = current.startParam.slice(0, -2) + (current.startParam.at(-2) === 'A' ? 'B' : 'A') + current.startParam.at(-1)
+    expect((await exchange('telegram', signed(telegramToken, { start_param: modified }))).status).toBe(400)
     expect(await db.user.count()).toBe(initialUsers)
     expect(await db.externalIdentity.count({ where: { userId: owner.id, provider: 'telegram' } })).toBe(0)
   })
@@ -128,7 +130,8 @@ describe('Cross-provider identity linking', () => {
   })
 
   test('deadline is rechecked after a real database lock wait', async () => {
-    const launch = await start()
+    const issuedAt = new Date(Date.now() - 14_700)
+    const launch = { startParam: `link_${tokens.create(owner.sessionId, issuedAt)}` }
     let release!: () => void
     let locked!: () => void
     const acquired = new Promise<void>((resolve) => { locked = resolve })
@@ -152,7 +155,7 @@ describe('Cross-provider identity linking', () => {
         if (!waiting) await Bun.sleep(10)
       }
       expect(waiting).toBe(true)
-      await db.telegramIdentityLink.update({ where: { sourceSessionId: owner.sessionId }, data: { expiresAt: new Date(0) } })
+      while (Date.now() <= issuedAt.getTime() + 15_000) await Bun.sleep(10)
     } finally { release(); await holder }
     expect((await pending).status).toBe(400)
     expect(await db.externalIdentity.count({ where: { userId: owner.id, provider: 'telegram' } })).toBe(0)

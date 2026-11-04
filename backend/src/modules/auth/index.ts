@@ -7,6 +7,7 @@ import { AuthService } from './application/auth-service'
 import { BrowserLinkService } from './application/browser-link-service'
 import { TelegramLinkService } from './application/telegram-link-service'
 import { createPrismaTelegramLinkRepository } from './infrastructure/telegram-link-repository'
+import { createTelegramLinkTokens } from './infrastructure/telegram-link-tokens'
 import { TelegramAuthService } from './application/telegram-auth-service'
 import { MaxAuthService } from './application/max-auth-service'
 import { passwordResetCooldownSeconds, type Clock, type LogoutCleanup, type ProjectUser } from './application/ports'
@@ -70,6 +71,7 @@ export function createAuthModule({
   const browserLinkService = buildBrowserLinkService({ clock, db, env, maxService, projectUser })
   const telegramLinkService = new TelegramLinkService({
     repository: createPrismaTelegramLinkRepository(db),
+    tokens: createTelegramLinkTokens(env.JWT_SECRET),
     sessionAbsoluteTtlDays: env.SESSION_ABSOLUTE_TTL_DAYS,
     configured: Boolean(env.TELEGRAM_AUTH_BOT_TOKEN ?? env.TELEGRAM_BOT_TOKEN),
   })
@@ -180,6 +182,7 @@ function buildTelegramAuthService({
       rotate: (token) => deriveRotatedRefreshToken(token, env.JWT_SECRET),
     },
     repository: createPrismaTelegramAuthRepository(db, sessions),
+    linkTokens: createTelegramLinkTokens(env.JWT_SECRET),
     verifyInitData: (rawInitData) => {
       if (!botToken) throw new Error('Telegram authentication is not configured')
       return verifyTelegramInitData(rawInitData, {

@@ -44,7 +44,7 @@ export const telegramLinkStartResponseSchema = z.discriminatedUnion('connected',
   z.object({ connected: z.literal(true) }).strict(),
   z.object({
     connected: z.literal(false),
-    startParam: z.string().regex(/^link_[A-Za-z0-9_-]{43}$/),
+    startParam: z.string().regex(/^link_[A-Za-z0-9_-]{70}$/),
     expiresAt: z.string().datetime(),
   }).strict(),
 ])

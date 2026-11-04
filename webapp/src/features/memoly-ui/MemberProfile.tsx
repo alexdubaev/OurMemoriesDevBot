@@ -1,6 +1,6 @@
 /* eslint-disable typographyPolicy/use-typography-component -- canonical member profile preserves its semantic HTML hierarchy. */
 import type { FamilyMemberDto } from '@web-app-demo/contracts'
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import { WebpIcon } from '@/components/WebpIcon'
 import { UiV2Button } from '@/components/ui-v2/UiV2Button'
@@ -9,6 +9,8 @@ import { AvatarLetter } from '@/features/session'
 import { AvatarPhoto, CurrentUserAvatarControls, MemberAvatarImage, useAvatarQuery } from '@/features/avatar'
 import { useAuth } from '@/features/auth'
 import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
+import { TelegramLinkCard } from '@/features/auth/TelegramLinkCard'
+import { createHostBridge } from '@/platform/telegram'
 import { useUpdateProfileMutation, validateProfileForm } from '@/features/users'
 import type { FamilyMemberActions } from './FamilyPresentation'
 import { isMemberSelf, memberProfileChanges, memberProfileError, type MemberProfileChange } from './member-profile-model'
@@ -106,6 +108,7 @@ function SelfAccountEditor({ busy, displayName, member, onNameSaved }: { busy: b
   const profile = useUpdateProfileMutation()
   const avatar = useAvatarQuery()
   const auth = useAuth()
+  const hostBridge = useMemo(() => createHostBridge(), [])
   const savedAvatar = avatar.data?.avatar
   const avatarPath = savedAvatar?.id ? `/api/uploads/avatar/content?avatar=${encodeURIComponent(savedAvatar.id)}&v=${encodeURIComponent(savedAvatar.updatedAt ?? '')}` : null
   const avatarUrl = usePrivateImageUrl(auth.user?.id ?? '', avatarPath, auth.transport, Boolean(auth.user?.id && avatarPath))
@@ -138,5 +141,6 @@ function SelfAccountEditor({ busy, displayName, member, onNameSaved }: { busy: b
         <UiV2Button className="member-profile-save" disabled={busy || profile.isPending || !validation.request} type="submit" variant="primary">{profile.isPending ? 'Сохраняем…' : 'Сохранить имя профиля'}</UiV2Button>
       </form>
     </section>
+    {hostBridge.kind === 'max' && auth.externalIdentityProvider === 'max' ? <TelegramLinkCard hostBridge={hostBridge} /> : null}
   </>
 }

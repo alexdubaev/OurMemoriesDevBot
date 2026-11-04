@@ -123,7 +123,7 @@ export type TelegramAuthRepository = Pick<AuthRepository, 'findActiveRefreshSess
     fingerprintHash: string
     replayExpiresAt: Date
     existingSessionId?: string
-    link?: { tokenHash: string; authDateSeconds: number; sourceAbsoluteTtlMs: number }
+    link?: { sourceSessionId: string; issuedAt: number; tokenHash: string; authDateSeconds: number; sourceAbsoluteTtlMs: number }
     now: Date
     session: {
       refreshTokenHash: string
@@ -142,11 +142,16 @@ export type TelegramAuthRepository = Pick<AuthRepository, 'findActiveRefreshSess
 
 export type TelegramLinkRepository = {
   isConnected(userId: string): Promise<boolean>
-  start(input: { userId: string; sessionId: string; identityId: string; tokenHash: string; absoluteTtlMs: number }): Promise<
+  start(input: { userId: string; sessionId: string; identityId: string; absoluteTtlMs: number }): Promise<
     | { connected: true }
-    | { connected: false; expiresAt: Date }
+    | { connected: false; issuedAt: Date }
     | null
   >
+}
+
+export type TelegramLinkTokens = {
+  create(sourceSessionId: string, issuedAt: Date): string
+  verify(token: string): { sourceSessionId: string; issuedAt: number; tokenHash: string }
 }
 
 export type MaxAuthRepository = Pick<AuthRepository, 'findActiveRefreshSession'> & {

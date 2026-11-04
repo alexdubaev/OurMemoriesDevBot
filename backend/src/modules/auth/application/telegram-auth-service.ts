@@ -1,12 +1,12 @@
 import { sessionExpiresAt, type SessionMetadata } from '../domain/session'
 import { AuthFailure } from '../domain/errors'
-import { hashTelegramLinkToken } from './telegram-link-service'
 import type {
   AccessTokens,
   Clock,
   ProjectUser,
   RefreshTokens,
   TelegramAuthRepository,
+  TelegramLinkTokens,
   VerifiedTelegramInitData,
 } from './ports'
 
@@ -19,6 +19,7 @@ type TelegramAuthServiceDependencies = {
   sessionAbsoluteTtlDays: number
   refreshTokens: RefreshTokens
   repository: TelegramAuthRepository
+  linkTokens: TelegramLinkTokens
   verifyInitData(rawInitData: string): VerifiedTelegramInitData
 }
 
@@ -39,8 +40,11 @@ export class TelegramAuthService {
 
     const now = this.dependencies.clock.now()
     const isLink = verified.startParam?.startsWith('link_') ?? false
-    const linkToken = isLink ? verified.startParam!.match(/^link_([A-Za-z0-9_-]{43})$/)?.[1] : undefined
-    if (isLink && !linkToken) throw new AuthFailure('telegram_link_invalid', 'Invalid link payload')
+    let link: ReturnType<TelegramLinkTokens['verify']> | undefined
+    if (isLink) {
+      try { link = this.dependencies.linkTokens.verify(verified.startParam!.slice(5)) }
+      catch { throw new AuthFailure('telegram_link_invalid', 'Invalid link payload') }
+    }
     const existingSessionId = await this.currentSessionId(presentedRefreshToken, now)
     const refreshToken = this.dependencies.refreshTokens.create()
     const exchanged = await this.dependencies.repository.exchangeTelegramIdentity({
@@ -48,8 +52,8 @@ export class TelegramAuthService {
       fingerprintHash: verified.replayFingerprintHash,
       replayExpiresAt: new Date(now.getTime() + 5 * 60 * 1000),
       existingSessionId,
-      link: linkToken ? {
-        tokenHash: hashTelegramLinkToken(linkToken),
+      link: link ? {
+        ...link,
         authDateSeconds: verified.authDateSeconds,
         sourceAbsoluteTtlMs: this.dependencies.sessionAbsoluteTtlDays * 86400_000,
       } : undefined,
