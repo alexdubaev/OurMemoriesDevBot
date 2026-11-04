@@ -191,7 +191,7 @@ describe('Cross-provider identity linking', () => {
       const before = await db.family.findUniqueOrThrow({ where: { id: familyId }, include: { members: true } })
       const marker = tokens.verify(launch.startParam.slice(5)).tokenHash
       const replayBefore = await db.telegramAuthReplay.findUniqueOrThrow({ where: { fingerprintHash: marker } })
-      const ledger = await db.$queryRaw`SELECT migration_name, checksum, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY migration_name`
+      const ledger = await db.$queryRaw<Array<{ migration_name: string; checksum: string; finished_at: Date | null; rolled_back_at: Date | null }>>`SELECT migration_name, checksum, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY migration_name`
       const frozen = await import(pathToFileURL(resolve(fixture, 'backend/src/app.ts')).href)
       const frozenEnv = await import(pathToFileURL(resolve(fixture, 'backend/src/env.ts')).href)
       const oldApp = frozen.createApp({ env: frozenEnv.loadEnv({ DATABASE_URL: databaseUrl,
@@ -210,7 +210,7 @@ describe('Cross-provider identity linking', () => {
       expect((await exchange('telegram', signed(telegramToken, { start_param: launch.startParam }))).status).toBe(400)
       expect(await db.telegramAuthReplay.findUniqueOrThrow({ where: { fingerprintHash: marker } })).toEqual(replayBefore)
       expect(await db.family.findUniqueOrThrow({ where: { id: familyId }, include: { members: true } })).toEqual(before)
-      expect(await db.$queryRaw`SELECT migration_name, checksum, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY migration_name`).toEqual(ledger)
+      expect(await db.$queryRaw<typeof ledger>`SELECT migration_name, checksum, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY migration_name`).toEqual(ledger)
     } finally {
       if (!fixture.startsWith(`${scratchRoot}${sep}`)) throw new Error('Refusing fixture cleanup outside task scratch')
       rmSync(fixture, { recursive: true, force: true })
