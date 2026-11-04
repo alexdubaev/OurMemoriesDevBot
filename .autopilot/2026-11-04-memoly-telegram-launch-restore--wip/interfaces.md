@@ -30,4 +30,10 @@ Real isolated PostgreSQL and public routes for config/auth/replay/session/identi
 
 ## Delivery ownership
 
+## Исполнитель выставил
+
+- Optional `TELEGRAM_AUTH_BOT_TOKEN`; существующие auth/session/media API не изменены. Auth разрешает auth-only ?? legacy, несовпадающие одновременно настроенные значения отклоняются.
+- Test-only loopback fixture server имеет отдельный cleanup endpoint для надёжного завершения Windows процесса. Он требует NODE_ENV=test и совпадающие loopback *_test URLs; production endpoint не добавлен.
+- Lead независимо повторил HMAC/config/public-route PostgreSQL check: 14 pass, 0 fail, 74 assertions. Исполнитель отдельно выполнил короткий Chromium journey с H.264/AAC fixture; реальная доставка и физическое устройство остаются pending до отдельного факта.
+
 Subagent owns all project code/tests/config/docs in explicit ticket allowlist. Root owns .autopilot artifacts, git integration, verification orchestration and protected operational configuration handling. Root never prints/copies token into repo, tests, prompt, image or arguments. Protected runtime alias token is sourced only from the preserved existing-bot secret. Original source file stays intact. Rollback env compatibility is proved before production mutation. Canonical host entrypoint, disk/host lock/image/source/readiness/migration-history/recovery checks stay required.

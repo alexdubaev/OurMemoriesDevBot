@@ -1,0 +1,53 @@
+import { createHmac, randomUUID } from 'node:crypto'
+import { expect, test } from '@playwright/test'
+
+test.afterAll(async ({ request }) => {
+  const response = await request.post(`http://127.0.0.1:${process.env.E2E_BACKEND_PORT}/__fixture/cleanup`)
+  expect(response.status()).toBe(204)
+})
+
+test('Telegram signed auth opens its family photos and plays, pauses and seeks MAX video', async ({ page }, testInfo) => {
+  const fields = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), query_id: randomUUID(),
+    user: JSON.stringify({ id: 776431901, first_name: 'Telegram fixture viewer' }) })
+  const check = [...fields].sort(([a], [b]) => Buffer.from(a).compare(Buffer.from(b)))
+    .map(([key, value]) => `${key}=${value}`).join('\n')
+  const secret = createHmac('sha256', 'WebAppData').update('123456:telegram-auth-only-synthetic').digest()
+  fields.set('hash', createHmac('sha256', secret).update(check).digest('hex'))
+  await page.addInitScript((initData) => {
+    Object.defineProperty(window, 'Telegram', { configurable: true,
+      value: { WebApp: { initData, version: '8.0', platform: 'tdesktop', colorScheme: 'light', ready() {} } } })
+  }, fields.toString())
+  const auth = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/telegram') && response.request().method() === 'POST')
+  await page.goto('/')
+  expect((await auth).status()).toBe(200)
+  expect((await page.context().cookies()).some((cookie) => cookie.name === 'web_app_demo_refresh' && cookie.httpOnly)).toBe(true)
+  const familyButton = page.getByRole('button', { name: /Telegram fixture family/ })
+  await familyButton.click()
+  await expect(page.getByText('Telegram fixture photos', { exact: true })).toBeVisible()
+  const photos = page.locator('[data-memory-id]').filter({ hasText: 'Telegram fixture photos' })
+  await expect(photos.locator('[data-carousel-position]')).toHaveCount(2)
+  await expect.poll(() => photos.locator('img').first().evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
+  const secondPhoto = photos.locator('[data-carousel-dot="2"]')
+  await secondPhoto.click()
+  await expect(secondPhoto).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => photos.locator('[data-carousel-position="2"] img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
+  await photos.locator('[data-carousel-position="2"]').getByRole('button', { name: 'Открыть фото', exact: true }).click()
+  await expect(page.locator('[data-mixed-viewer]')).toBeVisible()
+  await page.getByRole('button', { name: 'Закрыть просмотр', exact: true }).click()
+  const card = page.locator('[data-memory-id]').filter({ hasText: 'Telegram fixture MAX video' })
+  await card.scrollIntoViewIfNeeded()
+  await card.getByRole('button', { name: 'Смотреть видео', exact: true }).click()
+  const video = card.locator('video')
+  await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(0.1)
+  expect(await video.evaluate((element: HTMLVideoElement) => element.muted)).toBe(false)
+  await expect.poll(() => video.evaluate((element: HTMLVideoElement & { webkitAudioDecodedByteCount?: number }) => element.webkitAudioDecodedByteCount ?? 0)).toBeGreaterThan(0)
+  await card.getByRole('button', { name: 'Поставить видео на паузу', exact: true }).click()
+  await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.paused)).toBe(true)
+  const seek = card.getByRole('slider', { name: 'Позиция видео' })
+  await seek.click()
+  const seekPosition = await video.evaluate((element: HTMLVideoElement) => element.currentTime)
+  expect(seekPosition).toBeGreaterThan(1)
+  await card.getByRole('button', { name: 'Воспроизвести видео', exact: true }).click()
+  await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(seekPosition + 0.1)
+  await page.screenshot({ path: testInfo.outputPath('telegram-family-media.png'), fullPage: true })
+})

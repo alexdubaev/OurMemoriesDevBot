@@ -11,9 +11,9 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "memoryOwner": "user",
   "skillDir": "C:/Users/Alexandr/.codex/skills/autopilot",
-  "baseCommit": null,
+  "baseCommit": "e93f3ebecdd5159cf34aeb6633db333b3834dae4",
   "startedAt": "2026-11-04T19:32:46+03:00",
-  "updatedAt": "2026-11-04T19:41:54+03:00",
+  "updatedAt": "2026-11-04T20:00:17+03:00",
   "finishedAt": null,
   "stages": [
     {
@@ -42,12 +42,14 @@ window.STATE =
     },
     {
       "id": "plan",
-      "status": "active",
-      "startedAt": "2026-11-04T19:40:56+03:00"
+      "status": "done",
+      "startedAt": "2026-11-04T19:40:56+03:00",
+      "finishedAt": "2026-11-04T19:42:33+03:00"
     },
     {
       "id": "build",
-      "status": "pending"
+      "status": "active",
+      "startedAt": "2026-11-04T19:42:33+03:00"
     },
     {
       "id": "review",
@@ -100,12 +102,16 @@ window.STATE =
       ],
       "review": "нет",
       "model": "сильная",
-      "status": "pending",
+      "status": "in-progress",
       "retries": 0,
-      "repairs": 0
+      "repairs": 0,
+      "startedAt": "2026-11-04T19:42:34+03:00"
     }
   ],
-  "tests": null,
+  "tests": {
+    "passed": 14,
+    "failed": 0
+  },
   "debt": {
     "placeholders": [],
     "assumptions": [],
@@ -133,9 +139,14 @@ window.STATE =
     "2026-11-04T19:41:01+03:00",
     "2026-11-04T19:41:03+03:00",
     "2026-11-04T19:41:53+03:00",
-    "2026-11-04T19:41:54+03:00"
+    "2026-11-04T19:41:54+03:00",
+    "2026-11-04T19:42:32+03:00",
+    "2026-11-04T19:42:33+03:00",
+    "2026-11-04T19:42:34+03:00",
+    "2026-11-04T20:00:16+03:00",
+    "2026-11-04T20:00:17+03:00"
   ],
-  "rev": 14,
+  "rev": 19,
   "waiting": null,
   "waits": [],
   "log": [
@@ -217,6 +228,32 @@ window.STATE =
       "g": "G3",
       "ok": true,
       "problems": 0
+    },
+    {
+      "t": "2026-11-04T19:42:33+03:00",
+      "k": "stage",
+      "id": "build",
+      "act": "start"
+    },
+    {
+      "t": "2026-11-04T19:42:34+03:00",
+      "k": "ticket",
+      "ids": [
+        "01"
+      ],
+      "act": "start"
+    },
+    {
+      "t": "2026-11-04T20:00:16+03:00",
+      "k": "tests",
+      "passed": 14,
+      "failed": 0
+    },
+    {
+      "t": "2026-11-04T20:00:17+03:00",
+      "k": "add",
+      "key": "report",
+      "n": 2
     }
   ],
   "reqList": [
@@ -301,5 +338,9 @@ window.STATE =
       "problems": 0
     }
   },
-  "result": null
+  "result": null,
+  "report": [
+    "Физический iPhone и звук через динамик не подтверждаются desktop проверками.",
+    "Menu button Telegram остаётся на старом стенде; Main Mini App URL уже исправлен владельцем, настройки бота в этом запуске не меняются."
+  ]
 }

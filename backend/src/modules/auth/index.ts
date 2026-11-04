@@ -155,6 +155,7 @@ function buildTelegramAuthService({
   projectUser,
 }: Pick<Required<CreateAuthModuleOptions>, 'clock' | 'db' | 'env' | 'projectUser'>) {
   const sessions = createPrismaAuthRepository(db)
+  const botToken = env.TELEGRAM_AUTH_BOT_TOKEN ?? env.TELEGRAM_BOT_TOKEN
   return new TelegramAuthService({
     accessTokens: {
       sign: (payload) => signAccessToken(payload, env),
@@ -173,9 +174,9 @@ function buildTelegramAuthService({
     },
     repository: createPrismaTelegramAuthRepository(db, sessions),
     verifyInitData: (rawInitData) => {
-      if (!env.TELEGRAM_BOT_TOKEN) throw new Error('Telegram authentication is not configured')
+      if (!botToken) throw new Error('Telegram authentication is not configured')
       return verifyTelegramInitData(rawInitData, {
-        botToken: env.TELEGRAM_BOT_TOKEN,
+        botToken,
         now: clock.now(),
       })
     },
