@@ -1,4 +1,8 @@
 import { createHmac, randomUUID } from 'node:crypto'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { spawnSync } from 'node:child_process'
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { createApp } from '../../app'
 import { createPrisma } from '../../db'
@@ -160,6 +164,58 @@ describe('Cross-provider identity linking', () => {
     expect((await pending).status).toBe(400)
     expect(await db.externalIdentity.count({ where: { userId: owner.id, provider: 'telegram' } })).toBe(0)
   })
+
+  test('linked owner sessions and one-use fingerprints survive the pinned S3 recovery runtime and return', async () => {
+    const root = resolve(import.meta.dir, '../../../..')
+    const scratchRoot = resolve(root, '.scratch')
+    mkdirSync(scratchRoot, { recursive: true })
+    const fixture = mkdtempSync(resolve(scratchRoot, 'identity-link-recovery-'))
+    if (!fixture.startsWith(`${scratchRoot}${sep}`)) throw new Error('Recovery fixture escaped task scratch')
+    const run = (command: string, args: string[], input?: Uint8Array) => {
+      const result = spawnSync(command, args, { cwd: fixture, input, env: { ...process.env, CHECKPOINT_DISABLE: '1' }, timeout: 120000, maxBuffer: 48 * 1024 * 1024 })
+      if (result.status !== 0) throw new Error(`Frozen runtime preparation failed: ${result.stderr.toString()}`)
+      return result.stdout
+    }
+    try {
+      const archive = spawnSync('git', ['archive', '26cfab9ce35fd1a42279fc0d9dd3637c340eec6a', 'backend', 'packages', 'scripts/repo-env.mjs', 'webapp/package.json', 'website/package.json', 'package.json', 'bun.lock', 'bunfig.toml'], { cwd: root, maxBuffer: 48 * 1024 * 1024 })
+      expect(archive.status).toBe(0)
+      run('tar', ['-x'], archive.stdout)
+      run('bun', ['install', '--frozen-lockfile', '--filter', '@web-app-demo/backend'])
+      run('bun', ['run', '--cwd', 'backend', 'prisma:generate'])
+      const launch = await start()
+      const initData = signed(telegramToken, { start_param: launch.startParam })
+      const linked = await exchange('telegram', initData)
+      expect(linked.status).toBe(200)
+      const body = await linked.json()
+      expect(body.user.id).toBe(owner.id)
+      const before = await db.family.findUniqueOrThrow({ where: { id: familyId }, include: { members: true } })
+      const marker = tokens.verify(launch.startParam.slice(5)).tokenHash
+      const replayBefore = await db.telegramAuthReplay.findUniqueOrThrow({ where: { fingerprintHash: marker } })
+      const ledger = await db.$queryRaw`SELECT migration_name, checksum, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY migration_name`
+      const frozen = await import(pathToFileURL(resolve(fixture, 'backend/src/app.ts')).href)
+      const frozenEnv = await import(pathToFileURL(resolve(fixture, 'backend/src/env.ts')).href)
+      const oldApp = frozen.createApp({ env: frozenEnv.loadEnv({ DATABASE_URL: databaseUrl,
+        JWT_SECRET: env.JWT_SECRET, CORS_ORIGINS: origin, COOKIE_SECURE: 'true', MULTI_FAMILY_ACTIVATION: 'on' }), prisma: db })
+      for (const runtime of [oldApp, app]) {
+        const headers = { Authorization: `Bearer ${body.accessToken}` }
+        const me = await runtime.request('/api/v1/auth/me', { headers })
+        expect(me.status).toBe(200)
+        expect(await me.json()).toMatchObject({ user: { id: owner.id }, externalIdentityProvider: 'telegram' })
+        expect((await runtime.request(`/api/v1/families/${familyId}`, { headers })).status).toBe(200)
+        expect((await runtime.request(`/api/v1/families/${familyId}/members`, { headers })).status).toBe(200)
+      }
+      const refreshed = await oldApp.request('/api/v1/auth/refresh', { method: 'POST', headers: { Origin: origin, Cookie: cookie(linked) } })
+      expect(refreshed.status).toBe(200)
+      expect((await app.request('/api/v1/auth/me', { headers: { Authorization: `Bearer ${(await refreshed.json()).accessToken}` } })).status).toBe(200)
+      expect((await exchange('telegram', signed(telegramToken, { start_param: launch.startParam }))).status).toBe(400)
+      expect(await db.telegramAuthReplay.findUniqueOrThrow({ where: { fingerprintHash: marker } })).toEqual(replayBefore)
+      expect(await db.family.findUniqueOrThrow({ where: { id: familyId }, include: { members: true } })).toEqual(before)
+      expect(await db.$queryRaw`SELECT migration_name, checksum, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY migration_name`).toEqual(ledger)
+    } finally {
+      if (!fixture.startsWith(`${scratchRoot}${sep}`)) throw new Error('Refusing fixture cleanup outside task scratch')
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  }, 180000)
 
   async function start() {
     const response = await app.request('/api/v1/auth/telegram-link', { method: 'POST', headers: { Origin: origin, Authorization: `Bearer ${owner.accessToken}` } })

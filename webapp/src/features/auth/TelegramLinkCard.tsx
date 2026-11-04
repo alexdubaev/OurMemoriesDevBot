@@ -19,7 +19,7 @@ export function TelegramLinkCard({ hostBridge }: { hostBridge: Pick<HostBridge, 
   const [busy, setBusy] = useState(false)
   const [waitingUntil, setWaitingUntil] = useState<number | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const waiting = waitingUntil !== null && waitingUntil > Date.now()
+  const waiting = waitingUntil !== null
 
   const refresh = useCallback(async (expectedGeneration = generation.current) => {
     try {
@@ -37,14 +37,17 @@ export function TelegramLinkCard({ hostBridge }: { hostBridge: Pick<HostBridge, 
 
   useEffect(() => {
     const currentGeneration = ++generation.current
-    busyRef.current = false
-    setBusy(false)
-    setConnected(null)
-    setStatusFailed(false)
-    setWaitingUntil(null)
-    setNotice(null)
-    void refresh(currentGeneration)
-    return () => { generation.current++ }
+    queueMicrotask(() => {
+      if (currentGeneration !== generation.current) return
+      busyRef.current = false
+      setBusy(false)
+      setConnected(null)
+      setStatusFailed(false)
+      setWaitingUntil(null)
+      setNotice(null)
+      void refresh(currentGeneration)
+    })
+    return () => { generation.current = currentGeneration + 1 }
   }, [refresh, userId])
   useEffect(() => {
     const refreshOnReturn = () => {
@@ -98,9 +101,9 @@ export function TelegramLinkCard({ hostBridge }: { hostBridge: Pick<HostBridge, 
   return <section aria-label="Подключение Telegram" className="member-profile-card member-account-card">
     <div className="member-account-form">
       <Typography as="h4" variant="memoryButton">Telegram</Typography>
-      {connected === true ? <p aria-live="polite" className="member-profile-success">Telegram подключён</p> : <>
+      {connected === true ? <Typography as="p" variant="memoryMeta" aria-live="polite" className="member-profile-success">Telegram подключён</Typography> : <>
         <Typography as="p" variant="memoryMeta" tone="muted">Подключите Telegram к этому аккаунту, чтобы пользоваться им в обоих приложениях.</Typography>
-        {notice ? <p aria-live="polite" className={waiting ? 'member-profile-success' : 'member-profile-error'}>{notice}</p> : null}
+        {notice ? <Typography as="p" variant="memoryMeta" aria-live="polite" className={waiting ? 'member-profile-success' : 'member-profile-error'}>{notice}</Typography> : null}
         {waiting ? <UiV2Button className="member-profile-save" disabled={busy} onClick={() => void refresh()} type="button" variant="secondary">Проверить подключение</UiV2Button> : null}
         {statusFailed ? <UiV2Button className="member-profile-save" disabled={busy} onClick={() => void refresh()} type="button" variant="secondary">Повторить проверку</UiV2Button> : null}
         <UiV2Button className="member-profile-save" disabled={busy || connected === null || statusFailed} onClick={() => void start()} type="button" variant="primary">{busy ? 'Открываем Telegram…' : 'Привязать Telegram'}</UiV2Button>
