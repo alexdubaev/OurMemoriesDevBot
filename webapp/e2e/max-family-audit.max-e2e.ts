@@ -25,6 +25,7 @@ test('MAX-FULL: owner connects Telegram from profile and cached Telegram session
     } } })
   }, initData)
   await page.goto('/')
+  await page.getByRole('button', { name: 'Продолжить', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
   await selectFamilyFeed(page, 'Link child', 'Our linked family note')
   await page.getByRole('button', { name: 'Семья', exact: true }).click()
