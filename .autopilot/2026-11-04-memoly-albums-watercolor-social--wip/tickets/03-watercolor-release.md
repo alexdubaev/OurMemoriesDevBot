@@ -1,8 +1,8 @@
 # 03 — Акварель четырёх внутренних экранов и общая приёмка
 
-**Требования:** R64, R67, R01, R02, R03, R04, R52, R53, R54, R55, R56, R57, R58, R59, R60, R61, R62, R63, R65, R66, R68, R69, R70, R71, R72, R73, R74, R75, R76, R77, R78, R79
+**Требования:** G01, R64, R67, R01, R02, R03, R04, R52, R53, R54, R55, R56, R57, R58, R59, R60, R61, R62, R63, R65, R66, R68, R69, R70, R71, R72, R73, R74, R75, R76, R77, R78, R79
 **Зависит от:** 02
-**Зона:** `webapp/src/features/albums/` · `webapp/public/assets/albums/` · `assets/` · `docs/design/` · `webapp/e2e/` · `docs/reviews/`
+**Зона:** `webapp/src/features/albums/` · `webapp/public/assets/albums/` · `assets/` · `docs/design/` · `webapp/e2e/` · `docs/reviews/` · `deploy/selectel/redeploy.sh` · `tests/`
 **Волна:** 3
 **Ревью:** нет — одно итоговое review
 **Модель:** сильная
@@ -26,3 +26,6 @@
 - [ ] Catalog before/after same synthetic data matches; bottom 5 nav intact. Four actual screens 320/390/430 + large text empty/filled compare full reference; screenshots external task evidence.
 - [ ] Targeted test/type/lint/build and real browser evidence; docs replace UI-only with combined social/data/API task. No deploy guards/dependency changes.
 - [ ] /root integration: one final independent technical review + bounded fixes/narrow closure; exact-source FULL; merge main safely/squash PR/final SHA. Guarded single release with actual SHAs/jobs/diff/migration compatibility/backup/disk/lock/immutable artifacts/measured recovery/S3 preservation/public read-only smoke. Cleanup own branch/worktree only after merge; final complete truthful handoff and physical iPhone/MAX manual checklist, measured time.
+
+## G01 — точечно разрешённое дополнение release guard
+После freeze визуального source применить ровно подготовленный s3-album-social proposal с вычисленным final executable fingerprint вместо PENDING. Pins: baseline63 commit6de3da8 и ровно migration20261104110000/20261104113000 с exactLF/CRLFchecksum. Existing locked preSQL prefixes63/64/65; complete65 and matching schema; original s3 still complete-only. Ничего в ci-release ordering/hostguards/backup/S3/noDBrestore не менять. Actual code+tests join same finalreview/FULL/PR/release; no separate deployment task. Product design executor does NOT write guards; root serially assigns exact repair to recovery executor after visual commit.

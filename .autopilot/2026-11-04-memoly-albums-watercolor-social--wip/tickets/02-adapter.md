@@ -2,7 +2,7 @@
 
 **Требования:** R41, R42, R43, R44, R45, R46, R47, R48, R49, R50, R51
 **Зависит от:** 01
-**Зона:** `webapp/src/features/comments/` · `webapp/src/features/albums/` · `webapp/src/features/feed/index.ts` · `webapp/src/platform/persistence/private-cache.ts` · `webapp/src/features/feed/reaction-queue.ts` · `webapp/e2e/` · `webapp/tests/`
+**Зона:** `webapp/src/features/comments/` · `webapp/src/features/albums/` · `webapp/src/features/feed/index.ts` · `webapp/src/platform/persistence/private-cache.ts` · `webapp/src/features/feed/reaction-queue.ts` · `webapp/src/features/feed/presentation/MemoryReactions.tsx` · `webapp/e2e/` · `webapp/tests/`
 **Волна:** 2
 **Ревью:** нет — одно итоговое review
 **Модель:** сильная

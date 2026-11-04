@@ -34,7 +34,10 @@ Fetch main, обычный merge origin/main при drift, разрешить р
 Все этапы и приёмка выполнены, общий guarded deploy/smoke/recovery подтверждены. Финал: PR/base/head/merge/release SHA, migration/checks/review/deploy/recovery, screenshots, честный manual iPhone/MAX список, время request→working result/setup/checks/publication/deploy и отдельно tail/server time. На готовности к следующему разрешённому этапу не останавливаться, новые независимые задачи не начинать.
 
 ## Открытые места
-Местоположение полного watercolor оригинала выясняется асинхронно и локальным поиском, не отменяет требование fidelity и не блокирует сервер/adapter. Никаких продуктовых заглушек или снятых требований.
+В PR270 опубликован1906f549: reference-full-safe.html и подлинные assets. Пакет скачан и визуально проверен; README подтверждает, что только демонстрационные фотографии заменены синтетикой. Художественный перенос выполняется по этому полному безопасному дополнению к pinned863610b6; никаких продуктовых заглушек или снятых требований.
 
 ## Установленные ограничения разработки
 D01: pinned recovery runtime не сбрасывает generation. Реальный отрицательный тест подтверждён; минимальная additive DB fence и tx-local ordinary-edit preservation описаны interfaces.md. D02: synthetic existing S3 pending-SQL guard rejects before any mutation; bypass forbidden, minimal concrete proposal needed before release. Neither constraint drops a requirement or starts a new task.
+
+## Ограниченное разрешение владельца — G01
+2026-11-04 владелец ответил «Да, разрешаю точечное дополнение» на конкретный вопрос о подготовленном recovery guard patch. Разрешён отдельный s3-album-social profile для измеренного итогового executable source, baseline63 + exact2 pinned SQL, preSQL exactprefix63/64/65 only under inherited held release lock, complete65+schema. Старый s3 complete-only policy, fixed accepted recovery artifact IDs/lineage/config/UIv4/Control/S3/read-only checks, backup/disk/hostlock/smoke/no DB rollback сохраняются; ci-release sequence unchanged. Прототип external recovery-guard-proposal/REPORT.md/patch проверен realPG30cases, realLinuxlock, frozenCLI63vs65 и realS3roundtrip, не применён. Применение и финальная привязка выполняются после завершения UI, входят в один итоговый independent technical review и FULL.

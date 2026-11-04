@@ -56,8 +56,12 @@ export function createComposedAlbumSourceCatalog(memoryCatalog: AlbumMemorySourc
           attachment: available ? photo!.attachment : null, body: null, occurredAt: null }
       })
       const resultByKey = new Map([...projected, ...directProjected].map((source) => [key(source), source]))
-      return refs.map((ref) => resultByKey.get(key(ref)) ?? { ...ref, id: ref.id ?? ref.sourceId,
-        available: false, attachment: null, body: null, occurredAt: null })
+      return refs.map((ref) => {
+        const source = resultByKey.get(key(ref))
+        // A shared media payload may belong to distinct entry-source associations.
+        return source ? { ...source, id: ref.id ?? source.id } : { ...ref, id: ref.id ?? ref.sourceId,
+          available: false, attachment: null, body: null, occurredAt: null }
+      })
     },
     list: (tx, scope, filter, limit, before) => memoryCatalog.list(tx, scope, filter, limit, before),
   }

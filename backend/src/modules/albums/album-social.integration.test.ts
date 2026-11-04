@@ -1,6 +1,6 @@
 import { afterAll, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { albumEntryCommentMutationResponseSchema, albumEntryCommentPageSchema, albumEntryDiscussionSummarySchema, apiErrorSchema } from '@web-app-demo/contracts'
+import { albumEntryCommentMutationResponseSchema, albumEntryCommentPageSchema, albumEntryDiscussionSummarySchema, albumEntryPageSchema, apiErrorSchema } from '@web-app-demo/contracts'
 import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
 import { albumSocialFixtures } from './infrastructure/album-social-test-fixtures'
 
@@ -70,6 +70,58 @@ test('album-only history persists comments for owner/full/viewer without creatin
   expect((await f.db.album.findUniqueOrThrow({ where: { id: t.album.id } })).version).toBe(albumBefore.version)
   expect(await f.db.albumEntrySource.count({ where: { entryId: t.entry.id } })).toBe(3)
   expect(await f.db.albumEntryComment.count({ where: { entryId: t.entry.id } })).toBe(3)
+})
+
+test('the same direct or feed photo in two stories preserves distinct source associations and separate discussions', async () => {
+  for (const kind of ['direct', 'feed'] as const) {
+    const t = await target('free')
+    const secondEntry = await f.db.albumEntry.create({ data: { familyId: t.family.id, albumId: t.album.id, kind: 'event', orderKey: 2, title: 'Вторая история', caption: 'Другой контекст того же фото' } })
+    const other = { ...t, entry: secondEntry, path: t.path.replace(t.entry.id, secondEntry.id) }
+    let photoId: string, memoryId: string | null
+    if (kind === 'direct') {
+      photoId = (await attachPhotos(t, 1))[0]!.id
+      memoryId = null
+    } else {
+      const memory = await f.memory(t.family, t.owner, 'photo')
+      memoryId = memory.id
+      const asset = await f.db.mediaAsset.create({ data: {
+        familyId: t.family.id, uploaderId: t.owner.id, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+        originalKey: `synthetic/shared-feed-photo/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg',
+        sha256: 'b'.repeat(64), byteSize: 3, width: 640, height: 480, originalStatus: 'stored', renditionStatus: 'ready',
+      } })
+      photoId = asset.id
+      await f.db.memoryMedia.create({ data: { familyId: t.family.id, memoryId, mediaId: photoId, position: 0 } })
+      expect((await f.request(`${t.path}/sources`, t.owner.token, 'PUT', { expectedVersion: 1, sources: [{ sourceKind: 'private_storage', sourceId: photoId, memoryId }] }, randomUUID())).response.status).toBe(200)
+    }
+    const before = await f.db.mediaAsset.findUniqueOrThrow({ where: { id: photoId } })
+    const album = await f.db.album.findUniqueOrThrow({ where: { id: t.album.id } })
+    expect((await f.request(`${other.path}/sources`, t.owner.token, 'PUT', { expectedVersion: album.version, sources: [{ sourceKind: 'private_storage', sourceId: photoId, memoryId }] }, randomUUID())).response.status).toBe(200)
+    const result = await f.request(`/api/v1/families/${t.family.id}/albums/${t.album.id}/entries`, t.owner.token)
+    expect(result.response.status).toBe(200)
+    const page = albumEntryPageSchema.parse(result.body)
+    expect(page.items.map(({ id }) => id)).toEqual([t.entry.id, other.entry.id])
+    const sourceRows = await f.db.albumEntrySource.findMany({ where: { albumId: t.album.id }, orderBy: { entryId: 'asc' } })
+    expect(sourceRows).toHaveLength(2)
+    expect(new Set(page.items.flatMap(({ sources }) => sources.map(({ id }) => id))).size).toBe(2)
+    for (const entry of page.items) {
+      expect(entry.sourceCount).toBe(1)
+      expect(entry.sources).toMatchObject([{ id: sourceRows.find(({ entryId }) => entryId === entry.id)!.id, sourceId: photoId, memoryId, available: true, attachment: { id: photoId } }])
+    }
+    await create(t, t.owner.token, 'Первая история')
+    await create(other, t.owner.token, 'Вторая история')
+    await create(other, t.owner.token, 'Ещё о второй')
+    await reaction(t, 'heart')
+    await reaction(other, 'wow')
+    expect((await f.request(`${t.path}/discussion`, t.owner.token)).body).toMatchObject({ comments: { count: 1 }, reactionCounts: { heart: 1 }, currentUserReaction: 'heart' })
+    expect((await f.request(`${other.path}/discussion`, t.owner.token)).body).toMatchObject({ comments: { count: 2 }, reactionCounts: { wow: 1 }, currentUserReaction: 'wow' })
+    expect((await f.request(`${t.path}/comments?discussionGeneration=1`, t.owner.token)).body.items.map((item: { body: string }) => item.body)).toEqual(['Первая история'])
+    expect((await f.request(`${other.path}/comments?discussionGeneration=1`, t.owner.token)).body.items.map((item: { body: string }) => item.body).sort()).toEqual(['Вторая история', 'Ещё о второй'].sort())
+    expect(await f.db.mediaAsset.findUniqueOrThrow({ where: { id: photoId } })).toEqual(before)
+    if (memoryId) {
+      expect((await f.request(f.path(t.family.id, memoryId), t.owner.token)).body.summary.count).toBe(0)
+      expect(await f.db.memoryLike.count({ where: { memoryId } })).toBe(0)
+    } else expect(await f.db.memory.count({ where: { familyId: t.family.id } })).toBe(0)
+  }
 })
 
 test('durable replay survives lost response and executor TTL, rejects another body or entry, and resolves fresh text', async () => {

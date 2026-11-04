@@ -11,9 +11,9 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "memoryOwner": "user",
   "skillDir": "C:/Users/Alexandr/.codex/skills/autopilot",
-  "baseCommit": null,
+  "baseCommit": "7e60b958",
   "startedAt": "2026-11-04T12:20:45+03:00",
-  "updatedAt": "2026-11-04T12:59:19+03:00",
+  "updatedAt": "2026-11-04T13:32:41+03:00",
   "finishedAt": null,
   "stages": [
     {
@@ -62,9 +62,9 @@ window.STATE =
     }
   ],
   "requirements": {
-    "total": 79,
-    "done": 0,
-    "inTicket": 79,
+    "total": 80,
+    "done": 36,
+    "inTicket": 44,
     "inSpec": 0,
     "placeholder": 0,
     "deferred": 0,
@@ -122,10 +122,19 @@ window.STATE =
       ],
       "review": "нет — одно итоговое review по прямому заданию владельца",
       "model": "сильная",
-      "status": "in-progress",
+      "status": "repair",
       "startedAt": "2026-11-04T12:35:59+03:00",
+      "finishedAt": "2026-11-04T12:59:24+03:00",
       "retries": 0,
-      "repairs": 0
+      "repairs": 1,
+      "tests": {
+        "passed": 16,
+        "failed": 0
+      },
+      "commit": "c9b16813da16",
+      "repairFindings": [
+        "Реальный same-file-two-stories browser выявил projection500; сохранить ref.id каждой связи, узкая PG regression"
+      ]
     },
     {
       "id": "02",
@@ -158,7 +167,8 @@ window.STATE =
       ],
       "review": "нет — одно итоговое review",
       "model": "сильная",
-      "status": "pending",
+      "status": "in-progress",
+      "startedAt": "2026-11-04T12:59:25+03:00",
       "retries": 0,
       "repairs": 0
     },
@@ -166,6 +176,7 @@ window.STATE =
       "id": "03",
       "title": "Акварель четырёх внутренних экранов и общая приёмка",
       "requirements": [
+        "G01",
         "R64",
         "R67",
         "R01",
@@ -209,7 +220,9 @@ window.STATE =
         "assets/",
         "docs/design/",
         "webapp/e2e/",
-        "docs/reviews/"
+        "docs/reviews/",
+        "deploy/selectel/redeploy.sh",
+        "tests/"
       ],
       "review": "нет — одно итоговое review",
       "model": "сильная",
@@ -218,7 +231,10 @@ window.STATE =
       "repairs": 0
     }
   ],
-  "tests": null,
+  "tests": {
+    "passed": 16,
+    "failed": 0
+  },
   "debt": {
     "placeholders": [],
     "assumptions": [],
@@ -246,11 +262,25 @@ window.STATE =
     "2026-11-04T12:35:15+03:00",
     "2026-11-04T12:35:59+03:00",
     "2026-11-04T12:59:18+03:00",
-    "2026-11-04T12:59:19+03:00"
+    "2026-11-04T12:59:19+03:00",
+    "2026-11-04T12:59:24+03:00",
+    "2026-11-04T12:59:25+03:00",
+    "2026-11-04T13:17:03+03:00",
+    "2026-11-04T13:18:37+03:00",
+    "2026-11-04T13:18:38+03:00",
+    "2026-11-04T13:18:39+03:00",
+    "2026-11-04T13:23:54+03:00",
+    "2026-11-04T13:32:41+03:00"
   ],
-  "rev": 15,
+  "rev": 23,
   "waiting": null,
-  "waits": [],
+  "waits": [
+    {
+      "kind": "action",
+      "from": "2026-11-04T13:17:03+03:00",
+      "to": "2026-11-04T13:18:37+03:00"
+    }
+  ],
   "log": [
     {
       "t": "2026-11-04T12:20:45+03:00",
@@ -340,6 +370,58 @@ window.STATE =
       "g": "G3",
       "ok": true,
       "problems": 0
+    },
+    {
+      "t": "2026-11-04T12:59:24+03:00",
+      "k": "ticket",
+      "ids": [
+        "01"
+      ],
+      "act": "done",
+      "tests": {
+        "passed": 16,
+        "failed": 0
+      }
+    },
+    {
+      "t": "2026-11-04T12:59:25+03:00",
+      "k": "ticket",
+      "ids": [
+        "02"
+      ],
+      "act": "start"
+    },
+    {
+      "t": "2026-11-04T13:17:03+03:00",
+      "k": "ask",
+      "kind": "action",
+      "note": "Точное расширение S3 recovery guard для двух album-social миграций; проверенный patch подготовлен, независимый UI продолжается"
+    },
+    {
+      "t": "2026-11-04T13:18:37+03:00",
+      "k": "answered",
+      "kind": "action"
+    },
+    {
+      "t": "2026-11-04T13:18:38+03:00",
+      "k": "tickets",
+      "n": 3
+    },
+    {
+      "t": "2026-11-04T13:18:39+03:00",
+      "k": "gate",
+      "g": "G3",
+      "ok": true,
+      "problems": 0
+    },
+    {
+      "t": "2026-11-04T13:32:41+03:00",
+      "k": "ticket",
+      "ids": [
+        "01"
+      ],
+      "act": "repair",
+      "note": "Реальный same-file-two-stories browser выявил projection500; сохранить ref.id каждой связи, узкая PG regression"
     }
   ],
   "reqList": [
@@ -366,182 +448,182 @@ window.STATE =
     {
       "id": "R05",
       "text": "«Объект комментариев и реакций — отдельная запись альбома»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R06",
       "text": "«комментарии и реакции общие для всей этой работы.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R07",
       "text": "«это одно и то же обсуждение.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R08",
       "text": "«комментарии и реакции между ними не копируются»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R09",
       "text": "«Фото, загруженные только в альбом, должны поддерживаться»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R10",
       "text": "«НЕ создавать фиктивные Memory для привязки комментариев.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R11",
       "text": "«просмотр с пагинацией;»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R12",
       "text": "«редактирование своего комментария;»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R13",
       "text": "«удаление чужого комментария владельцем семьи;»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R14",
       "text": "«состояния отправки, ошибки и повторной попытки.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R15",
       "text": "«Сохранить действующие ограничения текста, нормализацию,»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R16",
       "text": "«но не переписывать чужой текст.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R17",
       "text": "«Full не получает дополнительных модераторских прав.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R18",
       "text": "«Сердечко — одна из реакций, а не второй независимый лайк.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R19",
       "text": "«поставить → заменить → убрать.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R20",
       "text": "«Повторная доставка запроса не увеличивает счётчик.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R21",
       "text": "«Быстрые последовательные нажатия не оставляют неверное»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R22",
       "text": "«Owner, Full и Viewer с действующим доступом к семье»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R23",
       "text": "«Это не даёт Viewer права изменять альбом или его материалы.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R24",
       "text": "«Право проверяется сервером, включая актуальность членства,»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R25",
       "text": "«После отзыва доступа нельзя читать, отправлять, редактировать,»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R26",
       "text": "«Приватный UI старого scope очищается.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R27",
       "text": "«Существующие MemoryComment/MemoryLike и их данные»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R28",
       "text": "«Переиспользовать проверенные общие примитивы:»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R29",
       "text": "«Новые ссылки должны обеспечивать соответствие»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R30",
       "text": "«families/{familyId}/albums/{albumId}/entries/{entryId}.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R31",
       "text": "«Старые endpoints и строгие DTO ленты оставить совместимыми.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R32",
       "text": "«Idempotency, курсоры и запросы должны различать:»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R33",
       "text": "«Не привязывать отправку каждого комментария к общей версии»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R34",
       "text": "«перестановка её фотографий сохраняют обсуждение.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R35",
       "text": "«Удаление альбома/записи закрывает доступ к обсуждению»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R36",
       "text": "«Полная очистка месяца сбрасывает обсуждение и реакции»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R37",
       "text": "«Запоздалый запрос или retry старой отправки после очистки»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R38",
       "text": "«Комментарии не делают пустой месяц «заполненным».»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R39",
       "text": "«Текстовое событие без фотографии — полноценная история.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R40",
       "text": "«Использовать реальные транзакции изолированной PostgreSQL.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R41",
@@ -737,6 +819,11 @@ window.STATE =
       "id": "R79",
       "text": "«Не останавливаться на «готово к следующему этапу»,»",
       "status": "in-ticket"
+    },
+    {
+      "id": "G01",
+      "text": "«Да, разрешаю точечное дополнение»",
+      "status": "in-ticket"
     }
   ],
   "gates": {
@@ -755,7 +842,7 @@ window.STATE =
     },
     "G3": {
       "ok": true,
-      "at": "2026-11-04T12:59:19+03:00",
+      "at": "2026-11-04T13:18:39+03:00",
       "problems": 0
     }
   },
