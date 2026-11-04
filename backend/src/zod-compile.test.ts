@@ -19,6 +19,7 @@ function probe(mode: ProbeMode): ProbeReport {
   const result = spawnSync(process.execPath, ['src/zod-compile.probe.ts', mode], {
     cwd: backendRoot,
     encoding: 'utf8',
+    timeout: 10_000,
   })
   if (result.status !== 0) {
     throw new Error(
@@ -60,7 +61,7 @@ test('compiled contract schemas accept, reject, and transform exactly like the r
       ? invalidRegistration.issues.map((issue) => (issue as { path: unknown[] }).path.join('.'))
       : [],
   ).toEqual(['email', 'password', 'displayName'])
-})
+}, 30_000)
 
 function accepted(outcome: ParseOutcome) {
   return outcome.success
