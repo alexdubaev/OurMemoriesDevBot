@@ -39,6 +39,16 @@ export const maxAuthRequestSchema = z
   })
   .strict()
 
+export const telegramLinkStatusResponseSchema = z.object({ connected: z.boolean() }).strict()
+export const telegramLinkStartResponseSchema = z.discriminatedUnion('connected', [
+  z.object({ connected: z.literal(true) }).strict(),
+  z.object({
+    connected: z.literal(false),
+    startParam: z.string().regex(/^link_[A-Za-z0-9_-]{70}$/),
+    expiresAt: z.string().datetime(),
+  }).strict(),
+])
+
 export const browserLinkStartResponseSchema = z.object({
   challengeId: z.string().min(1),
   displayCode: z.string().regex(/^\d{6}$/),

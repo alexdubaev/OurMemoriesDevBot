@@ -17,6 +17,7 @@ const env = loadEnv({
   MAX_ENABLED: 'true',
   MAX_BOT_TOKEN: '987654:max-family-audit-synthetic',
   MAX_BOT_EXPECTED_USERNAME: 'OurMemoriesMaxBot',
+  TELEGRAM_AUTH_BOT_TOKEN: '123456:telegram-link-audit-synthetic',
   MAX_WEBHOOK_URL: 'https://max.example.test/webhook',
   MAX_WEBHOOK_SECRET: 'M'.repeat(43),
   MAX_INBOX_ENCRYPTION_KEY: 'B'.repeat(43),

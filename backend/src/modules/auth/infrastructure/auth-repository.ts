@@ -13,6 +13,7 @@ import type {
   TelegramAuthRepository,
 } from '../application/ports'
 import { AuthFailure } from '../domain/errors'
+import { resolveTelegramLink } from './telegram-link-repository'
 
 export function createPrismaAuthRepository(db: DbClient): AuthRepository {
   return {
@@ -346,7 +347,9 @@ export function createPrismaTelegramAuthRepository(
               : { state: 'replayed' as const }
           }
 
-          const externalIdentity = await tx.externalIdentity.upsert({
+          const linked = input.link ? await resolveTelegramLink(tx, input.link, input.identity.subject) : null
+          if (linked && linked.state !== 'linked') return linked
+          const externalIdentity = linked?.externalIdentity ?? await tx.externalIdentity.upsert({
             where: {
               provider_subject: {
                 provider: input.identity.provider,
@@ -396,6 +399,7 @@ export function createPrismaTelegramAuthRepository(
           select: { sessionId: true },
         })
         if (isUniqueConstraintError(error) && replay) return { state: 'replayed' as const }
+        if (isUniqueConstraintError(error) && input.link) return { state: 'link_conflict' as const }
         throw error
       }
     },

@@ -12,6 +12,8 @@ import {
   maxAuthRequestSchema,
   meResponseSchema,
   telegramAuthRequestSchema,
+  telegramLinkStartResponseSchema,
+  telegramLinkStatusResponseSchema,
 } from '@web-app-demo/contracts'
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi'
 import type { Context } from 'hono'
@@ -24,6 +26,7 @@ import type { AuthService } from '../application/auth-service'
 import type { TelegramAuthService } from '../application/telegram-auth-service'
 import type { MaxAuthService } from '../application/max-auth-service'
 import type { BrowserLinkService } from '../application/browser-link-service'
+import type { TelegramLinkService } from '../application/telegram-link-service'
 import { userDtoFromPrincipal } from '../domain/user'
 import { executeAuth } from './errors'
 import type { AuthHttpEnv } from './middleware'
@@ -46,6 +49,8 @@ const telegramRoute = createRoute({
       content: { 'application/json': { schema: cookieAuthResponseSchema } },
       description: 'Verified Telegram identity and application session',
     },
+    400: { content: errorResponseContent, description: 'Identity link expired or consumed' },
+    409: { content: errorResponseContent, description: 'Telegram already belongs to an account' },
     422: { content: errorResponseContent, description: 'Invalid payload' },
     401: { content: errorResponseContent, description: 'Invalid, expired, or replayed initData' },
     403: { content: errorResponseContent, description: 'Untrusted browser origin' },
@@ -160,14 +165,40 @@ type CreateAuthRoutesOptions = {
   telegramService: TelegramAuthService
   maxService: MaxAuthService
   browserLinkService: BrowserLinkService
+  telegramLinkService: TelegramLinkService
   requireAuth: import('hono').MiddlewareHandler<AuthHttpEnv>
 }
 
-export function createAuthRoutes({ env, service, telegramService, maxService, browserLinkService, requireAuth }: CreateAuthRoutesOptions) {
+export function createAuthRoutes({ env, service, telegramService, maxService, browserLinkService, telegramLinkService, requireAuth }: CreateAuthRoutesOptions) {
   const routes = new OpenAPIHono<AuthHttpEnv>({ defaultHook: validationErrorHook })
 
   routes.use('/auth/me', requireAuth)
+  routes.use('/auth/telegram-link', requireAuth)
   routes.use('/auth/browser-link/:id/approve', requireAuth)
+
+  routes.openapi(createRoute({
+    method: 'get', path: '/auth/telegram-link', security: [{ BearerAuth: [] }],
+    responses: {
+      200: { content: { 'application/json': { schema: telegramLinkStatusResponseSchema } }, description: 'Telegram connection status for the MAX account' },
+      401: { content: errorResponseContent, description: 'MAX session required' },
+    },
+  }), async (c) => {
+    noStore(c)
+    return c.json(await executeAuth(() => telegramLinkService.status(c.var.user)), 200)
+  })
+  routes.openapi(createRoute({
+    method: 'post', path: '/auth/telegram-link', security: [{ BearerAuth: [] }],
+    responses: {
+      ...authWriteErrorResponses,
+      200: { content: { 'application/json': { schema: telegramLinkStartResponseSchema } }, description: 'One-use 15-second Telegram identity link' },
+      401: { content: errorResponseContent, description: 'MAX session required' },
+      403: { content: errorResponseContent, description: 'Untrusted browser origin' },
+    },
+  }), async (c) => {
+    assertTrustedCookieOrigin(c, env)
+    noStore(c)
+    return c.json(await executeAuth(() => telegramLinkService.start(c.var.user)), 200)
+  })
 
   routes.openapi(telegramRoute, async (c) => {
     assertTrustedCookieOrigin(c, env)

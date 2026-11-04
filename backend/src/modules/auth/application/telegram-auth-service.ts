@@ -6,6 +6,7 @@ import type {
   ProjectUser,
   RefreshTokens,
   TelegramAuthRepository,
+  TelegramLinkTokens,
   VerifiedTelegramInitData,
 } from './ports'
 
@@ -18,6 +19,7 @@ type TelegramAuthServiceDependencies = {
   sessionAbsoluteTtlDays: number
   refreshTokens: RefreshTokens
   repository: TelegramAuthRepository
+  linkTokens: TelegramLinkTokens
   verifyInitData(rawInitData: string): VerifiedTelegramInitData
 }
 
@@ -37,6 +39,12 @@ export class TelegramAuthService {
     }
 
     const now = this.dependencies.clock.now()
+    const isLink = verified.startParam?.startsWith('link_') ?? false
+    let link: ReturnType<TelegramLinkTokens['verify']> | undefined
+    if (isLink) {
+      try { link = this.dependencies.linkTokens.verify(verified.startParam!.slice(5)) }
+      catch { throw new AuthFailure('telegram_link_invalid', 'Invalid link payload') }
+    }
     const existingSessionId = await this.currentSessionId(presentedRefreshToken, now)
     const refreshToken = this.dependencies.refreshTokens.create()
     const exchanged = await this.dependencies.repository.exchangeTelegramIdentity({
@@ -44,6 +52,11 @@ export class TelegramAuthService {
       fingerprintHash: verified.replayFingerprintHash,
       replayExpiresAt: new Date(now.getTime() + 5 * 60 * 1000),
       existingSessionId,
+      link: link ? {
+        ...link,
+        authDateSeconds: verified.authDateSeconds,
+        sourceAbsoluteTtlMs: this.dependencies.sessionAbsoluteTtlDays * 86400_000,
+      } : undefined,
       now,
       session: {
         refreshTokenHash: this.dependencies.refreshTokens.hash(refreshToken),
@@ -53,6 +66,9 @@ export class TelegramAuthService {
       },
     })
 
+    if (exchanged.state === 'link_invalid' || exchanged.state === 'link_conflict') {
+      throw new AuthFailure(exchanged.state === 'link_invalid' ? 'telegram_link_invalid' : 'telegram_link_conflict', 'Telegram link rejected')
+    }
     if (exchanged.state === 'replayed') {
       throw new AuthFailure(
         'telegram_init_data_replayed',

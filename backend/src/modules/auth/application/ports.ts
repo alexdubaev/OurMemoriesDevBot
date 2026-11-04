@@ -106,6 +106,8 @@ export type MaxIdentity = {
 export type VerifiedTelegramInitData = {
   identity: TelegramIdentity
   replayFingerprintHash: string
+  authDateSeconds: number
+  startParam?: string
 }
 
 export type VerifiedMaxInitData = {
@@ -121,6 +123,7 @@ export type TelegramAuthRepository = Pick<AuthRepository, 'findActiveRefreshSess
     fingerprintHash: string
     replayExpiresAt: Date
     existingSessionId?: string
+    link?: { sourceSessionId: string; issuedAt: number; tokenHash: string; authDateSeconds: number; sourceAbsoluteTtlMs: number }
     now: Date
     session: {
       refreshTokenHash: string
@@ -131,8 +134,24 @@ export type TelegramAuthRepository = Pick<AuthRepository, 'findActiveRefreshSess
   }): Promise<
     | { state: 'issued' | 'same_session'; user: AuthUserRecord; session: { id: string } }
     | { state: 'invalid_account' }
+    | { state: 'link_invalid' }
+    | { state: 'link_conflict' }
     | { state: 'replayed' }
   >
+}
+
+export type TelegramLinkRepository = {
+  isConnected(userId: string): Promise<boolean>
+  start(input: { userId: string; sessionId: string; identityId: string; absoluteTtlMs: number }): Promise<
+    | { connected: true }
+    | { connected: false; issuedAt: Date }
+    | null
+  >
+}
+
+export type TelegramLinkTokens = {
+  create(sourceSessionId: string, issuedAt: Date): string
+  verify(token: string): { sourceSessionId: string; issuedAt: number; tokenHash: string }
 }
 
 export type MaxAuthRepository = Pick<AuthRepository, 'findActiveRefreshSession'> & {

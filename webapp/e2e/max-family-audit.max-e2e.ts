@@ -13,6 +13,82 @@ type ApiChild = { child: { id: string } }
 type ApiMemory = { id: string }
 type ApiFamilyMember = { userId: string; version: number; role: 'full' | 'viewer' }
 
+test('MAX-FULL: owner connects Telegram from profile and cached Telegram sessions cannot skip the signed link exchange', async ({ page, browser }, testInfo) => {
+  const initData = signedMaxInitData({ id: 85_000_000 + Math.floor(Math.random() * 1_000_000), first_name: 'Link owner' }, randomUUID(), '')
+  const ownerResponse = await page.request.post('/api/v1/auth/max', { data: { initData } })
+  expect(ownerResponse.status()).toBe(200)
+  const owner = await ownerResponse.json() as { user: { id: string }; accessToken: string }
+  await createAuditFamily(page, owner.accessToken, 'Linked family', 'Link child', 'Our linked family note')
+  await page.addInitScript((data) => {
+    Object.assign(window, { __openedLinks: [], WebApp: { initData: data, ready() {}, openLink(url: string) {
+      (window as unknown as { __openedLinks: string[] }).__openedLinks.push(url)
+    } } })
+  }, initData)
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Продолжить', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+  await selectFamilyFeed(page, 'Link child', 'Our linked family note')
+  await page.getByRole('button', { name: 'Семья', exact: true }).click()
+  await page.locator('.family-member-row').filter({ hasText: 'Link owner' }).click()
+  const card = page.getByRole('region', { name: 'Подключение Telegram' })
+  const start = card.getByRole('button', { name: 'Привязать Telegram', exact: true })
+  await expect(start).toBeEnabled()
+  await start.click()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __openedLinks: string[] }).__openedLinks.length)).toBe(1)
+  const url = await page.evaluate(() => (window as unknown as { __openedLinks: string[] }).__openedLinks[0]!)
+  expect(url).toMatch(/^https:\/\/t.me\/OurMemoriesDevBot\?startapp=link_[A-Za-z0-9_-]{70}$/)
+  expect(await card.locator('a,input,textarea').count()).toBe(0)
+  const payload = new URL(url).searchParams.get('startapp')!
+  const telegramContext = await browser.newContext({ baseURL: page.url().split('/').slice(0, 3).join('/') })
+  const occupiedSubject = 89_000_000 + Math.floor(Math.random() * 1_000_000)
+  const cached = await telegramContext.request.post('/api/v1/auth/telegram', { data: { initData: signedTelegramLinkData(occupiedSubject) } })
+  expect(cached.status()).toBe(200)
+  const cachedUser = await cached.json() as { user: { id: string } }
+  expect(cachedUser.user.id).not.toBe(owner.user.id)
+  const telegram = await telegramContext.newPage()
+  await telegram.addInitScript((launch) => {
+    Object.defineProperty(window, 'Telegram', { configurable: true, value: { WebApp: {
+      initData: launch, version: '8.0', platform: 'ios', ready() {},
+    } } })
+  }, signedTelegramLinkData(occupiedSubject + 1_000_000, payload))
+  const exchanged = telegram.waitForResponse((r) => r.url().endsWith('/api/v1/auth/telegram') && r.request().method() === 'POST')
+  await telegram.goto('/')
+  const linked = await exchanged
+  expect(linked.status()).toBe(200)
+  expect((await linked.json() as { user: { id: string } }).user.id).toBe(owner.user.id)
+  await expect(telegram.getByRole('heading', { name: 'Мои семьи' })).toBeVisible()
+  await selectFamilyFeed(telegram, 'Link child', 'Our linked family note')
+  await telegram.getByRole('button', { name: 'Семья', exact: true }).click()
+  await telegram.locator('.family-member-row').filter({ hasText: 'Link owner' }).click()
+  await expect(telegram.getByText('Владелец семьи', { exact: true }).last()).toBeVisible()
+  await expect(telegram.getByRole('region', { name: 'Подключение Telegram' })).toHaveCount(0)
+  await page.bringToFront()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(card.getByText('Telegram подключён', { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('telegram-connected-profile.png'), fullPage: true })
+
+  // Another signed launch reusing the spent capability must stop before even the cached owner hub.
+  const failed = await telegramContext.newPage()
+  await failed.addInitScript((launch) => {
+    Object.defineProperty(window, 'Telegram', { configurable: true, value: { WebApp: { initData: launch, version: '8.0', ready() {} } } })
+  }, signedTelegramLinkData(occupiedSubject + 2_000_000, payload))
+  const rejected = failed.waitForResponse((r) => r.url().endsWith('/api/v1/auth/telegram') && r.request().method() === 'POST')
+  await failed.goto('/')
+  expect((await rejected).status()).toBe(400)
+  await expect(failed.getByText('Не удалось подключить Telegram', { exact: true })).toBeVisible()
+  await expect(failed.getByRole('heading', { name: 'Мои семьи' })).toHaveCount(0)
+  await telegramContext.close()
+})
+
+function signedTelegramLinkData(subject: number, startParam?: string) {
+  const fields = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), query_id: randomUUID(),
+    user: JSON.stringify({ id: subject, first_name: 'Link Telegram fixture' }), ...(startParam ? { start_param: startParam } : {}) })
+  const check = [...fields].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, value]) => `${key}=${value}`).join('\n')
+  const secret = createHmac('sha256', 'WebAppData').update('123456:telegram-link-audit-synthetic').digest()
+  fields.set('hash', createHmac('sha256', secret).update(check).digest('hex'))
+  return fields.toString()
+}
+
 test('real PWA browser-link screen pairs through signed MAX initData and opens the authenticated family hub', async ({ browser, page }, testInfo) => {
   const browserLinkStarts: string[] = []
   const browserLinkRedeems: string[] = []
@@ -450,6 +526,7 @@ test('MAX owner retries a lost invite response with one idempotency key and invi
 
   const keys: string[] = []
   let committedInvite: { rawToken: string } | undefined
+  let latestInviteRawToken = ''
   let failFirstResponse = true
   let inviteCommitted!: () => void
   let releaseInvite!: () => void
@@ -460,6 +537,7 @@ test('MAX owner retries a lost invite response with one idempotency key and invi
     keys.push(route.request().headers()['idempotency-key'] ?? '')
     const committed = await route.fetch()
     const payload = await committed.json()
+    latestInviteRawToken = payload.rawToken as string
     if (failFirstResponse) {
       failFirstResponse = false
       committedInvite = payload
@@ -506,7 +584,9 @@ test('MAX owner retries a lost invite response with one idempotency key and invi
   })
   await page.getByRole('button', { name: 'Создать приглашение' }).click()
   await expect(page.getByRole('heading', { name: 'Ссылка готова' })).toBeVisible()
-  await expect(page.getByLabel('Ссылка приглашения')).toHaveValue(/https?:\/\//)
+  expect(latestInviteRawToken).toBeTruthy()
+  await expect(page.getByLabel('Ссылка приглашения MAX', { exact: true })).toHaveValue(`https://max.ru/OurMemoriesMaxBot?start=invite_${latestInviteRawToken}`)
+  await expect(page.getByLabel('Ссылка приглашения Telegram', { exact: true })).toHaveValue(`https://t.me/OurMemoriesDevBot?startapp=invite_${latestInviteRawToken}`)
   const postsBeforeReadRetry = keys.length
   await page.getByRole('button', { name: 'Готово' }).click()
   await expect(page.getByText('Изменение сохранено, но данные семьи не удалось обновить. Повторите только обновление данных.')).toBeVisible()

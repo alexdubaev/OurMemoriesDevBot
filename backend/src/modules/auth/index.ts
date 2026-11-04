@@ -5,6 +5,9 @@ import { drainPassCapacity } from '../../outbox'
 import type { BackendRuntime } from '../../runtime'
 import { AuthService } from './application/auth-service'
 import { BrowserLinkService } from './application/browser-link-service'
+import { TelegramLinkService } from './application/telegram-link-service'
+import { createPrismaTelegramLinkRepository } from './infrastructure/telegram-link-repository'
+import { createTelegramLinkTokens } from './infrastructure/telegram-link-tokens'
 import { TelegramAuthService } from './application/telegram-auth-service'
 import { MaxAuthService } from './application/max-auth-service'
 import { passwordResetCooldownSeconds, type Clock, type LogoutCleanup, type ProjectUser } from './application/ports'
@@ -66,6 +69,12 @@ export function createAuthModule({
   const telegramService = buildTelegramAuthService({ clock, db, env, projectUser })
   const maxService = buildMaxAuthService({ clock, db, env, projectUser })
   const browserLinkService = buildBrowserLinkService({ clock, db, env, maxService, projectUser })
+  const telegramLinkService = new TelegramLinkService({
+    repository: createPrismaTelegramLinkRepository(db),
+    tokens: createTelegramLinkTokens(env.JWT_SECRET),
+    sessionAbsoluteTtlDays: env.SESSION_ABSOLUTE_TTL_DAYS,
+    configured: Boolean(env.TELEGRAM_AUTH_BOT_TOKEN ?? env.TELEGRAM_BOT_TOKEN),
+  })
   const requireAuth = createRequireAuth((accessToken) => service.authenticateAccessToken(accessToken))
 
   return {
@@ -78,7 +87,7 @@ export function createAuthModule({
     legacyTestRoutes: legacyPasswordAuthForTests
       ? createLegacyAuthTestRoutes({ env, requireAuth, service })
       : undefined,
-    routes: createAuthRoutes({ env, service, telegramService, maxService, browserLinkService, requireAuth }),
+    routes: createAuthRoutes({ env, service, telegramService, maxService, browserLinkService, telegramLinkService, requireAuth }),
   }
 }
 
@@ -173,6 +182,7 @@ function buildTelegramAuthService({
       rotate: (token) => deriveRotatedRefreshToken(token, env.JWT_SECRET),
     },
     repository: createPrismaTelegramAuthRepository(db, sessions),
+    linkTokens: createTelegramLinkTokens(env.JWT_SECRET),
     verifyInitData: (rawInitData) => {
       if (!botToken) throw new Error('Telegram authentication is not configured')
       return verifyTelegramInitData(rawInitData, {

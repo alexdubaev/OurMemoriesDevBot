@@ -54,6 +54,8 @@ export function verifyTelegramInitData(
 
   return {
     identity: parseTelegramUser(userRaw),
+    authDateSeconds: authDate,
+    startParam: fields.get('start_param'),
     // Telegram's HMAC is stable for the signed field set even if the query parameters are
     // reordered or percent-encoded differently. Hash it once more so the replay table stores
     // neither raw initData nor a directly reusable Telegram signature.
