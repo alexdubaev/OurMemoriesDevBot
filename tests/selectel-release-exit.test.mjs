@@ -3782,6 +3782,43 @@ function s3AlbumSocialRecoverySource() {
   return fixtureSourceCache.get('s3AlbumSocial')
 }
 
+function telegramAuthOnlyS3RecoverySource() {
+  const source = s3AlbumSocialRecoverySource()
+  const directory = mkdtempSync(resolve(root, '.scratch', 'telegram-auth-s3-source-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, source.sha], { cwd: root, encoding: 'utf8' })
+  assert.equal(added.status, 0, added.stderr)
+  fixtureWorktrees.push(directory)
+  return commitFrozenSourceFiles({ root: directory, sha: source.sha }, [
+    ['backend/.env.example', 'bab2bc0cf5a01df253f70af81e1d64d539e3184d'],
+    ['backend/scripts/telegram-auth-only-verification-server.ts', 'ec46d072528ffcf53f15d0a35b424ff6a98da242'],
+    ['backend/src/env.ts', 'c4e3371b5ece55a2edf7ffc7eeb4d5440c12179d'],
+    ['backend/src/modules/auth/index.ts', 'daf11eb6ab94daa78cbe65498f4c981cb7ab47c5'],
+  ], 'reconstruct exact measured Telegram auth-only S3 executable source')
+}
+
+test('Telegram auth-only exact S3 source passes readiness and rejects unmeasured auth or storage drift', {
+  timeout: process.platform === 'win32' ? 240_000 : 90_000,
+}, () => {
+  const source = telegramAuthOnlyS3RecoverySource()
+  assert.equal(productionCompatibilityFingerprint(source.root), '2cd72b36e5fb2ccd01b9533d353419931ccf8d62d919c63a79e29c283b59a63f')
+  const ready = runS3Recovery(source, { action: 'rollback_readiness', s3SocialHistoryMocks: true })
+  assert.equal(ready.status, 0, ready.output)
+  assert.match(ready.events, /S3_SOCIAL_HISTORY:complete/)
+  assert.match(ready.events, /S3_READINESS/)
+  assert.doesNotMatch(ready.events, /UP:|GATE|INVERSE/)
+  for (const relativePath of ['backend/src/modules/auth/index.ts', 'backend/src/storage/s3-storage.ts']) {
+    const directory = mkdtempSync(resolve(root, '.scratch', 'telegram-auth-s3-drift-'))
+    const added = spawnSync('git', ['worktree', 'add', '--detach', directory, source.sha], { cwd: root, encoding: 'utf8' })
+    assert.equal(added.status, 0, added.stderr)
+    fixtureWorktrees.push(directory)
+    const drift = commitSourceChange({ root: directory, sha: source.sha }, relativePath,
+      '\n// unmeasured Telegram auth-only recovery drift\n', `reject unmeasured recovery input ${relativePath}`)
+    const rejected = runS3Recovery(drift, { action: 'rollback_readiness', s3SocialHistoryMocks: true })
+    assert.notEqual(rejected.status, 0, relativePath + rejected.output)
+    assert.doesNotMatch(rejected.events, /UP:|GATE|INVERSE/)
+  }
+})
+
 test('S3 album-social exact executable profile rejects unmeasured source changes', {
   timeout: process.platform === 'win32' ? 180_000 : 60_000,
 }, () => {

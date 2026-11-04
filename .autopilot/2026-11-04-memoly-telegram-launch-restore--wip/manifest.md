@@ -16,3 +16,5 @@
 | R10 | «Не объединяй учётные записи автоматически и не меняй права.» | in-ticket | Нет linking/merge и административного назначения членства в production. | Спецификация §7 → T01 |
 | R11 | «Не изменяй настройки бота и не регистрируй новый webhook.» | in-ticket | Main URL изменён самим владельцем; этот запуск не меняет menu/webhook/commands и не отправляет сообщения. | Спецификация §7 → T01 |
 | R12 | «Не выводи токены, ключи и секретные параметры.» | in-ticket | Только protected env/store, секретные значения не попадают в артефакты, логи или команды. | Спецификация §1,7 → T01 |
+| D01 | Exact recovery source binding для R06 | in-spec | Код изменил executable fingerprint; сохранить ту же принятую S3-safe recovery пару/profile и fail-closed negative drift control. Не новая возможность и не снятие R06. | Спецификация §5 → T01 |
+| D02 | Exact FULL scope classification для R05/R06 | in-spec | Dry-run отказал трём новым metadata/config путям. После разбора требуется точная tested FULL классификация; unknown-path и запрет понижения сохраняются. | Спецификация §5 → T01 |

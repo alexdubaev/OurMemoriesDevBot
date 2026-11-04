@@ -7,6 +7,10 @@
 **Ревью:** нет
 **Модель:** сильная
 
+Дополнение зоны по D01: `deploy/selectel/redeploy.sh` · `deploy/selectel/README.md` · `tests/selectel-release-exit.test.mjs`. Разрешена только точная metadata привязка измеренного source к прежней immutable S3-safe recovery паре и negative source-drift regression; gate логика и прежние ограничения неизменны. Один whole-change review после этой привязки.
+
+Дополнение зоны по D02: `scripts/verify-local.mjs` · `scripts/verify-local.test.mjs`. Только literal FULL classification трёх разобранных путей и negative adjacent-path regression. Никаких classifier алгоритмов, broad allowlist или снижения проверок.
+
 ## Что должно заработать
 
 Существующий memoLy проверяет Telegram initData и выдаёт обычную сессию по отдельному auth-only секрету, пока message-бот выключен. Это один цельный небольшой таск; одно whole-change review покрывает защищённые границы. Операционные действия production и Git выполняет lead после кода/проверок; исполнитель не получает секретов и не выполняет deploy. Lead завершает требования реальной доставки/приёмки только по факту и не считает commit доказательством deploy.

@@ -18,10 +18,13 @@ const ACCEPTED_UI_V4_SHA = 'afdb408f8bbf22b564c86bb8d33a83261f55cc48'
 // Keep exact identities: adjacent/new files still require their own classification.
 const REVIEWED_FULL_PATHS = new Set([
   '.autopilot/2026-10-23-wishlist/state.js',
+  '.autopilot/2026-11-04-memoly-albums-watercolor-social--wip/state.js',
   '.autopilot/dashboard.html',
   '.autopilot/state.js',
+  '.env.example',
   'assets/manifest.json',
   'webapp/e2e/album-social.playwright.config.ts',
+  'webapp/e2e/telegram-auth-only.playwright.config.ts',
   'webapp/e2e/fixtures/albums.ts',
 ])
 

@@ -13,7 +13,7 @@ window.STATE =
   "skillDir": "C:/Users/Alexandr/.codex/skills/autopilot",
   "baseCommit": "e93f3ebecdd5159cf34aeb6633db333b3834dae4",
   "startedAt": "2026-11-04T19:32:46+03:00",
-  "updatedAt": "2026-11-04T20:00:17+03:00",
+  "updatedAt": "2026-11-04T20:06:24+03:00",
   "finishedAt": null,
   "stages": [
     {
@@ -48,12 +48,14 @@ window.STATE =
     },
     {
       "id": "build",
-      "status": "active",
-      "startedAt": "2026-11-04T19:42:33+03:00"
+      "status": "done",
+      "startedAt": "2026-11-04T19:42:33+03:00",
+      "finishedAt": "2026-11-04T20:06:24+03:00"
     },
     {
       "id": "review",
-      "status": "pending"
+      "status": "active",
+      "startedAt": "2026-11-04T20:06:24+03:00"
     },
     {
       "id": "final",
@@ -102,10 +104,13 @@ window.STATE =
       ],
       "review": "нет",
       "model": "сильная",
-      "status": "in-progress",
+      "status": "repair",
       "retries": 0,
-      "repairs": 0,
-      "startedAt": "2026-11-04T19:42:34+03:00"
+      "repairs": 1,
+      "startedAt": "2026-11-04T19:42:34+03:00",
+      "repairFindings": [
+        "D01: точная metadata привязка нового auth-only source к прежнему S3-safe recovery profile, без изменения guards"
+      ]
     }
   ],
   "tests": {
@@ -124,7 +129,9 @@ window.STATE =
     "deferred": 0,
     "items": []
   },
-  "concerns": [],
+  "concerns": [
+    "D02: canonical FULL ещё NOT RUN — dry-run требует точной FULL классификации трёх новых metadata/config путей; исправление не понижает профиль."
+  ],
   "blind": null,
   "beats": [
     "2026-11-04T19:32:46+03:00",
@@ -144,11 +151,21 @@ window.STATE =
     "2026-11-04T19:42:33+03:00",
     "2026-11-04T19:42:34+03:00",
     "2026-11-04T20:00:16+03:00",
-    "2026-11-04T20:00:17+03:00"
+    "2026-11-04T20:00:17+03:00",
+    "2026-11-04T20:01:47+03:00",
+    "2026-11-04T20:03:48+03:00",
+    "2026-11-04T20:05:24+03:00",
+    "2026-11-04T20:06:24+03:00"
   ],
-  "rev": 19,
+  "rev": 23,
   "waiting": null,
-  "waits": [],
+  "waits": [
+    {
+      "kind": "action",
+      "from": "2026-11-04T20:05:24+03:00",
+      "to": "2026-11-04T20:06:24+03:00"
+    }
+  ],
   "log": [
     {
       "t": "2026-11-04T19:32:46+03:00",
@@ -254,6 +271,38 @@ window.STATE =
       "k": "add",
       "key": "report",
       "n": 2
+    },
+    {
+      "t": "2026-11-04T20:01:47+03:00",
+      "k": "ticket",
+      "ids": [
+        "01"
+      ],
+      "act": "repair",
+      "note": "D01: точная metadata привязка нового auth-only source к прежнему S3-safe recovery profile, без изменения guards"
+    },
+    {
+      "t": "2026-11-04T20:03:48+03:00",
+      "k": "add",
+      "key": "concerns",
+      "n": 1
+    },
+    {
+      "t": "2026-11-04T20:05:24+03:00",
+      "k": "ask",
+      "kind": "action",
+      "note": "Нужно отдельное разрешение только на обновление URL кнопки меню Telegram; остальная проверка и доставка продолжаются"
+    },
+    {
+      "t": "2026-11-04T20:06:24+03:00",
+      "k": "answered",
+      "kind": "action"
+    },
+    {
+      "t": "2026-11-04T20:06:24+03:00",
+      "k": "stage",
+      "id": "review",
+      "act": "start"
     }
   ],
   "reqList": [
