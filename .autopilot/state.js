@@ -13,7 +13,7 @@ window.STATE =
   "skillDir": "C:/Users/Alexandr/.codex/skills/autopilot",
   "baseCommit": "7e60b958",
   "startedAt": "2026-11-04T12:20:45+03:00",
-  "updatedAt": "2026-11-04T13:35:16+03:00",
+  "updatedAt": "2026-11-04T14:09:54+03:00",
   "finishedAt": null,
   "stages": [
     {
@@ -49,12 +49,14 @@ window.STATE =
     },
     {
       "id": "build",
-      "status": "active",
-      "startedAt": "2026-11-04T12:35:59+03:00"
+      "status": "done",
+      "startedAt": "2026-11-04T12:35:59+03:00",
+      "finishedAt": "2026-11-04T14:09:54+03:00"
     },
     {
       "id": "review",
-      "status": "pending"
+      "status": "active",
+      "startedAt": "2026-11-04T14:09:54+03:00"
     },
     {
       "id": "final",
@@ -63,8 +65,8 @@ window.STATE =
   ],
   "requirements": {
     "total": 80,
-    "done": 36,
-    "inTicket": 44,
+    "done": 64,
+    "inTicket": 16,
     "inSpec": 0,
     "placeholder": 0,
     "deferred": 0,
@@ -167,10 +169,16 @@ window.STATE =
       ],
       "review": "нет — одно итоговое review",
       "model": "сильная",
-      "status": "in-progress",
+      "status": "done",
       "startedAt": "2026-11-04T12:59:25+03:00",
       "retries": 0,
-      "repairs": 0
+      "repairs": 0,
+      "finishedAt": "2026-11-04T13:39:31+03:00",
+      "tests": {
+        "passed": 5,
+        "failed": 0
+      },
+      "commit": "f3eb1ad36339"
     },
     {
       "id": "03",
@@ -226,13 +234,14 @@ window.STATE =
       ],
       "review": "нет — одно итоговое review",
       "model": "сильная",
-      "status": "pending",
+      "status": "in-progress",
       "retries": 0,
-      "repairs": 0
+      "repairs": 0,
+      "startedAt": "2026-11-04T13:39:32+03:00"
     }
   ],
   "tests": {
-    "passed": 1,
+    "passed": 5,
     "failed": 0
   },
   "debt": {
@@ -271,9 +280,12 @@ window.STATE =
     "2026-11-04T13:18:39+03:00",
     "2026-11-04T13:23:54+03:00",
     "2026-11-04T13:32:41+03:00",
-    "2026-11-04T13:35:16+03:00"
+    "2026-11-04T13:35:16+03:00",
+    "2026-11-04T13:39:31+03:00",
+    "2026-11-04T13:39:32+03:00",
+    "2026-11-04T14:09:54+03:00"
   ],
-  "rev": 24,
+  "rev": 29,
   "waiting": null,
   "waits": [
     {
@@ -435,28 +447,54 @@ window.STATE =
         "passed": 1,
         "failed": 0
       }
+    },
+    {
+      "t": "2026-11-04T13:39:31+03:00",
+      "k": "ticket",
+      "ids": [
+        "02"
+      ],
+      "act": "done",
+      "tests": {
+        "passed": 5,
+        "failed": 0
+      }
+    },
+    {
+      "t": "2026-11-04T13:39:32+03:00",
+      "k": "ticket",
+      "ids": [
+        "03"
+      ],
+      "act": "start"
+    },
+    {
+      "t": "2026-11-04T14:09:54+03:00",
+      "k": "stage",
+      "id": "review",
+      "act": "start"
     }
   ],
   "reqList": [
     {
       "id": "R01",
       "text": "«Одна задача → один worktree → одна feature-ветка»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R02",
       "text": "«Начинай от свежего принятого origin/main.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R03",
       "text": "«не начата ли уже реализация этого оформления другим агентом;»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R04",
       "text": "«Используй собственные ветку, worktree, тестовую БД,»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R05",
@@ -641,107 +679,107 @@ window.STATE =
     {
       "id": "R41",
       "text": "«Не копировать целиком CommentsPanel в отдельный»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R42",
       "text": "«Не подставлять entryId в memoryId.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R43",
       "text": "«Ключи запросов, draft, optimistic state и retry различают:»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R44",
       "text": "«отменить устаревшие чтения;»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R45",
       "text": "«не отправлять старый черновик в новый объект;»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R46",
       "text": "«предупреждение о несохранённом тексте;»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R47",
       "text": "«сохранённый комментарий + failed refresh не отправляется заново.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R48",
       "text": "«работу клавиатуры, safe-area, фокуса и MAX Back.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R49",
       "text": "«на экране ОТКРЫТОЙ истории/работы:»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R50",
       "text": "«Не повторять её под каждым вложением.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R51",
       "text": "«Не запускать по запросу комментариев на каждую»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R52",
       "text": "«сразу учитывая подключённые социальные действия.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R53",
       "text": "«Использовать отдельные качественные оптимизированные assets.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R54",
       "text": "«Не заменять акварель emoji и не нарезать целый скриншот»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R55",
       "text": "«Рабочие семейные фото не публиковать в GitHub.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R56",
       "text": "«Сохранить плотный коллаж, разделение по годам/месяцам,»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R57",
       "text": "«Сохранить 12 глав, настоящую заполненность, компактный»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R58",
       "text": "«Сохранить text-only события, частичные/неизвестные даты»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R59",
       "text": "«Галерея сразу после короткого заголовка.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R60",
       "text": "«КАТАЛОГ «АЛЬБОМЫ» НЕ РЕДИЗАЙНИТЬ.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R61",
       "text": "«Лента → Альбомы → Добавить → Вишлист → Семья.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R62",
@@ -761,12 +799,12 @@ window.STATE =
     {
       "id": "R65",
       "text": "«320/390/430px, увеличенный текст, пустые/заполненные состояния,»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R66",
       "text": "«Физический iPhone не объявлять проверенным по эмуляции.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R67",
@@ -796,7 +834,7 @@ window.STATE =
     {
       "id": "R72",
       "text": "«обновить документацию задачи, чтобы она не называлась UI-only;»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R73",
