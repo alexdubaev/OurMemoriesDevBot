@@ -7,7 +7,7 @@ import { requireIntegrationDatabaseUrl } from '../../test-support/integration-da
 import { createTelegramLinkTokens } from './infrastructure/telegram-link-tokens'
 
 const databaseUrl = requireIntegrationDatabaseUrl()
-const origin = 'http://localhost:5173'
+const origin = 'https://app.example.test'
 const maxToken = '123456:max-link-fixture'
 const telegramToken = '987654:telegram-link-fixture'
 
