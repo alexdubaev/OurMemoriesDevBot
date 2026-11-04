@@ -676,6 +676,30 @@ operations boundaries in [S3 media recovery](../../docs/development/S3_MEDIA_MIG
 Keep this pair locally as the designated recovery artifact. No S3 policy,
 credentials, versioning or media migration change is needed for its acceptance.
 
+The separately approved `s3-album-social` profile binds executable fingerprint
+`3d939c75a4a6ec1ac6582ac7bcec70edb015c694267bad966aa096f4813df8d2`
+to that same immutable S3 pair. Its immutable 63-migration baseline is
+`6de3da8eb4588b3fe3ebe14016ea0c8ae35c69ab`; the only accepted suffix is
+`20261104110000_album_entry_social` and
+`20261104113000_album_social_recovery_clear`, with exact normalized LF/CRLF
+checksums. Existing guarded pre-SQL readiness, with the inherited host lock,
+accepts only completed exact prefixes of 63, 64 or 65 rows. Complete recovery
+requires all 65 and matching social tables/generation and enabled legacy-clear
+trigger/function. The original `s3` profile remains complete-only. Release order,
+backup, target identity, host inputs, installed Control protections, read-only S3
+readiness, gateway/auth, smoke and database-preservation guards are unchanged.
+Neither profile authorizes a database restore or storage switch.
+
+Canonical `test:tools` covers this profile's source/phase/lock/rollback boundaries;
+canonical backend integration includes
+`album-social-release-guard.integration.test.ts`, which executes the actual
+validator against unique real PostgreSQL databases and checks the frozen
+63-migration Prisma catalog against the current 65-row ledger. The existing
+explicit real-S3 lifecycle command in
+[S3 media recovery](../../docs/development/S3_MEDIA_MIGRATION.md) is additionally
+required for the final executable source. Bounded compatibility evidence does
+not replace final source-bound FULL verification and independent review.
+
 The guarded rollback supports these exact measured backend + webapp target pairs and source profiles:
 
 - `e383d79269a3595f4c6cabedf167335aea042cf3`, with its exact production image

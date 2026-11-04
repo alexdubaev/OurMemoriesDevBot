@@ -1012,12 +1012,13 @@ const frozenAvatarTimerFixSource = () => frozenGitBlob(reviewedAvatarTimerFixBlo
 const frozenStorybookManifest = () => frozenGitBlob(reviewedStorybookManifestBlob, 'Storybook manifest')
 const frozenStorybookLock = () => frozenGitBlob(reviewedStorybookLockBlob, 'Storybook lockfile')
 
+// Removing the full detached-fixture set is cumulative (69 measured removals: 105.5s).
 afterAll(() => {
   for (const directory of fixtureWorktrees.reverse()) {
     const result = spawnSync('git', ['worktree', 'remove', directory], { cwd: root, encoding: 'utf8' })
     if (result.status !== 0) throw new Error(result.stdout + result.stderr)
   }
-}, { timeout: 60_000 })
+}, { timeout: 300_000 })
 const redeployDefinitions = `. ${shellQuote(resolve(root, 'deploy/selectel/redeploy.sh'))}`
 
 test('MAX video installer host pin accepts only the historic blob or this exact reviewed blob', () => {
@@ -1158,6 +1159,9 @@ function runApplicationRollback(options = {}) {
       'rollback_control_installed_inputs_match() { :; }',
       'rollback_apply_max_video_recovery() { echo UNEXPECTED_MAX_INVERSE >> "$FIXTURE_EVENTS"; return 1; }',
     ] : []),
+    ...(options.s3SocialHistoryMocks ? [
+      'rollback_verify_s3_album_social_migration_history() { echo "S3_SOCIAL_HISTORY:$1" >> "$FIXTURE_EVENTS"; [ "$FIXTURE_MIGRATION_HISTORY_MISMATCH" = false ]; }',
+    ] : []),
     ...(options.trackRollbackOrder ? [
       'wait_backend_internal() { echo BACKEND_INTERNAL_READY >> "$FIXTURE_EVENTS"; }',
     ] : []),
@@ -1172,7 +1176,7 @@ function runApplicationRollback(options = {}) {
       'bash() {',
       ' if [ "$1" = "$APP_ROOT/deploy/selectel/redeploy.sh" ]; then',
       '   shift',
-      `   ( . "${options.redeployFromScriptDir ? '$SCRIPT_DIR/redeploy.sh' : '$APP_ROOT/deploy/selectel/redeploy.sh'}"; ${options.s3Mocks ? 'rollback_control_installed_inputs_match() { :; };' : ''} ${options.maxVideoMocks ? 'rollback_control_installed_inputs_match() { :; }; rollback_verify_max_video_migration_history() { echo present; }; rollback_verify_max_video_recovery_readiness() { echo MAX_READINESS >> "$FIXTURE_EVENTS"; }; rollback_apply_max_video_recovery() { echo MAX_INVERSE >> "$FIXTURE_EVENTS"; };' : ''} ${options.albumHistoryMocks ? 'rollback_verify_albums_migration_history() { echo "ALBUM_HISTORY:$1" >> "$FIXTURE_EVENTS"; return 0; };' : ''} require_command() { case "$1" in curl|flock|git|readlink|stat|docker) return 0 ;; *) command -v "$1" >/dev/null ;; esac; }; acquire_deploy_lock() { :; }; load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }; main "$@" )`,
+      `   ( ${options.s3SocialHistoryMocks ? 'saved_compose=$(declare -f compose);' : ''} . "${options.redeployFromScriptDir ? '$SCRIPT_DIR/redeploy.sh' : '$APP_ROOT/deploy/selectel/redeploy.sh'}"; ${options.s3SocialHistoryMocks ? 'eval "$saved_compose"; rollback_verify_s3_album_social_migration_history() { echo "S3_SOCIAL_HISTORY:$1" >> "$FIXTURE_EVENTS"; [ "$FIXTURE_MIGRATION_HISTORY_MISMATCH" = false ]; };' : ''} ${options.s3Mocks ? 'rollback_control_installed_inputs_match() { :; };' : ''} ${options.maxVideoMocks ? 'rollback_control_installed_inputs_match() { :; }; rollback_verify_max_video_migration_history() { echo present; }; rollback_verify_max_video_recovery_readiness() { echo MAX_READINESS >> "$FIXTURE_EVENTS"; }; rollback_apply_max_video_recovery() { echo MAX_INVERSE >> "$FIXTURE_EVENTS"; };' : ''} ${options.albumHistoryMocks ? 'rollback_verify_albums_migration_history() { echo "ALBUM_HISTORY:$1" >> "$FIXTURE_EVENTS"; return 0; };' : ''} require_command() { case "$1" in curl|flock|git|readlink|stat|docker) return 0 ;; *) command -v "$1" >/dev/null ;; esac; }; acquire_deploy_lock() { :; }; load_runtime_secrets() { export MAX_BOT_TOKEN=synthetic-test-token MAX_WEBHOOK_SECRET=synthetic-test-secret MAX_INBOX_ENCRYPTION_KEY=synthetic-test-key; }; main "$@" )`,
       ' else command bash "$@"; fi',
       '}',
     ] : []),
@@ -3580,4 +3584,279 @@ test('child linked-family recovery pins frozen production inputs to dc26 and rej
     const rejected = profile(mutated)
     assert.notEqual(rejected.status, 0, `changed child production input must not inherit recovery permission: ${relativePath}`)
   }
+})
+
+// Frozen executable source for the approved album-social S3 profile (producer may be squashed).
+const reviewedS3AlbumSocialBlobs = [
+  [
+    "backend/prisma/migrations/20261104110000_album_entry_social/migration.sql",
+    "9351b3ee4d6cb8d955a28340370e593f87fd2df8"
+  ],
+  [
+    "backend/prisma/migrations/20261104113000_album_social_recovery_clear/migration.sql",
+    "caae66f4a05c05c63c3164a1304023e51ec96b73"
+  ],
+  [
+    "backend/prisma/schema.prisma",
+    "ef4e55a10c937d19fbbdefa9e774469175c9b77b"
+  ],
+  [
+    "backend/src/modules/albums/album-social-recovery.integration.test.ts",
+    "e26a64a3a7cf48ed41654394b05c513e15335d0d"
+  ],
+  [
+    "backend/src/modules/albums/album-social.integration.test.ts",
+    "f75b5cf5df8eb2a93842d68ad2d618fe66c15478"
+  ],
+  [
+    "backend/src/modules/albums/application/album-social-ports.ts",
+    "a82e80dc5d18c899573e2969574168486372dc6a"
+  ],
+  [
+    "backend/src/modules/albums/application/album-social-service.ts",
+    "28f1efdc0e576024199e84c3e7c2a12352d65103"
+  ],
+  [
+    "backend/src/modules/albums/index.ts",
+    "990520d367d0b71687c292b9ead592314b127d53"
+  ],
+  [
+    "backend/src/modules/albums/infrastructure/album-social-test-fixtures.ts",
+    "c0ec140a640cef93cd3ca83f5072e8054f605fcc"
+  ],
+  [
+    "backend/src/modules/albums/infrastructure/composed-album-source-catalog.ts",
+    "c3b2e765f713fc31ddffa0ea59c7c38c333b2251"
+  ],
+  [
+    "backend/src/modules/albums/infrastructure/prisma-album-repository.ts",
+    "3c9091540843b458fc7030f8be1a3d768ecffcd9"
+  ],
+  [
+    "backend/src/modules/albums/infrastructure/prisma-album-social-repository.ts",
+    "fa73786d61962fe1179df225aa19f479d3beeea1"
+  ],
+  [
+    "backend/src/modules/albums/transport/routes.ts",
+    "f10100cd5e30359c596ab2c599be7927885bf141"
+  ],
+  [
+    "backend/src/modules/memories/index.ts",
+    "857e936dd1aaa1df11a75a6f215824b1712719cf"
+  ],
+  [
+    "backend/src/modules/memories/infrastructure/comment-authors.ts",
+    "8d3d5ba2b6e549aa83cbf88a6530448cb97b9bfc"
+  ],
+  [
+    "backend/src/modules/memories/infrastructure/prisma-comment-repository.ts",
+    "3b5f1761b5195ec07d648f87d7bbe0e30bfe826f"
+  ],
+  [
+    "bun.lock",
+    "433a6918a86b995a2094b9b2012deee48150e910"
+  ],
+  [
+    "package.json",
+    "688156326c6b583e8403c87618e038297a3fe13e"
+  ],
+  [
+    "packages/contracts/src/album-social.test.ts",
+    "73dc8170d20265348e42e9cf352b2af995027964"
+  ],
+  [
+    "packages/contracts/src/album-social.ts",
+    "89c680d43991cf41045bddabbfc2575acf55268b"
+  ],
+  [
+    "packages/contracts/src/index.ts",
+    "d9f31064b6a9162c04990e5aef4828b906cd23f5"
+  ],
+  [
+    "webapp/e2e/album-social.playwright.config.ts",
+    "eed2ee581f83697eb55b8380dee6c1d849e70d98"
+  ],
+  [
+    "webapp/e2e/album-social.spec.ts",
+    "8031164030347c38d37f519a7a4b117bddea2f1f"
+  ],
+  [
+    "webapp/e2e/albums.spec.ts",
+    "876015e77f8fbcfcd65fc9f33973da89efb35030"
+  ],
+  [
+    "webapp/e2e/fixtures/albums.ts",
+    "58a973caaa2da28398696d6740b6b7e0dc63bb83"
+  ],
+  [
+    "webapp/public/assets/albums/watercolor-bear.v1.webp",
+    "d280558fe3651b4b2d598b0c6a73beef7304b002"
+  ],
+  [
+    "webapp/public/assets/albums/watercolor-hero-hills.v1.webp",
+    "cb3d2d5b10c0a9d5044a51bd796210d201c59683"
+  ],
+  [
+    "webapp/public/assets/albums/watercolor-palette.v1.webp",
+    "c577e6cb5ff531c3d24fa174fcddc0de8892b441"
+  ],
+  [
+    "webapp/public/assets/albums/watercolor-rabbit.v1.webp",
+    "0830cff19228c9d189cd788692974115b4a528c5"
+  ],
+  [
+    "webapp/public/assets/albums/watercolor-sprig.v1.webp",
+    "ac699bd2770231282163010455a119529a9c0b41"
+  ],
+  [
+    "webapp/src/features/albums/AlbumEntryDetail.tsx",
+    "e36f5c3ba67e563ffa5b3b185238510e5efb9f3b"
+  ],
+  [
+    "webapp/src/features/albums/AlbumEntrySocial.tsx",
+    "3137ced4d11887c031ba8755d60e8f1b60e17256"
+  ],
+  [
+    "webapp/src/features/albums/AlbumWatercolor.tsx",
+    "d656cff5fca239dd54570b640ab86a2e10c9b1b4"
+  ],
+  [
+    "webapp/src/features/albums/AlbumsPage.tsx",
+    "58284e7d300d2201ff6ff5319c6666220516fafe"
+  ],
+  [
+    "webapp/src/features/albums/WorkshopGallery.tsx",
+    "500abf49a1ffdb9c1fa1fbfc3d5eb7fadf5049b6"
+  ],
+  [
+    "webapp/src/features/albums/albums.css",
+    "d9fe66f597f48d48f83f5acbab58c6274f6ed537"
+  ],
+  [
+    "webapp/src/features/comments/CommentItem.tsx",
+    "40eb7209027a3319117334c671835527e0b8d65d"
+  ],
+  [
+    "webapp/src/features/comments/CommentsPanel.tsx",
+    "37c63450ec593b77879b277890a271557b73db91"
+  ],
+  [
+    "webapp/src/features/comments/index.ts",
+    "983beb052de53aef1b73e514b0c7ac0c51c6130c"
+  ],
+  [
+    "webapp/src/features/comments/queries.ts",
+    "e64d07298ccddad531c9cbe930654bf9893d18a3"
+  ],
+  [
+    "webapp/src/features/comments/state.ts",
+    "9bcd3497eb3b3eb7098e9213635e4d7bdcf07a75"
+  ],
+  [
+    "webapp/src/features/comments/target-api.ts",
+    "74764606ebabfb8ddbf24d3d052ff87f77a7d969"
+  ],
+  [
+    "webapp/src/features/feed/index.ts",
+    "aa72ccaf96e975344ec076d747bcac58b3b559eb"
+  ],
+  [
+    "webapp/src/features/feed/presentation/MemoryReactions.tsx",
+    "c7cd163c7460a68eccc3a24a953ea0eb83de354c"
+  ],
+  [
+    "webapp/src/features/feed/reaction-queue.ts",
+    "0503f16733bbf4498a8562e90edf89e263266a5e"
+  ],
+  [
+    "webapp/tests/album-comments-adapter.test.ts",
+    "ad827b8333c4fc068ff7b53a2df3dc05e38abef8"
+  ]
+]
+
+function s3AlbumSocialRecoverySource() {
+  if (!fixtureSourceCache.has('s3AlbumSocial')) {
+    fixtureSourceCache.set('s3AlbumSocial', commitFrozenSourceFiles(s3RecoverySource(), reviewedS3AlbumSocialBlobs,
+      'reconstruct exact approved album-social S3 executable source'))
+  }
+  return fixtureSourceCache.get('s3AlbumSocial')
+}
+
+test('S3 album-social exact executable profile rejects unmeasured source changes', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
+  const source = s3AlbumSocialRecoverySource()
+  assert.equal(productionCompatibilityFingerprint(source.root), '3d939c75a4a6ec1ac6582ac7bcec70edb015c694267bad966aa096f4813df8d2')
+  const result = runS3Recovery(source, { action: 'rollback_readiness', s3SocialHistoryMocks: true })
+  assert.equal(result.status, 0, result.output)
+  assert.match(result.events, /S3_SOCIAL_HISTORY:complete/)
+  assert.match(result.events, /S3_READINESS/)
+  assert.doesNotMatch(result.events, /UP:|GATE|INVERSE/)
+  const directory = mkdtempSync(resolve(root, '.scratch', 's3-social-profile-drift-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, source.sha], { cwd: root, encoding: 'utf8' })
+  assert.equal(added.status, 0, added.stderr)
+  fixtureWorktrees.push(directory)
+  const drift = commitSourceChange({ root: directory, sha: source.sha }, 'backend/src/storage/s3-storage.ts',
+    '\n// unmeasured source drift\n', 'reject unmeasured S3 album-social source')
+  assert.notEqual(runS3Recovery(drift, { action: 'rollback_readiness', s3SocialHistoryMocks: true }).status, 0)
+})
+
+test('S3 album-social preparation preserves designated pair only under the locked pre-SQL route; complete recovery retains safeguards', { timeout: 180_000 }, () => {
+  const source = s3AlbumSocialRecoverySource()
+  const prepared = runS3Recovery(source, { action: 'prepare_rollback', runMigration: true, syntheticLock: true,
+    redeployFromScriptDir: true, s3SocialHistoryMocks: true, pending: true,
+    runningBackend: '6de3da8eb4588b3fe3ebe14016ea0c8ae35c69ab', runningWebapp: '6de3da8eb4588b3fe3ebe14016ea0c8ae35c69ab' })
+  assert.equal(prepared.status, 0, prepared.output)
+  assert.match(prepared.events, /S3_SOCIAL_HISTORY:pre-sql/)
+  assert.match(prepared.events, /S3_READINESS/)
+  assert.doesNotMatch(prepared.events, /UP:|GATE|INVERSE/)
+  assert.match(prepared.rollbackEnv, /^PREVIOUS_BACKEND_IMAGE_TAG=26cfab9ce35fd1a42279fc0d9dd3637c340eec6a$/m)
+  assert.equal(prepared.rollbackBackups.length, 1)
+  for (const options of [{ albumPhase: 'pre-sql' }, { albumPhase: 'pre-sql', ciRelease: true },
+    { pending: true }, { historyMismatch: true }, { badImage: true }, { badWebappImage: true }, { badLabel: true },
+    { storageDriver: 'filesystem' }, { s3Error: true }, { s3Versioned: true }]) {
+    const rejected = runS3Recovery(source, { action: 'rollback_readiness', s3SocialHistoryMocks: true, ...options })
+    assert.notEqual(rejected.status, 0, JSON.stringify(options) + rejected.output)
+    assert.doesNotMatch(rejected.events, /UP:|GATE|INVERSE/)
+  }
+  const recovered = runS3Recovery(source, { action: 'rollback', s3SocialHistoryMocks: true })
+  assert.equal(recovered.status, 0, recovered.output)
+  assert.match(recovered.events, /PAIR:26cfab9ce35fd1a42279fc0d9dd3637c340eec6a:26cfab9ce35fd1a42279fc0d9dd3637c340eec6a/)
+  assert.match(recovered.events, /S3_SOCIAL_HISTORY:complete/)
+  assert.doesNotMatch(recovered.events, /INVERSE/)
+  const legacy = runS3Recovery(s3RecoverySource(), { action: 'prepare_rollback', runMigration: true, syntheticLock: true,
+    redeployFromScriptDir: true, s3SocialHistoryMocks: true,
+    runningBackend: '6de3da8eb4588b3fe3ebe14016ea0c8ae35c69ab', runningWebapp: '6de3da8eb4588b3fe3ebe14016ea0c8ae35c69ab' })
+  assert.notEqual(legacy.status, 0)
+  assert.match(legacy.output, /S3 recovery requires the exact completed migration catalog/)
+  assert.doesNotMatch(legacy.events, /UP:|GATE|INVERSE/)
+})
+
+test('S3 album-social pre-SQL validator requires the actual inherited Linux release lock', { timeout: 60_000 }, () => {
+  const script = linuxPath(resolve(root, 'deploy/selectel/redeploy.sh'))
+  const result = runLinuxRoot(`
+set -euo pipefail
+. '${script}'
+SERVER_ROOT=$(mktemp -d /root/s3-social-lock-proof.XXXXXX)
+trap 'rm -rf -- "$SERVER_ROOT"' EXIT
+rollback_migration_catalog_checksums() { printf 'downstream-catalog-not-used\\n'; }
+compose() { printf 'REACHED\\n' >> "$SERVER_ROOT/events"; }
+MEMOLY_PRODUCT_SHA=fixture
+if rollback_verify_s3_album_social_migration_history pre-sql; then exit 21; fi
+SELECTEL_CI_RELEASE=true
+if rollback_verify_s3_album_social_migration_history pre-sql; then exit 22; fi
+SELECTEL_DEPLOY_LOCK_FD=9
+if rollback_verify_s3_album_social_migration_history pre-sql; then exit 23; fi
+exec 9>"$SERVER_ROOT/wrong.lock"
+if rollback_verify_s3_album_social_migration_history pre-sql; then exit 24; fi
+exec 9>&-
+exec 9>"$SERVER_ROOT/.selectel-deploy.lock"
+flock -n 9
+rollback_verify_s3_album_social_migration_history pre-sql
+exec 9>&-
+if rollback_verify_s3_album_social_migration_history pre-sql; then exit 25; fi
+cat "$SERVER_ROOT/events"
+`)
+  assert.equal(result.status, 0, result.stdout + result.stderr)
+  assert.equal(result.stdout.trim(), 'REACHED')
 })

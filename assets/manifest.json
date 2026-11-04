@@ -1836,6 +1836,51 @@
       "alpha": true,
       "bytes": 1380,
       "sha256": "3ffbb822d4061967c1687c9eb7d9207d83c954882c725ae17aa72a98a64a5247"
+    },
+    {
+      "path": "assets/albums/watercolor-palette.v1.webp",
+      "usage": "runtime-illustration",
+      "width": 166,
+      "height": 142,
+      "alpha": false,
+      "bytes": 1168,
+      "sha256": "ad93329853b0f161c3936757d7be9cb0e8bffd3ab3eb10c94af877b8d9eba967"
+    },
+    {
+      "path": "assets/albums/watercolor-bear.v1.webp",
+      "usage": "runtime-illustration",
+      "width": 222,
+      "height": 129,
+      "alpha": false,
+      "bytes": 1558,
+      "sha256": "4ddf12d1ca4ba2c2c7b3288169af9ef23de276560c6cd438e753acb1ff28838b"
+    },
+    {
+      "path": "assets/albums/watercolor-rabbit.v1.webp",
+      "usage": "runtime-illustration",
+      "width": 190,
+      "height": 166,
+      "alpha": false,
+      "bytes": 1166,
+      "sha256": "934164be64dea883d2f8cb9d8bc20b0560f89df6bcf2bf1d581d6b5fdef0b334"
+    },
+    {
+      "path": "assets/albums/watercolor-sprig.v1.webp",
+      "usage": "runtime-illustration",
+      "width": 73,
+      "height": 63,
+      "alpha": false,
+      "bytes": 358,
+      "sha256": "23a688590145b4e8bad2a2b71079ce702e48698a94ca797932964e5359127743"
+    },
+    {
+      "path": "assets/albums/watercolor-hero-hills.v1.webp",
+      "usage": "runtime-illustration",
+      "width": 259,
+      "height": 159,
+      "alpha": false,
+      "bytes": 818,
+      "sha256": "839e69d2f3e2e025c179e5999cf559a135c4d6700f213757eacff782acd5017a"
     }
   ]
 }

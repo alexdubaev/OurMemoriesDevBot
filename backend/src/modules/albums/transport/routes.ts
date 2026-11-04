@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono'
 import type { MiddlewareHandler } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 import { z } from 'zod'
 import {
   albumParamsSchema,
@@ -14,19 +15,26 @@ import {
   reorderAlbumEntryRequestSchema,
   updateAlbumEntryRequestSchema,
   updateAlbumRequestSchema,
+  albumEntryCommentParamsSchema,
+  albumEntryDiscussionGenerationQuerySchema,
+  createAlbumEntryCommentRequestSchema,
+  updateAlbumEntryCommentRequestSchema,
+  listAlbumEntryCommentsQuerySchema,
+  setAlbumEntryReactionRequestSchema,
 } from '@web-app-demo/contracts'
 import type { AuthHttpEnv } from '../../auth'
 import type { AlbumService } from '../application/album-service'
+import type { AlbumSocialService } from '../application/album-social-service'
 import { AlbumFailure } from '../domain/errors'
 import { MemoryFailure } from '../../memories'
-import { requestIdFrom, validationErrorResponse } from '../../../http/errors'
+import { errorResponse, requestIdFrom, validationErrorResponse } from '../../../http/errors'
 
 const familyParams = z.object({ familyId: z.uuid().toLowerCase() }).strict()
 const entryParams = albumEntryParamsSchema
 const versionBody = z.object({ expectedVersion: z.number().int().positive() }).strict()
 const scope = (user: AuthHttpEnv['Variables']['user'], familyId: string) => ({ familyId, principal: { userId: user.id, sessionId: user.sessionId } })
 
-export function createAlbumRoutes({ requireAuth, service }: { requireAuth: MiddlewareHandler<AuthHttpEnv>; service: AlbumService }) {
+export function createAlbumRoutes({ requireAuth, service, social }: { requireAuth: MiddlewareHandler<AuthHttpEnv>; service: AlbumService; social: AlbumSocialService }) {
   const routes = new Hono<AuthHttpEnv>()
   routes.use('/families/:familyId/albums/*', async (c, next) => { c.header('Cache-Control', 'private, no-store'); await next() })
   routes.use('/families/:familyId/albums', async (c, next) => { c.header('Cache-Control', 'private, no-store'); await next() })
@@ -34,6 +42,11 @@ export function createAlbumRoutes({ requireAuth, service }: { requireAuth: Middl
   routes.use('/families/:familyId/albums/*', requireAuth)
   routes.use('/families/:familyId/albums', requireAuth)
   routes.use('/families/:familyId/media-picker', requireAuth)
+  const discussionPath = '/families/:familyId/albums/:albumId/entries/:entryId'
+  const discussionBodyLimit = bodyLimit({ maxSize: 16_384, onError: (c) => c.json(errorResponse('BAD_REQUEST', 'Слишком большой запрос', requestIdFrom(c)), 413) })
+  routes.use(`${discussionPath}/comments`, discussionBodyLimit)
+  routes.use(`${discussionPath}/comments/*`, discussionBodyLimit)
+  routes.use(`${discussionPath}/reaction`, discussionBodyLimit)
 
   routes.get('/families/:familyId/albums', (c) => run(c, async () => {
     const p = familyParams.parse(c.req.param())
@@ -111,7 +124,41 @@ export function createAlbumRoutes({ requireAuth, service }: { requireAuth: Middl
     await service.deleteEntry(scope(c.var.user, p.familyId), p.albumId, p.entryId, input['if-match'])
     return c.body(null, 204)
   }))
+  routes.get(`${discussionPath}/discussion`, (c) => run(c, async () => {
+    const p = entryParams.parse(c.req.param())
+    return c.json(await social.discussion(scope(c.var.user, p.familyId), p.albumId, p.entryId))
+  }))
+  routes.get(`${discussionPath}/comments`, (c) => run(c, async () => {
+    const p = entryParams.parse(c.req.param())
+    return c.json(await social.list(scope(c.var.user, p.familyId), p.albumId, p.entryId, listAlbumEntryCommentsQuerySchema.parse(c.req.query())))
+  }))
+  routes.post(`${discussionPath}/comments`, (c) => run(c, async () => {
+    const p = entryParams.parse(c.req.param())
+    const key = idempotencyKeyHeadersSchema.parse({ 'idempotency-key': c.req.header('idempotency-key') })['idempotency-key']
+    const result = await social.create(scope(c.var.user, p.familyId), p.albumId, p.entryId, createAlbumEntryCommentRequestSchema.parse(await socialBody(c)), key)
+    return c.json({ comment: result.comment, summary: result.summary }, result.replayed ? 200 : 201)
+  }))
+  routes.patch(`${discussionPath}/comments/:commentId`, (c) => run(c, async () => {
+    const p = albumEntryCommentParamsSchema.parse(c.req.param())
+    const input = updateAlbumEntryCommentRequestSchema.parse(await socialBody(c))
+    return c.json(await social.update(scope(c.var.user, p.familyId), { ...p, discussionGeneration: input.discussionGeneration }, p.commentId, input))
+  }))
+  routes.delete(`${discussionPath}/comments/:commentId`, (c) => run(c, async () => {
+    const p = albumEntryCommentParamsSchema.parse(c.req.param())
+    const query = albumEntryDiscussionGenerationQuerySchema.parse(c.req.query())
+    const headers = ifMatchVersionHeadersSchema.parse({ 'if-match': c.req.header('if-match') })
+    return c.json(await social.delete(scope(c.var.user, p.familyId), { ...p, ...query }, p.commentId, headers['if-match']))
+  }))
+  routes.put(`${discussionPath}/reaction`, (c) => run(c, async () => {
+    const p = entryParams.parse(c.req.param())
+    return c.json(await social.setReaction(scope(c.var.user, p.familyId), p.albumId, p.entryId, setAlbumEntryReactionRequestSchema.parse(await socialBody(c))))
+  }))
   return routes
+}
+
+async function socialBody(c: Context<AuthHttpEnv>): Promise<unknown> {
+  try { return await c.req.json() }
+  catch { throw new AlbumFailure('invalid_input', 'Некорректный JSON запроса') }
 }
 
 async function run(c: Context<AuthHttpEnv>, operation: () => Promise<Response>) {

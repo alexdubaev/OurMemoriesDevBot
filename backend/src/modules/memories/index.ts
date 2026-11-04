@@ -23,6 +23,7 @@ import { createCommentRoutes } from './transport/comment-routes'
 export { commentPrivacyMiddleware } from './transport/comment-routes'
 export { CommentService } from './application/comment-service'
 export type { CommentRepository, CommentPosition } from './application/comment-ports'
+export { projectCommentAuthors } from './infrastructure/comment-authors'
 
 export function createMemoriesModule({
   db,

@@ -77,6 +77,7 @@ test('album deletion confirmations work without native dialogs', async ({ page }
     expect(await original.body()).toEqual(photoBytes)
   }
 
+  await page.getByLabel('Меню альбома', { exact: true }).click()
   await page.getByRole('button', { name: 'Настройки альбома', exact: true }).click()
   await page.getByRole('button', { name: 'Удалить альбом', exact: true }).click()
   const albumConfirmation = page.getByRole('alertdialog')
@@ -162,6 +163,7 @@ test('MAX authenticated album cover choices save and complete the picker', async
     const directory = process.env.MEMOLY_ALBUM_COVER_EVIDENCE_DIR
     if (directory) await page.screenshot({ fullPage: false, path: `${directory}/${name}.png` })
   }
+  await page.getByLabel('Меню альбома', { exact: true }).click()
   await page.getByRole('button', { name: 'Настройки альбома', exact: true }).click()
   await page.getByRole('button', { name: 'Выбрать обложку', exact: true }).click()
   await expect(page.locator('[data-albums-route="cover"]')).toBeVisible()
@@ -199,6 +201,7 @@ test('MAX authenticated album cover choices save and complete the picker', async
   await capture('catalog-after-manual-reload')
   await catalogCard.click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await page.getByLabel('Меню альбома', { exact: true }).click()
   await page.getByRole('button', { name: 'Настройки альбома', exact: true }).click()
   await page.getByRole('button', { name: 'Выбрать обложку', exact: true }).click()
   const autoResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/v1/families/${familyId}/albums/${album.id}`) && response.request().method() === 'PATCH')
@@ -501,7 +504,7 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   ]) {
     await page.locator('.albums-card').filter({ hasText: album.title }).click()
     await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
-    await expect(page.locator('.albums-intro h1')).toHaveText(album.title)
+    await expect(page.getByRole('heading', { name: album.title, exact: true })).toBeVisible()
     await capture(`inner-${album.kind}-390`)
     await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
     await expect(page.locator('[data-albums-route="catalog"]')).toBeVisible()
@@ -540,7 +543,7 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await expect(page.locator('.albums-timeline .albums-entry-card')).toHaveCount(12)
   const yearIntro = page.locator('.albums-year-intro')
   await expect(yearIntro).toContainText('Миша')
-  await expect(yearIntro).toContainText('Первый год Миши')
+  await expect(page.getByRole('heading', { name: 'Первый год Миши', exact: true })).toBeVisible()
   await expect(yearIntro).toContainText('0 из 12 месяцев заполнено')
   await expect(yearIntro.locator('progress')).toHaveJSProperty('value', 0)
   await capture('year-empty-390')
@@ -561,6 +564,7 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   await expect(page.locator('.albums-timeline .albums-entry-row.is-filled')).toHaveCount(1)
 
+  await page.getByLabel('Меню альбома', { exact: true }).click()
   await page.getByRole('button', { name: 'Настройки альбома' }).click()
   await page.getByRole('button', { name: 'Выбрать обложку', exact: true }).click()
   await expect(page.locator('[data-albums-route="cover"]')).toBeVisible()
@@ -597,11 +601,12 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   const albumCard = page.locator('.albums-card').filter({ hasText: 'Первый год Миши' })
   await albumCard.click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  await page.getByLabel('Меню альбома', { exact: true }).click()
   await page.getByRole('button', { name: 'Настройки альбома' }).click()
   await page.getByLabel('Название альбома').fill('Первый год Миши: первые двенадцать месяцев нашей семейной истории')
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
-  await expect(yearIntro).toContainText('Первый год Миши: первые двенадцать месяцев нашей семейной истории')
+  await expect(page.getByRole('heading', { name: 'Первый год Миши: первые двенадцать месяцев нашей семейной истории', exact: true })).toBeVisible()
   await page.setViewportSize({ width: 320, height: 844 })
   await page.evaluate(() => document.documentElement.style.setProperty('font-size', '32px', 'important'))
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -707,6 +712,7 @@ test('2000 works page progressively with bounded DOM, stable zoom anchor and sou
   const requests = await page.evaluate(() => (window as unknown as { __albumsEvidence: { log: { path: string }[]; rawPaths: string[] } }).__albumsEvidence)
   expect(requests.log.filter((entry) => /\/entries\?/.test(entry.path)).length).toBeGreaterThanOrEqual(3)
   expect(requests.rawPaths.every((path) => path.includes('variant=preview'))).toBe(true)
+  expect(requests.log.filter((entry) => /\/(discussion|comments|reaction)(?:\?|$)/.test(entry.path))).toEqual([])
   await page.evaluate(() => { const wall = document.querySelector('.albums-workshop-wall')!; window.scrollTo(0, wall.getBoundingClientRect().top + window.scrollY + (wall as HTMLElement).offsetHeight * .4) })
   await page.waitForTimeout(80)
   const anchor = await page.evaluate(() => {
@@ -747,7 +753,7 @@ test('stale album detail and old account responses cannot replace the current ro
   await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
   await page.getByRole('button', { name: /Мастерская/ }).click()
   await page.waitForTimeout(1100)
-  await expect(page.locator('.albums-intro h1')).toHaveText('Мастерская')
+  await expect(page.getByRole('heading', { name: 'Мастерская', exact: true })).toBeVisible()
   await page.evaluate(() => (window as unknown as { __selectedFamilyChangeAccount: () => void }).__selectedFamilyChangeAccount())
   await expect(page.locator('[data-navigation-surface="feed"]')).toBeVisible()
   await expect(page.locator('[data-navigation-surface="albums"]')).toHaveCount(0)

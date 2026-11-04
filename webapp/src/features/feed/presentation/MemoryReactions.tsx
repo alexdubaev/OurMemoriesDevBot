@@ -1,7 +1,7 @@
 import type { MemoryReaction } from '@web-app-demo/contracts'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactElement } from 'react'
 
-import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Typography } from '@/components/typography'
 import { WebpIcon } from '@/components/WebpIcon'
 import { readUiVersion } from '@/features/ui-version'
@@ -16,7 +16,7 @@ const reactionOptions: Array<{ value: MemoryReaction; emoji: string; label: stri
   { value: 'clap', emoji: '👏', label: 'Аплодисменты' },
 ]
 
-export function MemoryReactions({ counts, current, interactive, onSelect, open, point, onOpenChange, onHaptic, returnFocusRef, onComments, commentCount }: {
+export function MemoryReactions({ counts, current, interactive, onSelect, open, point, onOpenChange, onHaptic, returnFocusRef, onComments, commentCount, trigger }: {
   counts: Partial<Record<MemoryReaction, number>>
   current: MemoryReaction | null
   interactive: boolean
@@ -28,6 +28,8 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
   returnFocusRef: React.RefObject<HTMLElement | null>
   onComments?: (trigger: HTMLButtonElement) => void
   commentCount?: number
+  /** A real trigger supports click-based album controls; feed keeps its long-press anchor. */
+  trigger?: ReactElement
 }) {
   const firstChoice = useRef<HTMLButtonElement>(null)
   const uiV2 = readUiVersion() === 'v2'
@@ -61,8 +63,8 @@ export function MemoryReactions({ counts, current, interactive, onSelect, open, 
       {onComments ? <CommentAction count={commentCount} onClick={onComments} /> : null}
     </div> : null}
     {interactive ? <Popover onOpenChange={onOpenChange} open={open}>
-      <PopoverAnchor asChild><span aria-hidden="true" className="reaction-anchor" style={{ left: point.x, top: point.y }} /></PopoverAnchor>
-      <PopoverContent align="center" aria-label="Выбрать реакцию" className="reaction-picker" collisionPadding={collisionPadding()} onCloseAutoFocus={(event) => { event.preventDefault(); if (interactive && returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true }) }} onEscapeKeyDown={() => onOpenChange(false)} onOpenAutoFocus={(event) => event.preventDefault()} onPointerDownOutside={() => onOpenChange(false)} side="top" sideOffset={14}>
+      <>{trigger ? <PopoverTrigger asChild>{trigger}</PopoverTrigger> : <PopoverAnchor asChild><span aria-hidden="true" className="reaction-anchor" style={{ left: point.x, top: point.y }} /></PopoverAnchor>}</>
+      <PopoverContent align="center" aria-label="Выбрать реакцию" className="reaction-picker" collisionPadding={collisionPadding()} onCloseAutoFocus={(event) => { event.preventDefault(); if (interactive && returnFocusRef.current?.isConnected) returnFocusRef.current.focus({ preventScroll: true }) }} onEscapeKeyDown={() => onOpenChange(false)} onOpenAutoFocus={(event) => event.preventDefault()} onPointerDownOutside={trigger ? undefined : () => onOpenChange(false)} side="top" sideOffset={14}>
         <div aria-label="Реакции" className="reaction-picker-options" role="group" onKeyDown={(event) => {
           const choices = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button')]
           const index = choices.indexOf(event.target as HTMLButtonElement)

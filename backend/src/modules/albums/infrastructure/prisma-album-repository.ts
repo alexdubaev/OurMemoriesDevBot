@@ -248,6 +248,9 @@ export class PrismaAlbumRepository implements AlbumRepository {
         sourceCount: await countAvailableSources(tx, this.sourceCatalog, scope, entryId),
       }
       if (album.kind === 'events' && !(values.title?.trim() && (values.caption?.trim() || values.sourceCount > 0))) throw new AlbumFailure('invalid_input', 'Событию нужны название и описание либо хотя бы один источник')
+      // Distinguish an ordinary edit (including an intentionally empty month)
+      // from the exact pre-social clear mutation recognized by the DB fence.
+      await tx.$queryRaw`SELECT set_config('memoly.album_entry_edit', 'preserve', true)`
       await tx.albumEntry.update({ where: { id: entryId }, data: {
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.caption !== undefined ? { caption: input.caption } : {}),
@@ -270,8 +273,11 @@ export class PrismaAlbumRepository implements AlbumRepository {
       if (album.kind !== 'year') throw new AlbumFailure('invalid_input', 'Очистка содержимого доступна только для месяца первого года')
       await lockEntry(tx, scope.familyId, albumId, entryId)
       await tx.albumEntrySource.deleteMany({ where: { familyId: scope.familyId, albumId, entryId } })
+      const clearedAt = new Date()
+      await tx.albumEntryComment.updateMany({ where: { familyId: scope.familyId, albumId, entryId, deletedAt: null }, data: { body: '', deletedAt: clearedAt, updatedAt: clearedAt, version: { increment: 1 } } })
+      await tx.albumEntryReaction.deleteMany({ where: { familyId: scope.familyId, albumId, entryId } })
       await tx.albumEntry.update({ where: { id: entryId }, data: {
-        title: null, caption: null, childQuote: null, category: null, dateValue: null, datePrecision: 'unknown', version: { increment: 1 },
+        title: null, caption: null, childQuote: null, category: null, dateValue: null, datePrecision: 'unknown', version: { increment: 1 }, discussionGeneration: { increment: 1 },
       } })
       await tx.album.update({ where: { id: albumId }, data: { version: { increment: 1 } } })
     })

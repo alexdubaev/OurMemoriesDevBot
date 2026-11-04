@@ -1,11 +1,12 @@
 /* eslint-disable typographyPolicy/use-typography-component -- semantic gallery headings share the album stylesheet. */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AlbumEntryDto } from '@web-app-demo/contracts'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { coverSource, visibleTiles, workshopLayout, zoomLevel, zoomLevels } from './model'
 import { SourcePreview } from './SourcePreview'
+import { AlbumWatercolor } from './AlbumWatercolor'
 
-export function WorkshopGallery({ entries, accountId, scopeKey, transport, active, focusId, focusTop, level, onFocusRestored, onLevelChange, onOpen }: { entries: AlbumEntryDto[]; accountId: string; scopeKey: string; transport: AuthenticatedTransport; active: boolean; focusId: string | null; focusTop: number | null; level: number; onFocusRestored: () => void; onLevelChange: (level: number) => void; onOpen: (entry: AlbumEntryDto, trigger: HTMLElement) => void }) {
+export function WorkshopGallery({ controls, entries, accountId, scopeKey, transport, active, focusId, focusTop, level, onFocusRestored, onLevelChange, onOpen }: { controls: ReactNode; entries: AlbumEntryDto[]; accountId: string; scopeKey: string; transport: AuthenticatedTransport; active: boolean; focusId: string | null; focusTop: number | null; level: number; onFocusRestored: () => void; onLevelChange: (level: number) => void; onOpen: (entry: AlbumEntryDto, trigger: HTMLElement) => void }) {
   const [viewport, setViewport] = useState({ top: 0, height: 844, width: 358 })
   const root = useRef<HTMLDivElement>(null)
   const anchor = useRef<{ id: string; screenY: number; fraction: number } | null>(null)
@@ -87,10 +88,9 @@ export function WorkshopGallery({ entries, accountId, scopeKey, transport, activ
     onFocusRestored()
   }, [focusId, focusTop, layout, measure, onFocusRestored, rendered])
   return <>
-    <div className="albums-workshop-zoom"><strong>Все работы</strong><div><button aria-label="Уменьшить работы" disabled={level === 0} onClick={() => changeZoom(zoomLevel(level, -1))} type="button">−</button><output aria-live="polite">{zoomLevels[level].label} {zoomLevels[level].columns}</output><button aria-label="Увеличить работы" disabled={level === 2} onClick={() => changeZoom(zoomLevel(level, 1))} type="button">+</button></div></div>
-    <p className="albums-muted albums-gesture-hint">Два пальца меняют масштаб · один прокручивает</p>
+    <div className="albums-workshop-zoom">{controls}<div><button aria-label="Уменьшить работы" disabled={level === 0} onClick={() => changeZoom(zoomLevel(level, -1))} type="button">−</button><output aria-live="polite">{zoomLevels[level].label} {zoomLevels[level].columns}</output><button aria-label="Увеличить работы" disabled={level === 2} onClick={() => changeZoom(zoomLevel(level, 1))} type="button">+</button></div></div>
     <div aria-label="Галерея работ" className="albums-workshop-wall" data-columns={zoomLevels[level].columns} ref={root} style={{ height: layout.height }}>
-      {layout.headings.filter((heading) => heading.y >= viewport.top - 100 && heading.y < viewport.top + viewport.height + 500).map((heading) => <h2 className="albums-workshop-heading" key={`${heading.title}:${heading.y}`} style={{ top: heading.y }}>{heading.title}</h2>)}
+      {layout.headings.filter((heading) => heading.y >= viewport.top - 100 && heading.y < viewport.top + viewport.height + 500).map((heading) => <h2 className="albums-workshop-heading" key={`${heading.title}:${heading.y}`} style={{ top: heading.y }}>{heading.title}{heading === layout.headings[0] ? <AlbumWatercolor className="albums-gallery-bear" name="bear" /> : null}</h2>)}
       {rendered.map((tile) => { const entry = entries[tile.index]; return <button aria-label={entry.title || `Работа · ${entry.date.value ?? 'без даты'}`} className="albums-workshop-tile" data-album-tile={entry.id} key={entry.id} onClick={(event) => { if (performance.now() < suppressUntil.current) { event.preventDefault(); return } onOpen(entry, event.currentTarget) }} style={{ left: tile.x, top: tile.y, width: tile.width, height: tile.height }} type="button"><SourcePreview accountId={accountId} active={active} scopeKey={scopeKey} source={coverSource(entry.sources)} transport={transport} /></button> })}
     </div>
   </>

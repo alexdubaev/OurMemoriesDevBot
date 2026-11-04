@@ -6,6 +6,8 @@ import type { AuthHttpEnv } from '../auth'
 import type { AlbumMemorySourceCatalog } from '../memories'
 import { createPrismaAlbumPhotoSourceCatalog } from '../media'
 import { AlbumService } from './application/album-service'
+import { AlbumSocialService } from './application/album-social-service'
+import { PrismaAlbumSocialRepository } from './infrastructure/prisma-album-social-repository'
 import { PrismaAlbumRepository } from './infrastructure/prisma-album-repository'
 import { createAlbumRoutes } from './transport/routes'
 import { createAlbumMemorySourceCatalog } from '../memories'
@@ -17,7 +19,8 @@ export function createAlbumsModule({ db, idempotencyExecutor, idempotencySecret,
   const catalog = sourceCatalog ?? createComposedAlbumSourceCatalog(createAlbumMemorySourceCatalog(), createPrismaAlbumPhotoSourceCatalog())
   const repository = new PrismaAlbumRepository(db, idempotencyExecutor, catalog, notificationPilot)
   const service = new AlbumService(repository, idempotencySecret)
-  return { routes: createAlbumRoutes({ requireAuth, service }), service, repository }
+  const social = new AlbumSocialService(new PrismaAlbumSocialRepository(db, idempotencyExecutor, catalog), idempotencySecret)
+  return { routes: createAlbumRoutes({ requireAuth, service, social }), service, repository }
 }
 
 export { AlbumService } from './application/album-service'

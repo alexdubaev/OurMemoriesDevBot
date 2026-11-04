@@ -1,5 +1,4 @@
 import {
-  avatarCropSchema,
   type CommentDto,
   type CommentSummary,
   type CreateCommentRequest,
@@ -16,6 +15,7 @@ import type {
   CommentRepository,
 } from '../application/comment-ports'
 import { MemoryFailure } from '../domain/errors'
+import { projectCommentAuthors } from './comment-authors'
 
 type CommentRow = {
   id: string
@@ -283,32 +283,8 @@ async function project(
   familyOwnerId: string,
 ): Promise<CommentDto[]> {
   if (!rows.length) return []
-  const members = await tx.familyMember.findMany({
-    where: {
-      familyId: scope.familyId,
-      userId: { in: [...new Set(rows.map((row) => row.authorId))] },
-    },
-    select: {
-      userId: true,
-      familyDisplayName: true,
-      revokedAt: true,
-      user: {
-        select: {
-          displayName: true,
-          avatars: {
-            where: { state: 'ready' },
-            select: { id: true, avatarCrop: true },
-            take: 1,
-          },
-        },
-      },
-    },
-  })
-  const byId = new Map(members.map((member) => [member.userId, member]))
+  const authors = await projectCommentAuthors(tx, scope.familyId, rows.map((row) => row.authorId))
   return rows.map((row) => {
-    const member = byId.get(row.authorId),
-      avatar = member && !member.revokedAt ? member.user.avatars[0] : undefined
-    const crop = avatarCropSchema.safeParse(avatar?.avatarCrop)
     return {
       id: row.id,
       familyId: row.familyId,
@@ -321,17 +297,7 @@ async function project(
         edit: row.authorId === scope.principal.userId,
         delete: row.authorId === scope.principal.userId || familyOwnerId === scope.principal.userId,
       },
-      author: {
-        id: row.authorId,
-        name:
-          member?.familyDisplayName?.trim() ||
-          member?.user.displayName?.trim() ||
-          'Участник семьи',
-        avatarPath: avatar
-          ? `/api/v1/families/${scope.familyId}/media/avatars/${row.authorId}/${avatar.id}/content`
-          : null,
-        avatarCrop: avatar && crop.success ? crop.data : null,
-      },
+      author: authors.get(row.authorId)!,
     }
   })
 }

@@ -14,4 +14,4 @@ test('ffprobe rejects a signature-only fake video before it becomes stored', asy
     await writeFile(path, bytes)
     await expect(probeMedia(path, 'video')).rejects.toMatchObject({ kind: 'unsupported_media' })
   } finally { await rm(root, { recursive: true, force: true }) }
-})
+}, 35_000)

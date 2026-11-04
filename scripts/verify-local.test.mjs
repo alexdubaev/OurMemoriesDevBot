@@ -273,6 +273,20 @@ describe('risk based verification', () => {
     expect(classifyChanges(['scripts/repo-env.mjs'])).toBe('full')
   })
 
+  test('reviewed exact metadata and album browser infrastructure require FULL without accepting adjacent unknown files', () => {
+    const paths = ['.autopilot/2026-10-23-wishlist/state.js', '.autopilot/dashboard.html', '.autopilot/state.js',
+      'assets/manifest.json', 'webapp/e2e/album-social.playwright.config.ts', 'webapp/e2e/fixtures/albums.ts']
+    for (const path of paths) {
+      expect(classifyChanges([path])).toBe('full')
+      expect(() => selectProfile({ paths: [path], requested: 'standard' })).toThrow('Profile downgrade refused')
+    }
+    for (const path of ['.autopilot/another-task/state.js', '.autopilot/new-dashboard.html', '.autopilot/state-other.js',
+      'assets/other-manifest.json', 'webapp/e2e/new-journey.playwright.config.ts', 'webapp/e2e/fixtures/new-albums.ts']) {
+      expect(classifyChanges([path])).toBe('review-required')
+      expect(() => selectProfile({ paths: [...paths, path], requested: 'full' })).toThrow('REVIEW_REQUIRED')
+    }
+  })
+
   test('a requested profile cannot lower the inferred minimum', () => {
     expect(() => selectProfile({ paths: ['backend/src/modules/auth/login.ts'], requested: 'fast' }))
       .toThrow('Profile downgrade refused')
@@ -627,5 +641,5 @@ describe('risk based verification', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
-  })
+  }, 30_000)
 })

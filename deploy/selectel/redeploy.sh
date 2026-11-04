@@ -678,7 +678,11 @@ migrate() {
 	else
 		backup_database
 	fi
-	if git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e \
+	if [ "$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$S3_RECOVERY_SHA" || true)" = s3-album-social ]; then
+		# This exact completed baseline already contains the historical MAX migration.
+		rollback_verify_s3_album_social_migration_history pre-sql ||
+			die 'S3 album social migration requires the exact reviewed pre-SQL migration prefix'
+	elif git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e \
 		"$MEMOLY_PRODUCT_SHA:backend/prisma/migrations/20261025120000_max_video_legacy_retention/migration.sql" 2>/dev/null; then
 		max_video_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA") ||
 			die 'MAX video migration requires the exact reviewed source compatibility profile'
@@ -806,7 +810,8 @@ rollback_source_compatibility_profile() {
 		26cfab9ce35fd1a42279fc0d9dd3637c340eec6a)
 			# Independent S3-safe baseline. Never grant the old d299 pair S3 access.
 			exact_compatibility_attestations=("$S3_RECOVERY_SHA:$S3_RECOVERY_RUNTIME_FINGERPRINT:1540dbfda304a7bc05c96930702ef585adc0bae167a8dfbb7d85e9d64e67ed59:s3"
-				"$S3_RECOVERY_SHA:$S3_RECOVERY_RUNTIME_FINGERPRINT:852e88d542cd38550bcf8b0fab48701a6691be7a20469f9ed807fed4853fe7db:s3") ;;
+				"$S3_RECOVERY_SHA:$S3_RECOVERY_RUNTIME_FINGERPRINT:852e88d542cd38550bcf8b0fab48701a6691be7a20469f9ed807fed4853fe7db:s3"
+				"$S3_RECOVERY_SHA:$S3_RECOVERY_RUNTIME_FINGERPRINT:3d939c75a4a6ec1ac6582ac7bcec70edb015c694267bad966aa096f4813df8d2:s3-album-social") ;;
 		e383d79269a3595f4c6cabedf167335aea042cf3)
 			attestations=("3fce2739205da927b95eb3379b1d066b61282965:3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857:candidate") ;;
 		3fce2739205da927b95eb3379b1d066b61282965)
@@ -894,7 +899,7 @@ rollback_source_compatibility_profile() {
 			control) rollback_control_host_inputs_match "$revision" || continue ;;
 			max-video) rollback_max_video_host_inputs_match "$revision" || continue ;;
 			max-video-retirement) rollback_max_video_retirement_host_inputs_match "$revision" || continue ;;
-			s3) rollback_s3_host_inputs_match "$revision" || continue ;;
+			s3|s3-album-social) rollback_s3_host_inputs_match "$revision" || continue ;;
 		esac
 			printf '%s\n' "$profile"
 			return 0
@@ -1033,6 +1038,69 @@ rollback_control_installed_inputs_match() {
 		[ "$actual" = "$expected" ] || return 1
 	done
 	rollback_assert_root_owned_path "$control_root/metrics/snapshot.json" file 0644 || return 1
+}
+
+rollback_verify_s3_album_social_migration_history() {
+	local phase=$1 baseline_catalog candidate_catalog lock_path fd_target
+	case "$phase" in
+		complete) ;;
+		pre-sql)
+			[ "${SELECTEL_CI_RELEASE:-false}" = true ] || return 1
+			[[ "${SELECTEL_DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] || return 1
+			lock_path=$(readlink -f -- "$SERVER_ROOT/.selectel-deploy.lock") || return 1
+			fd_target=$(readlink "/proc/self/fd/$SELECTEL_DEPLOY_LOCK_FD" 2>/dev/null || true)
+			[ "$fd_target" = "$lock_path" ] || return 1
+			{ true >&"$SELECTEL_DEPLOY_LOCK_FD"; } 2>/dev/null || return 1
+			flock -n "$SELECTEL_DEPLOY_LOCK_FD" || return 1 ;;
+		*) return 1 ;;
+	esac
+	baseline_catalog=$(rollback_migration_catalog_checksums 6de3da8eb4588b3fe3ebe14016ea0c8ae35c69ab) || return 1
+	candidate_catalog=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") || return 1
+	MEMOLY_S3_SOCIAL_BASELINE="$baseline_catalog" MEMOLY_S3_SOCIAL_CANDIDATE="$candidate_catalog" MEMOLY_S3_SOCIAL_PHASE="$phase" \
+	compose run --rm --no-deps -e "MEMOLY_S3_SOCIAL_BASELINE=$baseline_catalog" \
+		-e "MEMOLY_S3_SOCIAL_CANDIDATE=$candidate_catalog" -e "MEMOLY_S3_SOCIAL_PHASE=$phase" \
+		backend bun -e "$(cat <<'MEMOLY_S3_SOCIAL_HISTORY_JS'
+import { Client } from 'pg';
+function parse(value) {
+  const result = [];
+  for (const line of (value ?? '').trim().split('\n')) {
+    const [name, lf, crlf, ...extra] = line.split(':');
+    if (extra.length || !/^\d+_[a-z0-9_]+$/.test(name ?? '') ||
+        !/^[0-9a-f]{64}$/.test(lf ?? '') || !/^[0-9a-f]{64}$/.test(crlf ?? '') ||
+        result.some(row => row.name === name)) throw Error('invalid catalog');
+    result.push({ name, lf, crlf });
+  }
+  return result;
+}
+const db = new Client({ connectionString: process.env.DATABASE_URL });
+try {
+  const baseline = parse(process.env.MEMOLY_S3_SOCIAL_BASELINE);
+  const candidate = parse(process.env.MEMOLY_S3_SOCIAL_CANDIDATE);
+  const phase = process.env.MEMOLY_S3_SOCIAL_PHASE;
+  const suffix = [{"name":"20261104110000_album_entry_social","lf":"8c8f1c1fc399a7872a65e33a3aafd48b03e8353d12fe7860c3e96c4ea0b3134e","crlf":"726fe5d5cbb21e9c9270c9d621ca7f52170eb337c7e3c565f48e0c6436750ebe"},{"name":"20261104113000_album_social_recovery_clear","lf":"d028ff8bdb7baf997056bdb4f4d7cc11ee9011327c9c63101c357de34c694ee2","crlf":"57b98f0a23945315cf619ca1bc5fd4916c46fc3a55db2f9585391c8ce1774f0f"}];
+  if (!['pre-sql', 'complete'].includes(phase) || baseline.length !== 63 || candidate.length !== 65 ||
+      baseline.some((row, i) => JSON.stringify(row) !== JSON.stringify(candidate[i])) ||
+      suffix.some((row, i) => JSON.stringify(row) !== JSON.stringify(candidate[63 + i]))) throw Error('unmeasured catalog');
+  await db.connect();
+  await db.query('BEGIN READ ONLY');
+  const { rows } = await db.query('SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name');
+  if (![63, 64, 65].includes(rows.length) || (phase === 'complete' && rows.length !== 65) ||
+      rows.some((row, i) => !row.finished_at || row.rolled_back_at || row.migration_name !== candidate[i].name ||
+        ![candidate[i].lf, candidate[i].crlf].includes(row.checksum))) throw Error('invalid exact prefix ledger');
+  const { rows: states } = await db.query(`SELECT
+    to_regclass('public.album_entry_comments') IS NOT NULL AS comments,
+    to_regclass('public.album_entry_reactions') IS NOT NULL AS reactions,
+    EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_entries' AND column_name='discussion_generation' AND data_type='integer' AND is_nullable='NO' AND column_default='1') AS generation,
+    EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid WHERE t.tgrelid='public.album_entries'::regclass AND t.tgname='album_entries_legacy_clear_discussion' AND NOT t.tgisinternal AND t.tgenabled='O' AND p.proname='protect_album_discussion_on_legacy_month_clear') AS trigger,
+    to_regprocedure('public.protect_album_discussion_on_legacy_month_clear()') IS NOT NULL AS function`);
+  const state = states[0], social = rows.length >= 64, recovery = rows.length === 65;
+  if (!state || state.comments !== social || state.reactions !== social || state.generation !== social ||
+      state.trigger !== recovery || state.function !== recovery) throw Error('schema and ledger disagree');
+  await db.query('COMMIT');
+} catch { process.exitCode = 1; }
+finally { await db.end().catch(() => {}); }
+MEMOLY_S3_SOCIAL_HISTORY_JS
+)" >/dev/null 2>&1
 }
 
 rollback_verify_migration_history() {
@@ -1624,7 +1692,7 @@ verify_application_rollback() {
 	fi
 	target_runtime=$(rollback_runtime_fingerprint "$target_runtime_revision") || die 'cannot fingerprint rollback target runtime'
 	[ "$target_runtime" = "$expected_target_runtime" ] || die 'rollback target runtime differs from the verified compatibility target'
-	if [ "$profile" = control ] || [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ] || [ "$profile" = s3 ]; then
+	if [ "$profile" = control ] || [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ] || [ "$profile" = s3 ] || [ "$profile" = s3-album-social ]; then
 		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
 			backend/Dockerfile bunfig.toml \
 			deploy/selectel/Dockerfile.webapp deploy/selectel/Caddyfile.edge.template deploy/selectel/in-place-file.sh ||
@@ -1635,6 +1703,8 @@ verify_application_rollback() {
 		elif [ "$profile" = max-video-retirement ]; then
 			rollback_max_video_retirement_host_inputs_match "$MEMOLY_PRODUCT_SHA" ||
 				die 'MAX video retirement rollback requires the exact filesystem-backed host inputs'
+		elif [ "$profile" = s3-album-social ]; then
+			rollback_s3_host_inputs_match "$MEMOLY_PRODUCT_SHA" || die 'S3 album social recovery requires the exact S3-backed host inputs'
 		elif [ "$profile" = s3 ]; then
 			[ "$migration_phase" = complete ] || die 'S3 recovery requires the exact completed migration catalog'
 			rollback_s3_host_inputs_match "$MEMOLY_PRODUCT_SHA" || die 'S3 recovery requires the exact S3-backed host inputs'
@@ -1699,7 +1769,7 @@ verify_application_rollback() {
 	[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "memoly-webapp:$PREVIOUS_WEBAPP_IMAGE_TAG")" = "$PREVIOUS_WEBAPP_IMAGE_TAG" ] ||
 		die 'rollback webapp image revision label mismatch'
 	configuration_backup_dir >/dev/null || die 'rollback configuration artifacts are unavailable'
-	if { [ "$profile" = albums ] || [ "$profile" = wishlist ] || [ "$profile" = control ] || [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ]; } && [ "$migration_phase" = pre-sql ]; then
+	if { [ "$profile" = albums ] || [ "$profile" = wishlist ] || [ "$profile" = control ] || [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ] || [ "$profile" = s3-album-social ]; } && [ "$migration_phase" = pre-sql ]; then
 		# The exact prefix ledger check below is the pre-SQL migration gate. Prisma
 		# migrate status intentionally reports a pending reviewed additive suffix.
 		:
@@ -1718,6 +1788,10 @@ verify_application_rollback() {
 		rollback_verify_migration_history "$expected_migration_checksums" ||
 			die "$profile rollback requires the exact completed migration history"
 		if [ "$profile" = s3 ]; then rollback_verify_s3_storage_readiness; fi
+	elif [ "$profile" = s3-album-social ]; then
+		rollback_verify_s3_album_social_migration_history "$migration_phase" ||
+			die 'S3 album social rollback requires the exact reviewed migration history for this phase'
+		rollback_verify_s3_storage_readiness
 	elif [ "$profile" = albums ]; then
 		rollback_verify_albums_migration_history "$migration_phase" ||
 			die 'albums rollback requires the exact reviewed migration history for this phase'

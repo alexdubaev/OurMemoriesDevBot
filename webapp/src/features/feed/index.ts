@@ -18,3 +18,6 @@ export { MediaPlaybackCoordinator } from './playback'
 export { FeedAuthorAvatar, FeedSharedAuthorAvatars } from './shared-author-avatars'
 export { ChildFilterChips } from './components'
 export { childFilterChips, composerInitialChildIds, normalizeChildFilter, UNTAGGED_CHILD_FILTER, type ChildFilter } from './child-filter'
+
+export { MemoryReactions } from './presentation/MemoryReactions'
+export { MemoryReactionQueue, reactionCountsAfterChange } from './reaction-queue'

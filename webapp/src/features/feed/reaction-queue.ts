@@ -1,6 +1,6 @@
 import type { MemoryReaction, ReactionResponse } from '@web-app-demo/contracts'
 
-export type ReactionWriter = (reaction: MemoryReaction | null) => Promise<ReactionResponse>
+export type ReactionWriter = (reaction: MemoryReaction | null) => Promise<Pick<ReactionResponse, 'reactionCounts' | 'currentUserReaction'>>
 
 export class MemoryReactionQueue {
   private desired: MemoryReaction | null
