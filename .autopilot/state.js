@@ -13,7 +13,7 @@ window.STATE =
   "skillDir": "C:/Users/Alexandr/.codex/skills/autopilot",
   "baseCommit": null,
   "startedAt": "2026-11-04T12:20:45+03:00",
-  "updatedAt": "2026-11-04T12:35:15+03:00",
+  "updatedAt": "2026-11-04T12:59:19+03:00",
   "finishedAt": null,
   "stages": [
     {
@@ -43,12 +43,14 @@ window.STATE =
     },
     {
       "id": "plan",
-      "status": "active",
-      "startedAt": "2026-11-04T12:35:12+03:00"
+      "status": "done",
+      "startedAt": "2026-11-04T12:35:12+03:00",
+      "finishedAt": "2026-11-04T12:35:59+03:00"
     },
     {
       "id": "build",
-      "status": "pending"
+      "status": "active",
+      "startedAt": "2026-11-04T12:35:59+03:00"
     },
     {
       "id": "review",
@@ -108,8 +110,7 @@ window.STATE =
         "R37",
         "R38",
         "R39",
-        "R40",
-        "R67"
+        "R40"
       ],
       "blockedBy": [],
       "wave": 1,
@@ -121,7 +122,8 @@ window.STATE =
       ],
       "review": "нет — одно итоговое review по прямому заданию владельца",
       "model": "сильная",
-      "status": "pending",
+      "status": "in-progress",
+      "startedAt": "2026-11-04T12:35:59+03:00",
       "retries": 0,
       "repairs": 0
     },
@@ -139,8 +141,7 @@ window.STATE =
         "R48",
         "R49",
         "R50",
-        "R51",
-        "R64"
+        "R51"
       ],
       "blockedBy": [
         "01"
@@ -165,6 +166,8 @@ window.STATE =
       "id": "03",
       "title": "Акварель четырёх внутренних экранов и общая приёмка",
       "requirements": [
+        "R64",
+        "R67",
         "R01",
         "R02",
         "R03",
@@ -240,9 +243,12 @@ window.STATE =
     "2026-11-04T12:35:12+03:00",
     "2026-11-04T12:35:13+03:00",
     "2026-11-04T12:35:14+03:00",
-    "2026-11-04T12:35:15+03:00"
+    "2026-11-04T12:35:15+03:00",
+    "2026-11-04T12:35:59+03:00",
+    "2026-11-04T12:59:18+03:00",
+    "2026-11-04T12:59:19+03:00"
   ],
-  "rev": 11,
+  "rev": 15,
   "waiting": null,
   "waits": [],
   "log": [
@@ -304,6 +310,32 @@ window.STATE =
     },
     {
       "t": "2026-11-04T12:35:15+03:00",
+      "k": "gate",
+      "g": "G3",
+      "ok": true,
+      "problems": 0
+    },
+    {
+      "t": "2026-11-04T12:35:59+03:00",
+      "k": "stage",
+      "id": "build",
+      "act": "start"
+    },
+    {
+      "t": "2026-11-04T12:35:59+03:00",
+      "k": "ticket",
+      "ids": [
+        "01"
+      ],
+      "act": "start"
+    },
+    {
+      "t": "2026-11-04T12:59:18+03:00",
+      "k": "tickets",
+      "n": 3
+    },
+    {
+      "t": "2026-11-04T12:59:19+03:00",
       "k": "gate",
       "g": "G3",
       "ok": true,
@@ -723,7 +755,7 @@ window.STATE =
     },
     "G3": {
       "ok": true,
-      "at": "2026-11-04T12:35:15+03:00",
+      "at": "2026-11-04T12:59:19+03:00",
       "problems": 0
     }
   },

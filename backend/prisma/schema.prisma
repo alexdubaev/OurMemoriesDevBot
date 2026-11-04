@@ -632,6 +632,8 @@ model FamilyMember {
   seenMemories      MemorySeen[]
   authoredMemories  Memory[]            @relation("MemoryAuthorMembership")
   authoredComments MemoryComment[]
+  albumEntryComments AlbumEntryComment[]
+  albumEntryReactions AlbumEntryReaction[]
   uploadedMedia     MediaAsset[]        @relation("MediaUploaderMembership")
   mediaReservations UploadReservation[] @relation("MediaReservationMembership")
   captionRequests  CaptionRequest[]
@@ -792,6 +794,7 @@ model AlbumEntry {
   datePrecision AlbumDatePrecision @default(unknown) @map("date_precision")
   orderKey    Int                  @map("order_key")
   version     Int                  @default(1)
+  discussionGeneration Int        @default(1) @map("discussion_generation")
   createActorId   String?           @map("create_actor_id") @db.Uuid
   createOperation String?           @map("create_operation")
   createRequestId String?           @map("create_request_id") @db.Uuid
@@ -803,6 +806,8 @@ model AlbumEntry {
   album       Album                @relation(fields: [albumId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entries_album_id_family_id_fkey")
   sources     AlbumEntrySource[]
   sourceOperations AlbumSourceOperation[]
+  comments AlbumEntryComment[]
+  reactions AlbumEntryReaction[]
 
   @@unique([id, familyId], map: "album_entries_id_family_id_key")
   @@unique([id, albumId, familyId], map: "album_entries_id_album_id_family_id_key")
@@ -891,6 +896,44 @@ model MemoryChildTag {
   @@index([familyId, childId, memoryId], map: "memory_child_tags_family_child_memory_idx")
   @@index([familyId, memoryId], map: "memory_child_tags_family_memory_idx")
   @@map("memory_child_tags")
+}
+
+model AlbumEntryComment {
+  id String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  familyId String @map("family_id") @db.Uuid
+  albumId String @map("album_id") @db.Uuid
+  entryId String @map("entry_id") @db.Uuid
+  discussionGeneration Int @map("discussion_generation")
+  authorId String @map("author_id") @db.Uuid
+  body String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version Int @default(1)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createRequestId String @map("create_request_id") @db.Uuid
+  initialPayloadHash String @map("initial_payload_hash")
+  entry AlbumEntry @relation(fields: [entryId, albumId, familyId], references: [id, albumId, familyId], onDelete: Cascade, map: "album_entry_comments_entry_scope_fkey")
+  authorMembership FamilyMember @relation(fields: [familyId, authorId], references: [familyId, userId], onDelete: Cascade, map: "album_entry_comments_author_membership_fkey")
+
+  @@unique([familyId, authorId, createRequestId], map: "album_entry_comments_create_marker_key")
+  @@index([familyId, albumId, entryId, discussionGeneration, deletedAt, createdAt(sort: Desc), id(sort: Desc)], map: "album_entry_comments_read_idx")
+  @@map("album_entry_comments")
+}
+
+model AlbumEntryReaction {
+  familyId String @map("family_id") @db.Uuid
+  albumId String @map("album_id") @db.Uuid
+  entryId String @map("entry_id") @db.Uuid
+  discussionGeneration Int @map("discussion_generation")
+  userId String @map("user_id") @db.Uuid
+  reaction MemoryReaction
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  entry AlbumEntry @relation(fields: [entryId, albumId, familyId], references: [id, albumId, familyId], onDelete: Cascade, map: "album_entry_reactions_entry_scope_fkey")
+  member FamilyMember @relation(fields: [familyId, userId], references: [familyId, userId], onDelete: Cascade, map: "album_entry_reactions_member_fkey")
+
+  @@id([entryId, userId])
+  @@index([familyId, albumId, entryId, discussionGeneration], map: "album_entry_reactions_read_idx")
+  @@map("album_entry_reactions")
 }
 
 model MemoryComment {

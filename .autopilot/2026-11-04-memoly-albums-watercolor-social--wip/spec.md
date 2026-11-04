@@ -35,3 +35,6 @@ Fetch main, обычный merge origin/main при drift, разрешить р
 
 ## Открытые места
 Местоположение полного watercolor оригинала выясняется асинхронно и локальным поиском, не отменяет требование fidelity и не блокирует сервер/adapter. Никаких продуктовых заглушек или снятых требований.
+
+## Установленные ограничения разработки
+D01: pinned recovery runtime не сбрасывает generation. Реальный отрицательный тест подтверждён; минимальная additive DB fence и tx-local ordinary-edit preservation описаны interfaces.md. D02: synthetic existing S3 pending-SQL guard rejects before any mutation; bypass forbidden, minimal concrete proposal needed before release. Neither constraint drops a requirement or starts a new task.

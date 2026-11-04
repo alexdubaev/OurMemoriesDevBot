@@ -83,3 +83,5 @@
 | R77 | «Чужую блокировку не снимать.» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
 | R78 | «Production smoke — без автоматического создания настоящих» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
 | R79 | «Не останавливаться на «готово к следующему этапу»,» | in-ticket | Нормативный полный контекст: разделы 0–11 исходного брифа | spec.md и interfaces.md; полный бриф 0–11 → T03 |
+| D01 | Legacy S3 runtime clear не знает discussionGeneration | in-spec | В реальной PostgreSQL после точных old clear mutations и refill возвращается comments.count=1; обслуживает R36/R37/R76 | interfaces.md: совместимость очистки |
+| D02 | S3 release guard разрешает только complete catalog | in-spec | Синтетический prepare_rollback RUN_MIGRATION=true отклонён до SQL/публикации, 1 pass; R74/R76 | spec.md: выпуск, без обхода guard |
