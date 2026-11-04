@@ -249,6 +249,14 @@ export function AlbumsPage(props: AlbumsPageProps) {
     void refreshAlbum(album.id).catch((reason) => { if (isAlbumScopeFailure(reason)) fail(reason); else setSavedRefreshFailed(true) })
   }
   function reloadCatalog() { setLoading(true); setError(null); setConflict(false); setRevision((value) => value + 1) }
+  function discussionInvalidated(reason: ApiRequestError) {
+    if (isAlbumScopeFailure(reason)) { fail(reason); return }
+    if (!album) return
+    // An old chapter cannot keep its draft or replace a newly opened detail.
+    // Return to the refreshed entry list; reopening obtains its current generation.
+    setEntry(null); navigate('album')
+    void refreshAlbum(album.id).catch(fail)
+  }
   function retryRead() {
     setLoading(true); setError(null); setConflict(false); setSavedRefreshFailed(false)
     if (album) void refreshAlbum(album.id, route === 'entry').catch(fail)
@@ -323,10 +331,10 @@ export function AlbumsPage(props: AlbumsPageProps) {
           <div ref={sentinel} />{entryCursor && !loading ? <button className="albums-secondary" disabled={loadingMore || conflict} onClick={() => void more()} type="button">{loadingMore ? 'Загружаем…' : 'Ещё истории'}</button> : null}
         </> : null}
         {album && route === 'edit-entry' ? <EntryEditor accountId={accountId} album={album} api={api} birthDate={albumChild?.birthDate} canUpload={role === 'full' && album.capabilities.edit} entry={entry} key={`${album.id}:${entry?.id ?? 'new'}:${suggestedTitle}`} onCancel={back} onSaved={saved} onUpload={(attach, attachPhotos) => setUpload({ attach, attachPhotos })} scopeKey={scopeKey} timezone={props.timezone} title={suggestedTitle} transport={transport} /> : null}
-        {active && album && route === 'entry' && entry ? <AlbumEntryDetail accountId={accountId} active busy={busy} childName={albumChild?.name ?? props.familyName} entry={entry} familyId={familyId} hostBridge={hostBridge} membershipEpoch={membershipEpoch} onBack={back} onEdit={() => navigate('edit-entry')} onRemove={askRemoveEntry} scopeKey={scopeKey} timezone={props.timezone} transport={transport} /> : null}
+        {active && album && route === 'entry' && entry ? <AlbumEntryDetail albumId={album.id} onDiscussionInvalidated={discussionInvalidated} accountId={accountId} active busy={busy} childName={albumChild?.name ?? props.familyName} entry={entry} familyId={familyId} hostBridge={hostBridge} membershipEpoch={membershipEpoch} onBack={back} onEdit={() => navigate('edit-entry')} onRemove={askRemoveEntry} scopeKey={scopeKey} timezone={props.timezone} transport={transport} /> : null}
       </main>
     </div>
-    <AlertDialog onOpenChange={(open) => { if (!open) setDeleteConfirmation(null) }} open={Boolean(deleteConfirmation)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{deleteConfirmation?.kind === 'album' ? 'Удалить альбом?' : deleteConfirmation?.kind === 'month' ? 'Очистить эту главу?' : 'Убрать историю из альбома?'}</AlertDialogTitle><AlertDialogDescription>{deleteConfirmation?.kind === 'album' ? 'Исходные материалы сохранятся.' : deleteConfirmation?.kind === 'month' ? 'Номер месяца и оригиналы сохранятся.' : 'Оригиналы сохранятся.'}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={busy}>Отмена</AlertDialogCancel><AlertDialogAction className="albums-danger" disabled={busy || conflict} onClick={confirmDeletion} variant="destructive">{deleteConfirmation?.kind === 'album' ? 'Удалить альбом' : deleteConfirmation?.kind === 'month' ? 'Очистить главу' : 'Убрать историю'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+    <AlertDialog onOpenChange={(open) => { if (!open) setDeleteConfirmation(null) }} open={Boolean(deleteConfirmation)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{deleteConfirmation?.kind === 'album' ? 'Удалить альбом?' : deleteConfirmation?.kind === 'month' ? 'Очистить эту главу?' : 'Убрать историю из альбома?'}</AlertDialogTitle><AlertDialogDescription>{deleteConfirmation?.kind === 'album' ? 'Исходные материалы сохранятся.' : deleteConfirmation?.kind === 'month' ? 'История, комментарии и реакции этой главы будут сброшены. Номер месяца и оригиналы сохранятся.' : 'Оригиналы сохранятся.'}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={busy}>Отмена</AlertDialogCancel><AlertDialogAction className="albums-danger" disabled={busy || conflict} onClick={confirmDeletion} variant="destructive">{deleteConfirmation?.kind === 'album' ? 'Удалить альбом' : deleteConfirmation?.kind === 'month' ? 'Очистить главу' : 'Убрать историю'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
     {upload ? <ComposerHost active={active} attach={upload.attach} attachPhotos={upload.attachPhotos} childId={albumChild?.id ?? props.child?.id} childOptions={multiChild ? [...childList] : undefined} initialChildIds={multiChild && album?.childId ? [album.childId] : []} familyId={familyId} familyTimezone={props.timezone} hostBridge={hostBridge} onClose={() => setUpload(null)} transport={transport} /> : null}
     {showNav ? <BottomNavigation active="albums" appearance="memoly" onAdd={props.child ? props.onAdd : undefined} onAlbums={() => undefined} onFamily={props.onFamily} onFeed={props.onFeed} onGifts={props.onGifts} role={role} /> : null}
   </div>

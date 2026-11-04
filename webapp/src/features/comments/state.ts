@@ -1,13 +1,19 @@
-import { commentBodySchema, type CommentDto } from '@web-app-demo/contracts'
+import { commentBodySchema, type CommentDto, type CommentSummary } from '@web-app-demo/contracts'
 import type { InfiniteData } from '@tanstack/react-query'
-import type { CommentPage } from '@web-app-demo/contracts'
 
-export type CommentScope = {
-  familyId: string
-  accountId: string
-  membershipEpoch: number
-  memoryId: string
+
+type MemberCommentScope = { familyId: string; accountId: string; membershipEpoch: number }
+export type MemoryCommentScope = MemberCommentScope & { target?: 'memory'; memoryId: string }
+export type AlbumCommentScope = MemberCommentScope & { target: 'albumEntry'; albumId: string; entryId: string; discussionGeneration: number }
+export type CommentScope = MemoryCommentScope | AlbumCommentScope
+// The panel renders common fields; each API keeps its own strict target identity.
+export type DiscussionComment = Omit<CommentDto, 'memoryId'>
+export type DiscussionSummary = Omit<CommentSummary, 'memoryId'>
+export type DiscussionPage = { items: DiscussionComment[]; nextCursor: string | null; summary: DiscussionSummary }
+export function commentTargetKey(scope: CommentScope) {
+  return scope.target === 'albumEntry' ? `albumEntry:${scope.albumId}:${scope.entryId}:${scope.discussionGeneration}` : `memory:${scope.memoryId}`
 }
+export function commentScopeKey(scope: CommentScope) { return `${scope.accountId}:${scope.familyId}:${scope.membershipEpoch}:${commentTargetKey(scope)}` }
 
 export type CommentCreateAttempt = Readonly<{
   body: string
@@ -40,15 +46,15 @@ export function createCommentAttempt(body: string, idempotencyKey: string = cryp
 
 export function isCurrentCommentScope(expected: CommentScope, current: CommentScope | null, mounted: boolean) {
   return mounted && current !== null && expected.familyId === current.familyId && expected.accountId === current.accountId &&
-    expected.membershipEpoch === current.membershipEpoch && expected.memoryId === current.memoryId
+    expected.membershipEpoch === current.membershipEpoch && commentTargetKey(expected) === commentTargetKey(current)
 }
 
 export function isCurrentCommentRead(expectedRevision: number, currentRevision: number, mutationPaused: boolean, scopeIsCurrent: boolean) {
   return !mutationPaused && scopeIsCurrent && expectedRevision === currentRevision
 }
 
-export function mergeCommentPages(pages: readonly CommentDto[][]) {
-  const unique = new Map<string, CommentDto>()
+export function mergeCommentPages(pages: readonly DiscussionComment[][]) {
+  const unique = new Map<string, DiscussionComment>()
   for (const page of pages) for (const item of page) {
     const existing = unique.get(item.id)
     if (!existing || item.version >= existing.version) unique.set(item.id, item)
@@ -56,7 +62,7 @@ export function mergeCommentPages(pages: readonly CommentDto[][]) {
   return [...unique.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id))
 }
 
-export function compareCommentPosition(left: Pick<CommentDto, 'createdAt' | 'id'>, right: Pick<CommentDto, 'createdAt' | 'id'>) {
+export function compareCommentPosition(left: Pick<DiscussionComment, 'createdAt' | 'id'>, right: Pick<DiscussionComment, 'createdAt' | 'id'>) {
   return Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.id.localeCompare(right.id)
 }
 
@@ -65,10 +71,10 @@ export function compareCommentPosition(left: Pick<CommentDto, 'createdAt' | 'id'
  * overlap boundary. Preserve every remaining older server window and its real cursor.
  */
 export function reconcileLatestCommentPages(
-  existing: InfiniteData<CommentPage, string | null> | undefined,
-  refreshedPages: CommentPage[],
+  existing: InfiniteData<DiscussionPage, string | null> | undefined,
+  refreshedPages: DiscussionPage[],
   refreshedPageParams: Array<string | null>,
-): InfiniteData<CommentPage, string | null> {
+): InfiniteData<DiscussionPage, string | null> {
   if (refreshedPages.length === 0) return existing ?? { pages: [], pageParams: [] }
   if (!existing || existing.pages.length === 0) return { pages: refreshedPages, pageParams: refreshedPageParams }
 
@@ -91,16 +97,16 @@ export function reconcileLatestCommentPages(
 
 /** Replace one server-cursor window without flattening its older cached windows. */
 export function reconcileCommentWindow(
-  existing: InfiniteData<CommentPage, string | null>,
-  page: CommentPage,
+  existing: InfiniteData<DiscussionPage, string | null>,
+  page: DiscussionPage,
   pageParam: string | null,
-  upperBoundary: CommentDto | null,
-): InfiniteData<CommentPage, string | null> {
+  upperBoundary: DiscussionComment | null,
+): InfiniteData<DiscussionPage, string | null> {
   const pageIndex = existing.pageParams.findIndex((param) => param === pageParam)
   if (pageIndex < 0) return existing
   const prefix = existing.pages.slice(0, pageIndex)
   const prefixIds = new Set(prefix.flatMap((part) => part.items.map((item) => item.id)))
-  const withinUpper = (item: CommentDto) => !upperBoundary || compareCommentPosition(item, upperBoundary) < 0
+  const withinUpper = (item: DiscussionComment) => !upperBoundary || compareCommentPosition(item, upperBoundary) < 0
   const authoritative = page.items.filter((item) => withinUpper(item) && !prefixIds.has(item.id))
   const refreshedOldest = authoritative.at(-1)
   const pages = [...prefix, { ...page, items: authoritative }]

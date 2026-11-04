@@ -13,7 +13,7 @@ window.STATE =
   "skillDir": "C:/Users/Alexandr/.codex/skills/autopilot",
   "baseCommit": "7e60b958",
   "startedAt": "2026-11-04T12:20:45+03:00",
-  "updatedAt": "2026-11-04T13:32:41+03:00",
+  "updatedAt": "2026-11-04T13:35:16+03:00",
   "finishedAt": null,
   "stages": [
     {
@@ -122,16 +122,16 @@ window.STATE =
       ],
       "review": "нет — одно итоговое review по прямому заданию владельца",
       "model": "сильная",
-      "status": "repair",
+      "status": "done",
       "startedAt": "2026-11-04T12:35:59+03:00",
-      "finishedAt": "2026-11-04T12:59:24+03:00",
+      "finishedAt": "2026-11-04T13:35:16+03:00",
       "retries": 0,
       "repairs": 1,
       "tests": {
-        "passed": 16,
+        "passed": 1,
         "failed": 0
       },
-      "commit": "c9b16813da16",
+      "commit": "ee924e683bda",
       "repairFindings": [
         "Реальный same-file-two-stories browser выявил projection500; сохранить ref.id каждой связи, узкая PG regression"
       ]
@@ -232,7 +232,7 @@ window.STATE =
     }
   ],
   "tests": {
-    "passed": 16,
+    "passed": 1,
     "failed": 0
   },
   "debt": {
@@ -270,9 +270,10 @@ window.STATE =
     "2026-11-04T13:18:38+03:00",
     "2026-11-04T13:18:39+03:00",
     "2026-11-04T13:23:54+03:00",
-    "2026-11-04T13:32:41+03:00"
+    "2026-11-04T13:32:41+03:00",
+    "2026-11-04T13:35:16+03:00"
   ],
-  "rev": 23,
+  "rev": 24,
   "waiting": null,
   "waits": [
     {
@@ -422,6 +423,18 @@ window.STATE =
       ],
       "act": "repair",
       "note": "Реальный same-file-two-stories browser выявил projection500; сохранить ref.id каждой связи, узкая PG regression"
+    },
+    {
+      "t": "2026-11-04T13:35:16+03:00",
+      "k": "ticket",
+      "ids": [
+        "01"
+      ],
+      "act": "done",
+      "tests": {
+        "passed": 1,
+        "failed": 0
+      }
     }
   ],
   "reqList": [

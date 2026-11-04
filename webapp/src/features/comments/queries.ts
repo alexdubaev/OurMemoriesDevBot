@@ -2,17 +2,20 @@ import { CancelledError, useInfiniteQuery, useQueries, useQueryClient } from '@t
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ApiRequestError } from '@/platform/api'
 import type { InfiniteData } from '@tanstack/react-query'
-import type { CommentDto, CommentPage } from '@web-app-demo/contracts'
+import type { AlbumEntryDiscussionSummary } from '@web-app-demo/contracts'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { privateCacheIdentityGeneration, privateFamilyCacheGeneration, isActivePrivateCacheIdentity } from '@/platform/persistence/private-cache'
-import { loadCommentSummaries, loadComments } from './api'
-import type { CommentScope } from './state'
+import { loadCommentSummaries } from './api'
+import { loadTargetComments } from './target-api'
+import { commentScopeKey, type CommentScope, type MemoryCommentScope, type DiscussionComment, type DiscussionPage, type DiscussionSummary } from './state'
 import { commentRetryDelay, commentRetryReady, compareCommentPosition, isCurrentCommentRead, reconcileCommentWindow, reconcileLatestCommentPages } from './state'
 
 export const commentsQueryKeys = {
   all: ['session', 'comments'] as const,
   summaries: (familyId: string, accountId: string, epoch: number, memoryIds: readonly string[]) => [...commentsQueryKeys.all, familyId, accountId, epoch, 'summaries', ...memoryIds] as const,
   list: (familyId: string, accountId: string, epoch: number, memoryId: string) => [...commentsQueryKeys.all, familyId, accountId, epoch, 'list', memoryId] as const,
+  discussion: (scope: Pick<CommentScope, 'familyId' | 'accountId' | 'membershipEpoch'> & { albumId: string; entryId: string }) => [...commentsQueryKeys.all, scope.familyId, scope.accountId, scope.membershipEpoch, 'album-entry', scope.albumId, scope.entryId, 'discussion'] as const,
+  forScope: (scope: CommentScope) => scope.target === 'albumEntry' ? [...commentsQueryKeys.all, scope.familyId, scope.accountId, scope.membershipEpoch, 'album-entry', scope.albumId, scope.entryId, scope.discussionGeneration, 'list'] as const : commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId),
 }
 
 export function useCommentSummaries(transport: AuthenticatedTransport, familyId: string, accountId: string, membershipEpoch: number, memoryIds: string[], active: boolean) {
@@ -59,8 +62,9 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
   const identity = privateCacheIdentityGeneration()
   const familyGeneration = privateFamilyCacheGeneration(scope.accountId, scope.familyId)
   const client = useQueryClient()
-  const key = useMemo(() => commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), [scope.accountId, scope.familyId, scope.memoryId, scope.membershipEpoch])
-  const list = useInfiniteQuery<CommentPage, Error, InfiniteData<CommentPage>, ReturnType<typeof commentsQueryKeys.list>, string | null>({
+  const scopeKey = commentScopeKey(scope)
+  const key = useMemo(() => commentsQueryKeys.forScope(scope), [scope])
+  const list = useInfiniteQuery<DiscussionPage, Error, InfiniteData<DiscussionPage>, ReturnType<typeof commentsQueryKeys.forScope>, string | null>({
     queryKey: key,
     enabled: false,
     initialPageParam: null as string | null,
@@ -88,8 +92,7 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
   const [retryAt, setRetryAt] = useState(0)
   const retryAtRef = useRef(0)
   const retryAfterAt = useRef(0)
-  const upperBoundaries = useRef(new Map<string, CommentDto | null>())
-  const scopeKey = `${scope.familyId}\u0000${scope.accountId}\u0000${scope.membershipEpoch}\u0000${scope.memoryId}`
+  const upperBoundaries = useRef(new Map<string, DiscussionComment | null>())
   const currentScopeKey = useRef(scopeKey)
   const canReadNow = useCallback(() => typeof document !== 'undefined' && typeof navigator !== 'undefined' && !document.hidden && navigator.onLine, [])
 
@@ -116,7 +119,7 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
 
   const perform = useCallback(async (kind: 'refresh' | 'older', cursor?: string | null) => {
     if (mutationPaused.current || !enabled || !lease.current || !canReadNow()) return
-    const data = client.getQueryData<InfiniteData<CommentPage, string | null>>(key)
+    const data = client.getQueryData<InfiniteData<DiscussionPage, string | null>>(key)
     if (kind === 'older' && (!data?.pages.length || (cursor === undefined && !data.pages.at(-1)?.nextCursor))) return
     const before = data?.pages[0]?.items[0] ?? null
     const expectedRevision = ++revision.current
@@ -131,8 +134,8 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
     try {
       if (kind === 'refresh') {
         let nextCursor: string | null = null
-        let previousUpper: CommentDto | null = null
-        const pages: CommentPage[] = []
+        let previousUpper: DiscussionComment | null = null
+        const pages: DiscussionPage[] = []
         const params: Array<string | null> = []
         let reachedBoundary = before === null
         while (true) {
@@ -141,7 +144,7 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
             if (!canReadNow()) throw new CancelledError()
             const pageParam = nextCursor
             const upperForPage = pageParam === null ? null : previousUpper
-            const page = await loadComments(transport, scope.familyId, scope.memoryId, pageParam, controller.signal)
+            const page = await loadTargetComments(transport, scope, pageParam, controller.signal)
             if (!valid(expectedRevision)) throw new CancelledError()
             if (pageParam !== null) upperBoundaries.current.set(pageParam, upperForPage)
             pages.push(page); params.push(pageParam)
@@ -160,13 +163,13 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
           if (!valid(expectedRevision) || !canReadNow()) throw new CancelledError()
         }
         const reconciled = reconcileLatestCommentPages(data, pages, params)
-        await cancelCommentSummaryQueries(client, scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
+        await cancelTargetCommentSummaryQueries(client, scope)
         if (!valid(expectedRevision)) throw new CancelledError()
         if (valid(expectedRevision)) {
           beforeWrite?.()
           client.setQueryData(key, reconciled)
           const authoritativeSummary = pages[0]?.summary
-          if (authoritativeSummary) writeCommentSummary(client, scope.familyId, scope.accountId, scope.membershipEpoch, authoritativeSummary)
+          if (authoritativeSummary) writeTargetCommentSummary(client, scope, authoritativeSummary)
           reconciled.pageParams.forEach((rawParam, index) => {
             const param = rawParam ?? ''
             if (index < pages.length) {
@@ -181,14 +184,14 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
         }
       } else {
         if (!canReadNow()) throw new CancelledError()
-        const current = client.getQueryData<InfiniteData<CommentPage, string | null>>(key)
+        const current = client.getQueryData<InfiniteData<DiscussionPage, string | null>>(key)
         const next = cursor ?? current?.pages.at(-1)?.nextCursor ?? null
         if (!next || !current) return
         const requestedWindowIndex = cursor === undefined ? -1 : current.pageParams.findIndex((item) => item === cursor)
         if (cursor !== undefined && requestedWindowIndex < 0) return
-        const page = await loadComments(transport, scope.familyId, scope.memoryId, next, controller.signal)
+        const page = await loadTargetComments(transport, scope, next, controller.signal)
         if (!valid(expectedRevision)) throw new CancelledError()
-        await cancelCommentSummaryQueries(client, scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
+        await cancelTargetCommentSummaryQueries(client, scope)
         if (!valid(expectedRevision)) throw new CancelledError()
         const pageIndex = current.pageParams.findIndex((item) => item === next)
         if (pageIndex < 0) {
@@ -196,8 +199,8 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
           const appended = { ...page, items: page.items.filter((item) => !ids.has(item.id)) }
           const boundary = current.pages.at(-1)?.items.at(-1) ?? null
           beforeWrite?.()
-          client.setQueryData<InfiniteData<CommentPage, string | null>>(key, { pages: [...current.pages, appended], pageParams: [...current.pageParams, next] })
-          writeCommentSummary(client, scope.familyId, scope.accountId, scope.membershipEpoch, page.summary)
+          client.setQueryData<InfiniteData<DiscussionPage, string | null>>(key, { pages: [...current.pages, appended], pageParams: [...current.pageParams, next] })
+          writeTargetCommentSummary(client, scope, page.summary)
           upperBoundaries.current.set(next, boundary)
           if (page.nextCursor && page.items.at(-1)) upperBoundaries.current.set(page.nextCursor, page.items.at(-1)!)
           failureCount.current = 0; retryAtRef.current = 0; retryAfterAt.current = 0; setRetryAt(0)
@@ -208,7 +211,7 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
           upperBoundaries.current.set(next, upper)
           const reconciled = reconcileCommentWindow(current, page, next, upper)
           beforeWrite?.(); client.setQueryData(key, reconciled)
-          writeCommentSummary(client, scope.familyId, scope.accountId, scope.membershipEpoch, page.summary)
+          writeTargetCommentSummary(client, scope, page.summary)
           if (page.nextCursor && page.items.at(-1)) upperBoundaries.current.set(page.nextCursor, page.items.at(-1)!)
           const resultIndex = reconciled.pageParams.findIndex((item) => item === next)
           for (let index = resultIndex + 2; index < reconciled.pageParams.length; index += 1) {
@@ -232,7 +235,7 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
       if (activeController.current === controller) { activeController.current = null; activeReadKind.current = null; activeReadRevision.current = -1 }
       if (valid(expectedRevision)) { setReadPending(false); setFetchingOlder(false) }
     }
-  }, [beforeWrite, canReadNow, client, enabled, key, lease, scope.accountId, scope.familyId, scope.membershipEpoch, scope.memoryId, transport, valid])
+  }, [beforeWrite, canReadNow, client, enabled, key, lease, scope, transport, valid])
 
   const enqueue = useCallback((kind: 'refresh' | 'older', cursor?: string | null, force = false) => {
     if (kind === 'refresh' && activeReadKind.current === 'refresh' && activeReadRevision.current === revision.current && !queue.current.refresh) return queue.current.running ?? Promise.resolve()
@@ -292,7 +295,7 @@ export function useCommentsList(transport: AuthenticatedTransport, scope: Commen
 
 export function useInvalidateComments() {
   const client = useQueryClient()
-  return (scope: CommentScope) => client.invalidateQueries({ queryKey: commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), exact: true })
+  return (scope: CommentScope) => client.invalidateQueries({ queryKey: commentsQueryKeys.forScope(scope), exact: true })
 }
 
 export async function cancelCommentSummaryQueries(client: import('@tanstack/react-query').QueryClient, familyId: string, accountId: string, epoch: number, memoryId: string) {
@@ -311,7 +314,7 @@ export function writeCommentSummary(client: import('@tanstack/react-query').Quer
   }
 }
 
-export function invalidateCommentSummaryForMemory(client: import('@tanstack/react-query').QueryClient, scope: CommentScope) {
+export function invalidateCommentSummaryForMemory(client: import('@tanstack/react-query').QueryClient, scope: MemoryCommentScope) {
   const queries = client.getQueryCache().findAll({ queryKey: [...commentsQueryKeys.all, scope.familyId, scope.accountId, scope.membershipEpoch, 'summaries'] })
   return Promise.all(queries.filter((query) => query.queryKey.slice(6).includes(scope.memoryId)).map((query) => client.invalidateQueries({ queryKey: query.queryKey, exact: true })))
 }
@@ -319,4 +322,13 @@ export function invalidateCommentSummaryForMemory(client: import('@tanstack/reac
 export function removeCommentScopeQueries(client: import('@tanstack/react-query').QueryClient, familyId: string, accountId: string, epoch: number) {
   client.removeQueries({ predicate: ({ queryKey }) => queryKey[0] === 'session' && queryKey[1] === 'comments' &&
     queryKey[2] === familyId && queryKey[3] === accountId && queryKey[4] === epoch })
+}
+
+export async function cancelTargetCommentSummaryQueries(client: import('@tanstack/react-query').QueryClient, scope: CommentScope) {
+  if (scope.target !== 'albumEntry') return cancelCommentSummaryQueries(client, scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
+  await client.cancelQueries({ queryKey: commentsQueryKeys.discussion(scope), exact: true })
+}
+export function writeTargetCommentSummary(client: import('@tanstack/react-query').QueryClient, scope: CommentScope, summary: DiscussionSummary) {
+  if (scope.target !== 'albumEntry') { writeCommentSummary(client, scope.familyId, scope.accountId, scope.membershipEpoch, { ...summary, memoryId: scope.memoryId }); return }
+  client.setQueryData<AlbumEntryDiscussionSummary>(commentsQueryKeys.discussion(scope), (data) => data?.discussionGeneration === scope.discussionGeneration ? { ...data, comments: { ...data.comments, ...summary } } : data)
 }

@@ -1,13 +1,13 @@
-import type { CommentDto } from '@web-app-demo/contracts'
+import type { DiscussionComment } from './state'
 import { FeedAuthorAvatar } from '@/features/feed'
 import { AvatarLetter } from '@/features/session'
 import { Typography } from '@/components/typography'
 
 export function CommentItem({ comment, familyTimezone, onEdit, onDelete }: {
-  comment: CommentDto
+  comment: DiscussionComment
   familyTimezone: string
-  onEdit: (comment: CommentDto) => void
-  onDelete: (comment: CommentDto) => void
+  onEdit: (comment: DiscussionComment) => void
+  onDelete: (comment: DiscussionComment) => void
 }) {
   const time = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short', timeZone: familyTimezone }).format(new Date(comment.createdAt))
   return <article className="comments-item" data-comment-id={comment.id}>

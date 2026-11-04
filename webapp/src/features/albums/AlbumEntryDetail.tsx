@@ -1,13 +1,15 @@
 /* eslint-disable typographyPolicy/use-typography-component -- semantic album detail follows its scoped stylesheet. */
 import { useEffect, useRef, useState } from 'react'
 import type { AlbumEntryDto, MemoryDto } from '@web-app-demo/contracts'
-import type { AuthenticatedTransport } from '@/platform/api'
+import type { ApiRequestError, AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/telegram'
 import { loadMemory, MixedMediaViewer, MemoryMediaScope, MediaPlaybackCoordinator } from '@/features/feed'
 import { categories, dateLabel, monthAgeLabel, sourceKey, type AlbumSource } from './model'
 import { SourcePreview } from './SourcePreview'
+import { AlbumEntrySocial } from './AlbumEntrySocial'
+import { filled } from './model'
 
-export function AlbumEntryDetail({ entry, accountId, membershipEpoch, scopeKey, transport, familyId, timezone, childName, hostBridge, active, onBack, onEdit, onRemove, onUpload, busy }: { entry: AlbumEntryDto; accountId: string; membershipEpoch: number; scopeKey: string; transport: AuthenticatedTransport; familyId: string; timezone: string; childName: string; hostBridge: HostBridge; active: boolean; onBack: () => void; onEdit: () => void; onRemove: () => void; onUpload?: () => void; busy: boolean }) {
+export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, accountId, membershipEpoch, scopeKey, transport, familyId, timezone, childName, hostBridge, active, onBack, onEdit, onRemove, onUpload, busy }: { albumId: string; onDiscussionInvalidated: (error: ApiRequestError) => void; entry: AlbumEntryDto; accountId: string; membershipEpoch: number; scopeKey: string; transport: AuthenticatedTransport; familyId: string; timezone: string; childName: string; hostBridge: HostBridge; active: boolean; onBack: () => void; onEdit: () => void; onRemove: () => void; onUpload?: () => void; busy: boolean }) {
   const [viewer, setViewer] = useState<{ memory: MemoryDto; index: number; sourceMemories: Record<string, MemoryDto>; sourcePresentation: Record<string, { authorLabel: string; dateLabel: string }> } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -69,6 +71,7 @@ export function AlbumEntryDetail({ entry, accountId, membershipEpoch, scopeKey, 
       {entry.caption ? <p className="albums-story">{entry.caption}</p> : null}{entry.childQuote ? <blockquote>«{entry.childQuote}»</blockquote> : null}
       <div className="albums-detail-sources">{entry.sources.map((source, index) => <article key={sourceKey(source)}>{source.kind === 'note' && source.available ? <p className="albums-note">{source.body || 'Заметка без текста'}</p> : <button aria-label={`Открыть ${source.kind === 'voice' ? 'голосовое' : 'материал'} ${index + 1}`} disabled={!source.available || loading} onClick={(event) => void open(source, event.currentTarget)} type="button"><SourcePreview accountId={accountId} active={active} scopeKey={scopeKey} source={source} transport={transport} /></button>}{!source.available ? <p>Оригинал недоступен</p> : null}</article>)}</div>
       {loading ? <p role="status">Открываем оригинал…</p> : null}{error ? <p className="albums-error" role="alert">{error}</p> : null}
+      {entry.kind !== 'month' || filled(entry) ? <AlbumEntrySocial accountId={accountId} albumId={albumId} entryId={entry.id} familyId={familyId} hostBridge={hostBridge} key={`${scopeKey}:${albumId}:${entry.id}`} membershipEpoch={membershipEpoch} onInvalidated={onDiscussionInvalidated} timezone={timezone} transport={transport} /> : null}
       {entry.capabilities.edit ? <div className="albums-form-actions"><button className="albums-primary" disabled={busy} onClick={onEdit} type="button">Изменить</button>{onUpload ? <button className="albums-secondary" disabled={busy} onClick={onUpload} type="button">Загрузить новое</button> : null}<button className="albums-danger" disabled={busy} onClick={onRemove} type="button">{entry.kind === 'month' ? 'Очистить главу' : 'Убрать из альбома'}</button></div> : null}
     </section>
     {active && viewer ? <MixedMediaViewer childName={childName} familyTimezone={timezone} hostBridge={hostBridge} index={viewer.index} memory={viewer.memory} onClose={() => setViewer(null)} onIndexChange={(index) => setViewer((current) => current ? { ...current, index } : current)} preferReturnFocus returnFocusRef={trigger} sourceMemories={viewer.sourceMemories} sourcePresentation={viewer.sourcePresentation} transport={transport} /> : null}

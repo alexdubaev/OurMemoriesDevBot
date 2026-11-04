@@ -2,24 +2,29 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
-import type { CommentDto, CommentPage } from '@web-app-demo/contracts'
+import type { DiscussionComment, DiscussionPage } from './state'
 import { Typography } from '@/components/typography'
 import { CommentComposer } from './CommentComposer'
 import { CommentItem } from './CommentItem'
 import { FeedSharedAuthorAvatars } from '@/features/feed'
-import { createComment, deleteComment, updateComment } from './api'
-import { cancelCommentSummaryQueries, commentsQueryKeys, removeCommentScopeQueries, useCommentsList, writeCommentSummary } from './queries'
-import { COMMENT_ACTIVE_REFRESH_MS, COMMENT_IDLE_AFTER_MS, COMMENT_IDLE_REFRESH_MS, compareCommentPosition, createCommentAttempt, isCurrentCommentScope, mergeCommentPages, normalizeCommentBody, type CommentCreateAttempt, type CommentScope } from './state'
+import { createTargetComment, deleteTargetComment, updateTargetComment, isDiscussionChanged } from './target-api'
+import { cancelTargetCommentSummaryQueries, commentsQueryKeys, removeCommentScopeQueries, useCommentsList, writeTargetCommentSummary } from './queries'
+import { commentScopeKey, COMMENT_ACTIVE_REFRESH_MS, COMMENT_IDLE_AFTER_MS, COMMENT_IDLE_REFRESH_MS, compareCommentPosition, createCommentAttempt, isCurrentCommentScope, mergeCommentPages, normalizeCommentBody, type CommentCreateAttempt, type CommentScope } from './state'
 import { isActivePrivateCacheIdentity, privateCacheIdentityGeneration, privateFamilyCacheGeneration } from '@/platform/persistence/private-cache'
 import './comments.css'
 
-export function CommentsPanel({ open, scope, familyTimezone, transport, hostBridge, onClose, returnFocusRef, hostInsets }: {
+export function CommentsPanel(props: Parameters<typeof ScopedCommentsPanel>[0]) {
+  return <ScopedCommentsPanel key={commentScopeKey(props.scope)} {...props} />
+}
+
+function ScopedCommentsPanel({ open, scope, familyTimezone, transport, hostBridge, onClose, returnFocusRef, hostInsets, onTargetInvalidated }: {
   open: boolean
   scope: CommentScope
   familyTimezone: string
   transport: AuthenticatedTransport
   hostBridge: { onBack: (callback: () => void) => () => void }
   onClose: () => void
+  onTargetInvalidated?: (error: ApiRequestError) => void
   returnFocusRef: React.RefObject<HTMLElement | null>
   hostInsets?: { top: number; right: number; bottom: number; left: number }
 }) {
@@ -43,8 +48,8 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   const unreadNewCommentIds = useRef(new Set<string>())
   const [edit, setEdit] = useState<{ id: string; version: number; body: string } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null)
-  const readingAnchor = useRef<{ id: string | null; offset: number; atBottom: boolean; ids: Set<string>; newest: CommentDto | null } | null>(null)
-  const previousListData = useRef<InfiniteData<CommentPage> | undefined>(undefined)
+  const readingAnchor = useRef<{ id: string | null; offset: number; atBottom: boolean; ids: Set<string>; newest: DiscussionComment | null } | null>(null)
+  const previousListData = useRef<InfiniteData<DiscussionPage> | undefined>(undefined)
   const captureReadingAnchor = useCallback(() => {
     const element = listRef.current
     if (!element) return
@@ -76,7 +81,6 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   }, [])
   const comments = useMemo(() => mergeCommentPages((list.data?.pages ?? []).map((page) => page.items)), [list.data])
   const currentScope = useRef(scope)
-  const { accountId, familyId, membershipEpoch, memoryId } = scope
   const { refreshCurrentWindow, retryAt } = list
   const retryAtRef = useRef(retryAt)
   useLayoutEffect(() => { retryAtRef.current = retryAt }, [retryAt])
@@ -84,7 +88,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
     unreadNewCommentIds.current.clear()
     setNewCommentsCount(0)
   }, [])
-  useLayoutEffect(() => { currentScope.current = { accountId, familyId, membershipEpoch, memoryId } }, [accountId, familyId, membershipEpoch, memoryId])
+  useLayoutEffect(() => { currentScope.current = scope }, [scope])
   const identityGeneration = privateCacheIdentityGeneration()
   const familyGeneration = privateFamilyCacheGeneration(scope.accountId, scope.familyId)
   const leaseIsCurrent = () => isCurrentCommentScope(scope, currentScope.current, lease.current) &&
@@ -162,7 +166,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
     let lastActivityAt = Date.now()
     const clearTimer = () => { generation += 1; if (timer !== undefined) clearTimeout(timer); timer = undefined }
     const refreshReadingWindow = async () => {
-      const key = commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
+      const key = commentsQueryKeys.forScope(scope)
       const element = listRef.current
       const bounds = element?.getBoundingClientRect()
       const visibleCommentIds = element && bounds
@@ -178,7 +182,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       const refreshedCursors = new Set<string>()
       const refreshedCommentIds = new Set<string>()
       for (let pass = 0; pass < visibleCommentIds.length; pass += 1) {
-        const data = queryClient.getQueryData<InfiniteData<CommentPage, string | null>>(key)
+        const data = queryClient.getQueryData<InfiniteData<DiscussionPage, string | null>>(key)
         if (!data) break
         const cursor = visibleCommentIds.map((id) => {
           if (refreshedCommentIds.has(id)) return null
@@ -190,7 +194,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
         if (!cursor) break
         refreshedCursors.add(cursor.cursor!)
         await refreshOlderWindow(cursor.cursor!)
-        const updated = queryClient.getQueryData<InfiniteData<CommentPage, string | null>>(key)
+        const updated = queryClient.getQueryData<InfiniteData<DiscussionPage, string | null>>(key)
         const refreshedIndex = updated?.pageParams.findIndex((item) => item === cursor.cursor) ?? -1
         for (const comment of updated?.pages[refreshedIndex]?.items ?? []) refreshedCommentIds.add(comment.id)
       }
@@ -241,7 +245,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       window.removeEventListener('offline', trigger)
       document.removeEventListener('visibilitychange', trigger)
     }
-  }, [clearUnreadComments, open, queryClient, refreshCurrentWindow, refreshOlderWindow, scope.accountId, scope.familyId, scope.membershipEpoch, scope.memoryId, suspendBackgroundReads])
+  }, [clearUnreadComments, open, queryClient, refreshCurrentWindow, refreshOlderWindow, scope, suspendBackgroundReads])
 
   useEffect(() => {
     if (!open) return
@@ -256,14 +260,14 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   useEffect(() => () => {
     lease.current = false
     mutationController.current?.abort()
-    const key = commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
+    const key = commentsQueryKeys.forScope(scope)
     queryClient.removeQueries({ queryKey: key, exact: true })
-  }, [queryClient, scope.accountId, scope.familyId, scope.membershipEpoch, scope.memoryId])
+  }, [queryClient, scope])
 
   useEffect(() => {
     if (open) return
-    void queryClient.cancelQueries({ queryKey: commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), exact: true })
-  }, [open, queryClient, scope.accountId, scope.familyId, scope.membershipEpoch, scope.memoryId])
+    void queryClient.cancelQueries({ queryKey: commentsQueryKeys.forScope(scope), exact: true })
+  }, [open, queryClient, scope])
 
   useLayoutEffect(() => {
     const previous = previousListData.current
@@ -329,6 +333,17 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
     }
   }, [captureReadingAnchor, open])
 
+  function invalidateAlbumDiscussion(cause: unknown) {
+    if (scope.target !== 'albumEntry' || !isDiscussionChanged(cause) || !(cause instanceof ApiRequestError)) return false
+    lease.current = false
+    mutationController.current?.abort()
+    setDraft(''); setEdit(null); setUncertainAttempt(null); setDeleteTarget(null)
+    queryClient.removeQueries({ queryKey: commentsQueryKeys.forScope(scope), exact: true })
+    onTargetInvalidated?.(cause)
+    onClose()
+    return true
+  }
+
   async function submitCreate(attempt: CommentCreateAttempt) {
     const captured = uncertainAttempt ?? createCommentAttempt(attempt.body, attempt.idempotencyKey)
     if (busyRef.current || !leaseIsCurrent()) return
@@ -336,16 +351,16 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
     busyRef.current = true; setBusy(true); setError(null)
     const controller = new AbortController(); mutationController.current = controller
     try {
-      const result = await createComment(transport, scope.familyId, scope.memoryId, captured, controller.signal)
+      const result = await createTargetComment(transport, scope, captured, controller.signal)
       if (!leaseIsCurrent()) return
-      await cancelCommentSummaryQueries(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
+      await cancelTargetCommentSummaryQueries(queryClient, scope)
       if (!leaseIsCurrent()) return
       setUncertainAttempt(null); setDraft('')
-      writeCommentSummary(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, result.summary)
+      writeTargetCommentSummary(queryClient, scope, result.summary)
       captureReadingAnchor()
-      upsertConfirmedComment(queryClient, commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), result.comment, result.summary, true)
+      upsertConfirmedComment(queryClient, commentsQueryKeys.forScope(scope), result.comment, result.summary, true)
     } catch (cause) {
-      if (!leaseIsCurrent()) return
+      if (!leaseIsCurrent() || invalidateAlbumDiscussion(cause)) return
       if (cause instanceof ApiRequestError && cause.status >= 400 && cause.status < 500 && cause.status !== 408) {
         setError('Не удалось отправить комментарий. Проверьте текст и повторите попытку.')
         setUncertainAttempt(null)
@@ -366,22 +381,22 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
     busyRef.current = true; setBusy(true); setError(null)
     const controller = new AbortController(); mutationController.current = controller
     try {
-      const result = await updateComment(transport, scope.familyId, scope.memoryId, edit.id, { body, expectedVersion: edit.version }, controller.signal)
+      const result = await updateTargetComment(transport, scope, edit.id, { body, expectedVersion: edit.version }, controller.signal)
       if (!leaseIsCurrent()) return
-      await cancelCommentSummaryQueries(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
+      await cancelTargetCommentSummaryQueries(queryClient, scope)
       if (!leaseIsCurrent()) return
       setEdit(null)
-      writeCommentSummary(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, result.summary)
+      writeTargetCommentSummary(queryClient, scope, result.summary)
       captureReadingAnchor()
-      upsertConfirmedComment(queryClient, commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), result.comment, result.summary, false)
+      upsertConfirmedComment(queryClient, commentsQueryKeys.forScope(scope), result.comment, result.summary, false)
     } catch (cause) {
-      if (!leaseIsCurrent()) return
+      if (!leaseIsCurrent() || invalidateAlbumDiscussion(cause)) return
       if (cause instanceof ApiRequestError && cause.code === 'VERSION_CONFLICT') {
         setError('Комментарий уже изменён. Черновик сохранён; проверьте актуальную версию и сохраните ещё раз.')
         list.endMutation()
         await refreshCommentTarget(edit.id)
         refreshedTargetWindow = true
-        const latest = queryClient.getQueryData<InfiniteData<CommentPage>>(commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId))?.pages.flatMap((page) => page.items).find((item) => item.id === edit.id)
+        const latest = queryClient.getQueryData<InfiniteData<DiscussionPage>>(commentsQueryKeys.forScope(scope))?.pages.flatMap((page) => page.items).find((item) => item.id === edit.id)
         if (latest && leaseIsCurrent()) setEdit((current) => current?.id === latest.id ? { ...current, version: latest.version } : current)
       }
       else {
@@ -390,7 +405,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
           list.endMutation()
           await refreshCommentTarget(edit.id)
           refreshedTargetWindow = true
-          const latest = queryClient.getQueryData<InfiniteData<CommentPage>>(commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId))?.pages.flatMap((page) => page.items).find((item) => item.id === edit.id)
+          const latest = queryClient.getQueryData<InfiniteData<DiscussionPage>>(commentsQueryKeys.forScope(scope))?.pages.flatMap((page) => page.items).find((item) => item.id === edit.id)
           if (!leaseIsCurrent()) return
           if (!latest && cause.status === 409) setEdit(null)
         }
@@ -405,16 +420,16 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
     busyRef.current = true; setBusy(true); setError(null)
     const controller = new AbortController(); mutationController.current = controller
     try {
-      const result = await deleteComment(transport, scope.familyId, scope.memoryId, deleteTarget.id, deleteTarget.version, controller.signal)
+      const result = await deleteTargetComment(transport, scope, deleteTarget.id, deleteTarget.version, controller.signal)
       if (!leaseIsCurrent()) return
-      await cancelCommentSummaryQueries(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
+      await cancelTargetCommentSummaryQueries(queryClient, scope)
       if (!leaseIsCurrent()) return
       setDeleteTarget(null); if (edit?.id === result.deletedId) setEdit(null)
-      writeCommentSummary(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch, result.summary)
+      writeTargetCommentSummary(queryClient, scope, result.summary)
       captureReadingAnchor()
-      removeConfirmedComment(queryClient, commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId), result.deletedId, result.summary)
+      removeConfirmedComment(queryClient, commentsQueryKeys.forScope(scope), result.deletedId, result.summary)
     } catch (cause) {
-      if (!leaseIsCurrent()) return
+      if (!leaseIsCurrent() || invalidateAlbumDiscussion(cause)) return
       const conflict = cause instanceof ApiRequestError && cause.code === 'VERSION_CONFLICT'
       setError(conflict ? 'Комментарий изменён. Проверьте актуальную версию и подтвердите удаление ещё раз.' : 'Не удалось удалить комментарий.')
       if (conflict) setDeleteTarget(null)
@@ -423,7 +438,7 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
       refreshedTargetWindow = true
       if (!leaseIsCurrent()) return
       if (deleteTarget && !conflict) {
-        const latest = queryClient.getQueryData<InfiniteData<CommentPage>>(commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId))?.pages.flatMap((page) => page.items).find((item) => item.id === deleteTarget.id)
+        const latest = queryClient.getQueryData<InfiniteData<DiscussionPage>>(commentsQueryKeys.forScope(scope))?.pages.flatMap((page) => page.items).find((item) => item.id === deleteTarget.id)
         if (!latest) setDeleteTarget(null)
       }
     }
@@ -431,20 +446,24 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   }
 
   async function refreshCommentTarget(commentId: string) {
-    const key = commentsQueryKeys.list(scope.familyId, scope.accountId, scope.membershipEpoch, scope.memoryId)
-    const data = queryClient.getQueryData<InfiniteData<CommentPage, string | null>>(key)
+    const key = commentsQueryKeys.forScope(scope)
+    const data = queryClient.getQueryData<InfiniteData<DiscussionPage, string | null>>(key)
     const pageIndex = data?.pages.findIndex((page) => page.items.some((item) => item.id === commentId)) ?? -1
     const cursor = pageIndex > 0 ? data?.pageParams[pageIndex] : null
     if (cursor) await list.refreshOlderWindow(cursor)
     else await list.refreshCurrentWindow(true)
   }
 
-  const readAccessLost = Boolean(list.data && list.error instanceof ApiRequestError && [403, 404].includes(list.error.status))
+  const readAccessLost = list.error instanceof ApiRequestError && ((scope.target === 'albumEntry' && (isDiscussionChanged(list.error) || [401, 403, 404].includes(list.error.status))) || Boolean(list.data && [403, 404].includes(list.error.status)))
   useEffect(() => {
-    if (!readAccessLost || !open) return
-    removeCommentScopeQueries(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch)
+    if (!readAccessLost || !open || !(list.error instanceof ApiRequestError)) return
+    lease.current = false
+    mutationController.current?.abort()
+    if (isDiscussionChanged(list.error)) queryClient.removeQueries({ queryKey: commentsQueryKeys.forScope(scope), exact: true })
+    else removeCommentScopeQueries(queryClient, scope.familyId, scope.accountId, scope.membershipEpoch)
+    onTargetInvalidated?.(list.error)
     onClose()
-  }, [onClose, open, queryClient, readAccessLost, scope.accountId, scope.familyId, scope.membershipEpoch])
+  }, [list.error, onClose, onTargetInvalidated, open, queryClient, readAccessLost, scope])
 
   return <DialogPrimitive.Root onOpenChange={(next) => { if (!next) requestClose() }} open={open}>
     <DialogPrimitive.Portal><DialogPrimitive.Overlay className="comments-overlay" />
@@ -470,10 +489,10 @@ export function CommentsPanel({ open, scope, familyTimezone, transport, hostBrid
   </DialogPrimitive.Root>
 }
 
-function upsertConfirmedComment(client: ReturnType<typeof useQueryClient>, key: readonly unknown[], comment: CommentDto, summary: CommentPage['summary'], prepend: boolean) {
-  const cached = client.getQueryData<InfiniteData<CommentPage, string | null>>(key)
+function upsertConfirmedComment(client: ReturnType<typeof useQueryClient>, key: readonly unknown[], comment: DiscussionComment, summary: DiscussionPage['summary'], prepend: boolean) {
+  const cached = client.getQueryData<InfiniteData<DiscussionPage, string | null>>(key)
   if (!cached || cached.pages.length === 0) {
-    client.setQueryData<InfiniteData<CommentPage, string | null>>(key, { pages: [{ items: [comment], nextCursor: null, summary }], pageParams: [null] })
+    client.setQueryData<InfiniteData<DiscussionPage, string | null>>(key, { pages: [{ items: [comment], nextCursor: null, summary }], pageParams: [null] })
     return
   }
   let placed = false
@@ -486,11 +505,11 @@ function upsertConfirmedComment(client: ReturnType<typeof useQueryClient>, key: 
     return { ...page, summary, items: page.items.filter((item) => item.id !== comment.id) }
   })
   if (!placed && prepend) pages[0] = { ...pages[0]!, items: [comment, ...pages[0]!.items] }
-  client.setQueryData<InfiniteData<CommentPage, string | null>>(key, { ...cached, pages })
+  client.setQueryData<InfiniteData<DiscussionPage, string | null>>(key, { ...cached, pages })
 }
 
-function removeConfirmedComment(client: ReturnType<typeof useQueryClient>, key: readonly unknown[], commentId: string, summary: CommentPage['summary']) {
-  const cached = client.getQueryData<InfiniteData<CommentPage, string | null>>(key)
+function removeConfirmedComment(client: ReturnType<typeof useQueryClient>, key: readonly unknown[], commentId: string, summary: DiscussionPage['summary']) {
+  const cached = client.getQueryData<InfiniteData<DiscussionPage, string | null>>(key)
   if (!cached) return
-  client.setQueryData<InfiniteData<CommentPage, string | null>>(key, { ...cached, pages: cached.pages.map((page) => ({ ...page, summary, items: page.items.filter((item) => item.id !== commentId) })) })
+  client.setQueryData<InfiniteData<DiscussionPage, string | null>>(key, { ...cached, pages: cached.pages.map((page) => ({ ...page, summary, items: page.items.filter((item) => item.id !== commentId) })) })
 }

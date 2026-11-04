@@ -1,4 +1,4 @@
-import type { AlbumDto, AlbumEntryDto, MemoryDto } from '@web-app-demo/contracts'
+import type { AlbumDto, AlbumEntryDto, AlbumEntryCommentDto, MemoryDto, MemoryReaction } from '@web-app-demo/contracts'
 import type { HttpRequestOptions } from '../../src/platform/api/http-client'
 import { ApiRequestError } from '../../src/platform/api'
 import { memorySources, sourceKey } from '../../src/features/albums/model'
@@ -17,8 +17,8 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
     const result: MemoryDto = { id: memoryId, familyId, childId, author: { id: userId, name: `Автор ${index}`, avatarPath: null }, kind, body: kind === 'note' ? 'Тёплый текст из семейной заметки' : `Синтетическая работа ${index}`, occurredAt: `2026-10-${String(28 - (index % 27)).padStart(2, '0')}T10:00:00.000Z`, firstPublishedAt: now, sourcePublishedAt: null, createdAt: now, version: 1, status: 'published', attachments: kind === 'note' ? [] : [attachment], reactionCounts: {}, currentUserReaction: null, likes: { count: 0, likedByMe: false }, capabilities: { edit: true, delete: true, like: true } }
     memories.set(result.id, result); return result
   }
-  const works = Math.min(2000, Math.max(24, Number(params.get('albums') || 24)))
-  const photos = Array.from({ length: works }, (_, index) => memory(index))
+  const works = Math.min(2000, Math.max(3, Number(params.get('albums') || 24)))
+  const photos = Array.from({ length: Math.max(4, works) }, (_, index) => memory(index))
   // One published carousel exercises individual, non-positional source selection.
   photos[0].attachments.push(photos[1].attachments[0]); memories.set(photos[0].id, photos[0])
   const note = memory(3000, 'note'); const voice = memory(3001, 'voice')
@@ -27,11 +27,17 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
   function entry(index: number, fields: Partial<AlbumEntryDto> = {}): AlbumEntryDto { return { id: id(index + 10_000), kind: 'work', monthNumber: null, title: null, caption: null, childQuote: null, category: 'drawing', date: { precision: 'day', value: `2026-10-${String(28 - index % 27).padStart(2, '0')}` }, version: 1, order: index, sources: memorySources(photos[index % photos.length]).map((source) => ({ ...source, id: id() })), sourceCount: 1, aggregateVersion: 1, capabilities, ...fields } }
   entries.set(albums[0].id, Array.from({ length: 12 }, (_, index) => entry(index, { kind: 'month', monthNumber: index + 1, sources: index === 0 ? memorySources(photos[0]) : [], caption: index === 0 ? 'С каждым днём — новая маленькая история' : null, category: null, date: { precision: 'unknown', value: null } })))
   entries.set(albums[1].id, [entry(20, { kind: 'event', title: 'Первая улыбка', caption: 'Улыбнулась нам за завтраком', sources: [], date: { precision: 'month', value: '2024-03' } }), entry(21, { kind: 'event', title: 'Первое слово', caption: 'Мама', sources: [], date: { precision: 'unknown', value: null } })])
-  entries.set(albums[2].id, photos.map((_, index) => entry(index, { id: id(index + 20_000), category: index % 2 ? 'craft' : 'drawing' })))
+  entries.set(albums[2].id, photos.slice(0, works).map((_, index) => entry(index, { id: id(index + 20_000), category: index % 2 ? 'craft' : 'drawing' })))
   entries.set(albums[3].id, [entry(30, { title: 'В саду', caption: 'Тёплый день у бабушки', sources: [...memorySources(photos[0]).slice(0, 1), ...memorySources(photos[2]), ...memorySources(voice), ...memorySources(note)] }), entry(31, { title: 'Печём пирог' })])
   albums.forEach((album) => { album.entryCount = album.kind === 'year' ? 1 : entries.get(album.id)!.length })
   const log: { path: string; method: string; key?: string; body?: unknown }[] = []
   const replay = new Map<string, unknown>()
+  const discussions = new Map<string, { generation: number; comments: AlbumEntryCommentDto[]; reaction: MemoryReaction | null }>()
+  const socialState = (entryId: string) => {
+    let state = discussions.get(entryId)
+    if (!state) { state = { generation: 1, comments: [], reaction: null }; discussions.set(entryId, state) }
+    return state
+  }
   let failAttach = params.has('attachFail')
   let revokeNextAlbumRead = false
   let delayNextEntriesPage = false
@@ -55,7 +61,8 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
     const key = headers.get('Idempotency-Key') ?? undefined
     const body = options.body as Record<string, unknown> | undefined
     log.push({ path, method, key, body })
-    if (key && replay.has(`${route}:${key}`)) return { handled: true, value: replay.get(`${route}:${key}`) }
+    const socialRoute = /\/entries\/[^/]+\/(?:discussion|comments|reaction)(?:\/|$)/.test(route)
+    if (key && !socialRoute && replay.has(`${route}:${key}`)) return { handled: true, value: replay.get(`${route}:${key}`) }
     const done = (value: unknown) => { if (key) replay.set(`${route}:${key}`, structuredClone(value)); return { handled: true, value } }
     if (route === '/memories' && method === 'POST') {
       if (params.has('delayedPublish')) await new Promise((resolve) => setTimeout(resolve, 600))
@@ -106,10 +113,33 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
       return done({ entry: saved, replayed: false })
     }
     const item = list.find((entry) => entry.id === segments[3])!
+    if (socialRoute) {
+      if (!item) throw new ApiRequestError(404, 'NOT_FOUND', 'Synthetic entry missing')
+      const state = socialState(item.id)
+      const identity = { familyId, albumId: album.id, entryId: item.id, discussionGeneration: state.generation }
+      const summary = () => ({ ...identity, count: state.comments.length, capabilities: { read: true, create: true } })
+      const discussion = () => ({ ...identity, comments: summary(), reactionCounts: state.reaction ? { [state.reaction]: 1 } : {}, currentUserReaction: state.reaction })
+      if (item.kind === 'month' && !item.caption?.trim() && !item.sources.some((source) => source.available)) throw new ApiRequestError(409, 'CONFLICT', 'Synthetic empty month')
+      if (segments[4] === 'discussion') return done(discussion())
+      const generation = method === 'GET' || method === 'DELETE' ? Number(parsed.searchParams.get('discussionGeneration')) : Number(body?.discussionGeneration)
+      if (generation !== state.generation) throw new ApiRequestError(409, 'VERSION_CONFLICT', 'Synthetic chapter cleared')
+      if (segments[4] === 'reaction') { state.reaction = body!.reaction as MemoryReaction | null; return done(discussion()) }
+      if (method === 'GET') return done({ items: [...state.comments].reverse(), nextCursor: null, summary: summary() })
+      if (method === 'POST') {
+        if (key && replay.has(`${route}:${key}`)) return { handled: true, value: replay.get(`${route}:${key}`) }
+        const comment: AlbumEntryCommentDto = { ...identity, id: id(), author: { id: userId, name: 'Синтетический участник', avatarPath: null, avatarCrop: null }, body: String(body!.body).trim(), createdAt: now, updatedAt: now, version: 1, capabilities: { edit: true, delete: true } }
+        state.comments.push(comment); return done({ comment, summary: summary() })
+      }
+      const index = state.comments.findIndex((comment) => comment.id === segments[5])
+      if (index < 0) throw new ApiRequestError(404, 'NOT_FOUND', 'Synthetic comment missing')
+      if (method === 'DELETE') { const [comment] = state.comments.splice(index, 1); return done({ deletedId: comment.id, summary: summary() }) }
+      const comment = state.comments[index]; comment.body = String(body!.body); comment.version += 1
+      return done({ comment, summary: summary() })
+    }
     if (method === 'GET') return done({ entry: { ...item, aggregateVersion: album.version } })
     if (method === 'DELETE') { list.splice(list.indexOf(item), 1); bump(album, item); return done(null) }
     if (segments[4] === 'sources') { item.sources = (body!.sources as { memoryId: string; sourceKind: string; sourceId: string }[]).map((ref) => ({ ...memorySources(memories.get(ref.memoryId)!).find((source) => sourceKey(source) === sourceKey(ref as never))!, id: id() })); item.sourceCount = item.sources.length }
-    else if (segments[4] === 'clear') { item.sources = []; item.caption = null; item.sourceCount = 0 }
+    else if (segments[4] === 'clear') { item.sources = []; item.caption = null; item.sourceCount = 0; const state = socialState(item.id); state.generation += 1; state.comments = []; state.reaction = null }
     else { const input = { ...body }; delete input.expectedVersion; Object.assign(item, input) }
     bump(album, item); return done({ entry: item })
   }
