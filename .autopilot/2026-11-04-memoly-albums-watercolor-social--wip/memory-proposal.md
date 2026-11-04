@@ -10,3 +10,4 @@
 - Verified with a matching isolated loopback `*_test` environment: `bun run --cwd webapp e2e --config=e2e/album-social.playwright.config.ts` (3 passed).
 - Verified targeted backend social/recovery suites and current → pinned S3 → current existing live check (1 passed).
 - Canonical FULL remains pending; do not report it as PASS.
+- Windows FULL safety suite needs an already-running task-owned Ubuntu process even when PostgreSQL is in Docker: cold default WSL startup can exceed Bun test budgets and cascade into catastrophic WSL errors. Warm instance plus unchanged first backup test217.82ms proved this boundary; never hide it by skipping Linux ownership/lock assertions.
