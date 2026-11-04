@@ -41,3 +41,6 @@ D01: pinned recovery runtime не сбрасывает generation. Реальн�
 
 ## Ограниченное разрешение владельца — G01
 2026-11-04 владелец ответил «Да, разрешаю точечное дополнение» на конкретный вопрос о подготовленном recovery guard patch. Разрешён отдельный s3-album-social profile для измеренного итогового executable source, baseline63 + exact2 pinned SQL, preSQL exactprefix63/64/65 only under inherited held release lock, complete65+schema. Старый s3 complete-only policy, fixed accepted recovery artifact IDs/lineage/config/UIv4/Control/S3/read-only checks, backup/disk/hostlock/smoke/no DB rollback сохраняются; ci-release sequence unchanged. Прототип external recovery-guard-proposal/REPORT.md/patch проверен realPG30cases, realLinuxlock, frozenCLI63vs65 и realS3roundtrip, не применён. Применение и финальная привязка выполняются после завершения UI, входят в один итоговый independent technical review и FULL.
+
+### Necessary dependency closure (D04)
+Существующие transitive glob/minimatch build/lint dependencies обновляются только до официально исправленных14.0.2/11.0.1, если targeted consumer compatibility подтверждается. Новых product libraries и audit exceptions нет. Это необходимое устранение фактического FULL-blocker, не независимая модернизация зависимостей; immutable source/recovery pin перепроверяется с итоговым lockfile.

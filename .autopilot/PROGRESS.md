@@ -1,7 +1,7 @@
 <!-- autopilot:progress -->
 # memoLy — альбомные истории: обсуждения и акварель
 
-Текущая сборка: `.autopilot/2026-11-04-memoly-albums-watercolor-social--wip/`. Сервер, общий social adapter и четыре внутренних экрана реализованы. Одно независимое review без подтверждённых P0/P1/P2 и clean-clone social3/3 пройдены. Первый FULL выявил public-import boundary; адресное исправление и exact-source rebind проверены. Финальный FULL/merge/release ещё выполняются; это не отчёт об успешном выпуске.
+Текущая сборка: `.autopilot/2026-11-04-memoly-albums-watercolor-social--wip/`. Сервер, общий social adapter и четыре внутренних экрана реализованы. Одно независимое review без подтверждённых P0/P1/P2 и clean-clone social3/3 пройдены. Первый FULL выявил public-import boundary; адресное исправление проверено. Затем закрыты Bun JSX scanner и реальные glob/minimatch audit blockers; affected checks пройдены, final source rebind/recovery proof выполняются. Финальный FULL/merge/release ещё выполняются; это не отчёт об успешном выпуске.
 
 ## Договорились — не пересматривать
 
