@@ -83,7 +83,7 @@ export function TelegramLinkCard({ hostBridge }: { hostBridge: Pick<HostBridge, 
         return
       }
       setWaitingUntil(Date.parse(result.expiresAt))
-      setNotice('Завершите подключение в Telegram и вернитесь сюда в течение 15 секунд.')
+      setNotice('Откройте memoLy в Telegram в течение 15 секунд. Подключение произойдёт автоматически.')
     } catch (error) {
       if (currentGeneration !== generation.current) return
       setNotice(linkErrorMessage(error))

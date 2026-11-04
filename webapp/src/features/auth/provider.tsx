@@ -167,7 +167,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     options.signal?.throwIfAborted()
     if (options.isCurrent?.() === false) return
     setBootstrapError(null)
-    if (provider === 'max') setApiSessionEpoch(result.sessionEpoch)
+    setApiSessionEpoch(result.sessionEpoch)
     setAccessToken(result.data.accessToken)
     queryClient.setQueryData(authQueryKeys.me(), {
       user: result.data.user,
