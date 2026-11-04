@@ -1057,7 +1057,8 @@ test('MAX-FULL: revoked viewer loses family access and rejoins with retained his
   await usedInviteContext.close()
 })
 
-test('MAX owner creates one invite and can independently copy or share both provider links', async ({ page }) => {
+test('MAX-FULL: owner creates one invite and can independently copy or share both provider links', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   const ownerMaxId = 7_300_000 + Math.floor(Math.random() * 100_000)
   const ownerToken = await signInMax(page, { id: ownerMaxId, first_name: 'Invite links owner' })
@@ -1094,6 +1095,7 @@ test('MAX owner creates one invite and can independently copy or share both prov
   expect(await telegramField.inputValue() === expectedTelegramUrl).toBe(true)
   expect(await maxField.isEditable()).toBe(false)
   expect(await telegramField.isEditable()).toBe(false)
+  await page.screenshot({ path: testInfo.outputPath('cross-provider-invite-ready.png'), fullPage: true, animations: 'disabled' })
 
   await page.evaluate(() => {
     const target = window as typeof window & { __inviteWrites?: string[]; __inviteShareUrls?: string[] }
