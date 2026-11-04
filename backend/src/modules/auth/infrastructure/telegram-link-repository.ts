@@ -43,14 +43,14 @@ export async function resolveTelegramLink(tx: Transaction, input: {
   }
   const source = await activeMaxSource(tx, candidate.id, now, new Date(now.getTime() - input.sourceAbsoluteTtlMs))
   if (!source || source.userId !== candidate.userId) return { state: 'link_invalid' as const }
-  const fingerprintHash = `telegram-link:${input.tokenHash}`
+  const fingerprintHash = input.tokenHash
   if (await tx.telegramAuthReplay.findUnique({ where: { fingerprintHash } })) return { state: 'link_invalid' as const }
   const identity = await tx.externalIdentity.findUnique({ where: { provider_subject: { provider: 'telegram', subject } } })
   const connected = await tx.externalIdentity.findFirst({ where: { provider: 'telegram', userId: source.userId } })
   if (identity || connected) {
     return { state: 'link_conflict' as const }
   }
-  // Recheck after potentially blocking reads. The tagged fingerprint is a one-use Telegram
+  // Recheck after potentially blocking reads. The domain-separated fingerprint is a one-use Telegram
   // authorization capability, stored atomically with the identity/session in the existing registry.
   const consumeAt = await databaseNow(tx)
   if (input.issuedAt + 15_000 <= consumeAt.getTime()) return { state: 'link_invalid' as const }

@@ -86,7 +86,7 @@ describe('Cross-provider identity linking', () => {
     expect(result.headers.get('set-cookie')).toBeNull()
     expect(await db.authSession.findMany({ where: { userId: other.user.id } })).toEqual(before)
     expect((await db.externalIdentity.findUniqueOrThrow({ where: { provider_subject: { provider: 'telegram', subject: String(subject) } } })).userId).toBe(other.user.id)
-    expect(await db.telegramAuthReplay.count({ where: { fingerprintHash: `telegram-link:${tokens.verify(launch.startParam.slice(5)).tokenHash}` } })).toBe(0)
+    expect(await db.telegramAuthReplay.count({ where: { fingerprintHash: tokens.verify(launch.startParam.slice(5)).tokenHash } })).toBe(0)
     expect(await status()).toEqual({ connected: false })
   })
 
