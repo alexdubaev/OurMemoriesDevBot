@@ -1057,7 +1057,9 @@ test('MAX-FULL: revoked viewer loses family access and rejoins with retained his
   await usedInviteContext.close()
 })
 
-test('MAX-FULL: owner creates one invite and can independently copy or share both provider links', async ({ page }, testInfo) => {
+for (const hostSurface of ['MAX', 'Telegram', 'PWA'] as const) {
+test(`MAX-FULL: ${hostSurface} surface creates one invite and can independently copy or share both provider links`, async ({ page: initialPage, browser }, testInfo) => {
+  let page = initialPage
   await page.setViewportSize({ width: 390, height: 844 })
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   const ownerMaxId = 7_300_000 + Math.floor(Math.random() * 100_000)
@@ -1067,8 +1069,24 @@ test('MAX-FULL: owner creates one invite and can independently copy or share bot
   const noteBody = `Invite journey ${suffix}`
   const family = await createAuditFamily(page, ownerToken, `Invite links ${suffix}`, childName, noteBody)
 
-  await page.evaluate((data) => { (window as unknown as MaxAuditWindow).WebApp.initData = data }, signedMaxInitData({ id: ownerMaxId, first_name: 'Invite links owner' }, randomUUID(), ''))
-  await page.reload()
+  let surfaceContext: Awaited<ReturnType<typeof browser.newContext>> | null = null
+  let telegramAuthRequests = 0
+  if (hostSurface === 'MAX') {
+    await page.evaluate((data) => { (window as unknown as MaxAuditWindow).WebApp.initData = data }, signedMaxInitData({ id: ownerMaxId, first_name: 'Invite links owner' }, randomUUID(), ''))
+    await page.reload()
+  } else {
+    const appUrl = new URL('/', page.url()).toString()
+    surfaceContext = await browser.newContext({ storageState: await page.context().storageState(), viewport: { width: 390, height: 844 } })
+    await surfaceContext.grantPermissions(['clipboard-read', 'clipboard-write'])
+    if (hostSurface === 'Telegram') {
+      await surfaceContext.addInitScript(() => {
+        Object.defineProperty(window, 'Telegram', { configurable: true, value: { WebApp: { initData: 'synthetic-host-surface-not-used-for-auth', version: '6.0', platform: 'ios', ready() {} } } })
+      })
+    }
+    page = await surfaceContext.newPage()
+    if (hostSurface === 'Telegram') page.on('request', (request) => { if (request.url().endsWith('/api/v1/auth/telegram')) telegramAuthRequests += 1 })
+    await page.goto(appUrl)
+  }
   await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible({ timeout: 15_000 })
   await selectFamilyFeed(page, childName, noteBody)
   await page.getByRole('button', { name: 'Семья' }).click()
@@ -1096,7 +1114,7 @@ test('MAX-FULL: owner creates one invite and can independently copy or share bot
   expect(await telegramField.inputValue() === expectedTelegramUrl).toBe(true)
   expect(await maxField.isEditable()).toBe(false)
   expect(await telegramField.isEditable()).toBe(false)
-  await page.screenshot({ path: testInfo.outputPath('cross-provider-invite-ready.png'), fullPage: true, animations: 'disabled' })
+  if (hostSurface === 'MAX') await page.screenshot({ path: testInfo.outputPath('cross-provider-invite-ready.png'), fullPage: true, animations: 'disabled' })
 
   await page.evaluate(() => {
     const target = window as typeof window & { __inviteWrites?: string[]; __inviteShareUrls?: string[] }
@@ -1144,10 +1162,13 @@ test('MAX-FULL: owner creates one invite and can independently copy or share bot
   expect(selectedLink === expectedTelegramUrl).toBe(true)
 
   expect(createRequests).toBe(1)
-  const inviteList = await page.request.get(`/api/v1/families/${family.id}/invites`, { headers: { Authorization: `Bearer ${ownerToken}` } })
+  if (hostSurface === 'Telegram') expect(telegramAuthRequests).toBe(0)
+  const inviteList = await initialPage.request.get(`/api/v1/families/${family.id}/invites`, { headers: { Authorization: `Bearer ${ownerToken}` } })
   expect(inviteList.status()).toBe(200)
   expect((await inviteList.json() as { items: unknown[] }).items).toHaveLength(1)
+  await surfaceContext?.close()
 })
+}
 
 async function expectInviteReady(page: Page) {
   await expect(page.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
