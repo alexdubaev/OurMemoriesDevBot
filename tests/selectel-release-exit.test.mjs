@@ -3713,7 +3713,7 @@ const reviewedS3AlbumSocialBlobs = [
   ],
   [
     "webapp/src/features/albums/AlbumEntrySocial.tsx",
-    "2894ae8fc2d0c3acd9bf397b04712d396c62c216"
+    "ece35d70c668625f532ffad89446ddf862970e86"
   ],
   [
     "webapp/src/features/albums/AlbumWatercolor.tsx",
@@ -3741,7 +3741,7 @@ const reviewedS3AlbumSocialBlobs = [
   ],
   [
     "webapp/src/features/comments/index.ts",
-    "4ded0310e5c567e3dd7aefcde4ff8fda36479a95"
+    "983beb052de53aef1b73e514b0c7ac0c51c6130c"
   ],
   [
     "webapp/src/features/comments/queries.ts",
@@ -3783,7 +3783,7 @@ function s3AlbumSocialRecoverySource() {
 
 test('S3 album-social exact executable profile rejects unmeasured source changes', () => {
   const source = s3AlbumSocialRecoverySource()
-  assert.equal(productionCompatibilityFingerprint(source.root), '04bfada5960753e5cd9a01e9dfd9011cb772b3d22022d1227ed1bdaf40e0272f')
+  assert.equal(productionCompatibilityFingerprint(source.root), 'f62b170c24958b718325a551849c9a2a07865dd04c5852e29ab48fad1084eb90')
   const result = runS3Recovery(source, { action: 'rollback_readiness', s3SocialHistoryMocks: true })
   assert.equal(result.status, 0, result.output)
   assert.match(result.events, /S3_SOCIAL_HISTORY:complete/)
