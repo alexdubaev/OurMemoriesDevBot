@@ -49,7 +49,7 @@ export function AlbumEntrySocial(props: Props) {
   if (!discussion.data) return <section aria-label="Обсуждение истории" className="albums-entry-social">
     {discussion.isPending ? <Typography as="p" role="status" variant="bodySm">Загружаем обсуждение…</Typography> : <div role="alert"><Typography as="p" variant="bodySm">Не удалось загрузить обсуждение.</Typography><button onClick={() => void discussion.refetch()} type="button"><Typography as="span" variant="memoryButton">Повторить</Typography></button></div>}
   </section>
-  return <AlbumDiscussionControls {...props} key={discussion.data.discussionGeneration} summary={discussion.data} />
+  return <AlbumDiscussionControls key={discussion.data.discussionGeneration} {...props} summary={discussion.data} />
 }
 
 function AlbumDiscussionControls({ accountId, familyId, membershipEpoch, albumId, entryId, transport, hostBridge, timezone, onInvalidated, summary }: Props & { summary: AlbumEntryDiscussionSummary }) {
