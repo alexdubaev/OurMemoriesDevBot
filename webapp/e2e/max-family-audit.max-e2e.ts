@@ -1069,6 +1069,7 @@ test('MAX-FULL: owner creates one invite and can independently copy or share bot
 
   await page.evaluate((data) => { (window as unknown as MaxAuditWindow).WebApp.initData = data }, signedMaxInitData({ id: ownerMaxId, first_name: 'Invite links owner' }, randomUUID(), ''))
   await page.reload()
+  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible({ timeout: 15_000 })
   await selectFamilyFeed(page, childName, noteBody)
   await page.getByRole('button', { name: 'Семья' }).click()
   await page.getByRole('button', { name: 'Пригласить родственника' }).click()
