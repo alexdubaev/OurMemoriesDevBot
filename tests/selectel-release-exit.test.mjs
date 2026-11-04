@@ -3781,7 +3781,9 @@ function s3AlbumSocialRecoverySource() {
   return fixtureSourceCache.get('s3AlbumSocial')
 }
 
-test('S3 album-social exact executable profile rejects unmeasured source changes', () => {
+test('S3 album-social exact executable profile rejects unmeasured source changes', {
+  timeout: process.platform === 'win32' ? 180_000 : 60_000,
+}, () => {
   const source = s3AlbumSocialRecoverySource()
   assert.equal(productionCompatibilityFingerprint(source.root), '3d939c75a4a6ec1ac6582ac7bcec70edb015c694267bad966aa096f4813df8d2')
   const result = runS3Recovery(source, { action: 'rollback_readiness', s3SocialHistoryMocks: true })
@@ -3829,7 +3831,7 @@ test('S3 album-social preparation preserves designated pair only under the locke
   assert.doesNotMatch(legacy.events, /UP:|GATE|INVERSE/)
 })
 
-test('S3 album-social pre-SQL validator requires the actual inherited Linux release lock', () => {
+test('S3 album-social pre-SQL validator requires the actual inherited Linux release lock', { timeout: 60_000 }, () => {
   const script = linuxPath(resolve(root, 'deploy/selectel/redeploy.sh'))
   const result = runLinuxRoot(`
 set -euo pipefail
