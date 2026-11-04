@@ -52,7 +52,7 @@ describe('Cross-provider identity linking', () => {
     await db.$disconnect()
   })
 
-  test('links a free signed Telegram to the same owner, family and permissions without changing MAX sessions', async () => {
+  test('links a free signed platform identity to the same owner, family and permissions without changing MAX sessions', async () => {
     const before = await db.family.findUniqueOrThrow({ where: { id: familyId }, include: { members: true } })
     const launch = await start()
     expect(launch.startParam).toMatch(/^link_[A-Za-z0-9_-]{70}$/)
@@ -78,7 +78,7 @@ describe('Cross-provider identity linking', () => {
     expect(await db.externalIdentity.count({ where: { userId: owner.id } })).toBe(2)
   })
 
-  test('does not merge an occupied Telegram or change its user identity and sessions', async () => {
+  test('does not merge an occupied platform identity or change its user identity and sessions', async () => {
     const subject = nextSubject()
     const telegram = await exchange('telegram', signed(telegramToken, {}, subject))
     const other = await telegram.json()
@@ -123,7 +123,7 @@ describe('Cross-provider identity linking', () => {
     expect((await exchange('telegram', signed(telegramToken, { start_param: launch.startParam }))).status).toBe(400)
   })
 
-  test('one key has one winner under concurrent distinct Telegram identities', async () => {
+  test('one key has one winner under concurrent distinct platform identities', async () => {
     const launch = await start()
     const before = await db.user.count()
     const responses = await Promise.all([1, 2].map(() => exchange('telegram', signed(telegramToken, { start_param: launch.startParam }))))
