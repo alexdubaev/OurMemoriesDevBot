@@ -5,10 +5,17 @@ import { readFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { requireIntegrationDatabaseUrl } from '../../test-support/integration-database'
+// @ts-expect-error Test-only JavaScript fixture has no declaration surface.
+import { verifyS3AlbumSocialMigrationRoute } from '../../../scripts/test-support/s3-album-social-route-fixture.mjs'
 
 const root = resolve(import.meta.dir, '../../../..')
 const pinned = '26cfab9ce35fd1a42279fc0d9dd3637c340eec6a'
 const baseline = '6de3da8eb4588b3fe3ebe14016ea0c8ae35c69ab'
+
+test('S3 album-social normal migration uses exact routed prefixes and preserves historical MAX routing', async () => {
+  const result = await verifyS3AlbumSocialMigrationRoute(root, resolve(root, 'deploy/selectel/redeploy.sh'))
+  expect(result.cases).toBe(14)
+}, 300_000)
 
 test('S3 album-social release guard validates only exact real PostgreSQL prefixes and preserves data through frozen Prisma status', async () => {
   const base = new URL(requireIntegrationDatabaseUrl()!)

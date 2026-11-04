@@ -678,7 +678,11 @@ migrate() {
 	else
 		backup_database
 	fi
-	if git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e \
+	if [ "$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$S3_RECOVERY_SHA" || true)" = s3-album-social ]; then
+		# This exact completed baseline already contains the historical MAX migration.
+		rollback_verify_s3_album_social_migration_history pre-sql ||
+			die 'S3 album social migration requires the exact reviewed pre-SQL migration prefix'
+	elif git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e \
 		"$MEMOLY_PRODUCT_SHA:backend/prisma/migrations/20261025120000_max_video_legacy_retention/migration.sql" 2>/dev/null; then
 		max_video_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA") ||
 			die 'MAX video migration requires the exact reviewed source compatibility profile'
