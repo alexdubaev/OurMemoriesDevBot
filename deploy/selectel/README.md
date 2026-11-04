@@ -677,7 +677,7 @@ Keep this pair locally as the designated recovery artifact. No S3 policy,
 credentials, versioning or media migration change is needed for its acceptance.
 
 The separately approved `s3-album-social` profile binds executable fingerprint
-`f62b170c24958b718325a551849c9a2a07865dd04c5852e29ab48fad1084eb90`
+`3d939c75a4a6ec1ac6582ac7bcec70edb015c694267bad966aa096f4813df8d2`
 to that same immutable S3 pair. Its immutable 63-migration baseline is
 `6de3da8eb4588b3fe3ebe14016ea0c8ae35c69ab`; the only accepted suffix is
 `20261104110000_album_entry_social` and
