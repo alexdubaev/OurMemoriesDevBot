@@ -27,7 +27,7 @@ export function archiveFrozenMax63Runtime(repository: string, destination: strin
 }
 
 /** Execute the original positive body with its actual compatible source and schema. */
-export async function runFrozenMax63Positive(repository: string, file: string, name: string) {
+export async function runFrozenMax63Positive(repository: string, file: string, name: string, options: { archiveGitContext?: boolean } = {}) {
   const base = new URL(requireIntegrationDatabaseUrl()!)
   if (base.hostname !== '127.0.0.1' || !base.pathname.endsWith('_test')) throw Error('Loopback test database required')
   const database = `max63_recovery_${randomUUID().replaceAll('-', '')}_test`
@@ -43,7 +43,11 @@ export async function runFrozenMax63Positive(repository: string, file: string, n
     await admin.connect(); connected = true
     await admin.query(`CREATE DATABASE "${database}"`); created = true
     checkedFrozenCommand('bun', ['run', 'prisma:deploy'], resolve(runtime, 'backend'), env)
-    const output = checkedFrozenCommand('bun', ['test', '--test-name-pattern', `${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, file], resolve(runtime, 'backend'), env)
+    const childEnv = options.archiveGitContext
+      ? { ...env, GIT_DIR: checkedFrozenCommand('git', ['rev-parse', '--absolute-git-dir'], repository, env).trim(), GIT_WORK_TREE: runtime }
+      : env
+    const output = checkedFrozenCommand('bun', ['test', '--test-name-pattern', `${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, file], resolve(runtime, 'backend'),
+      childEnv)
     if (!/\b1 pass\b/.test(output) || !/Ran 1 test across 1 file/.test(output)) throw Error(`Frozen positive did not execute exactly one passing case:\n${output}`)
     return output
   } finally {
