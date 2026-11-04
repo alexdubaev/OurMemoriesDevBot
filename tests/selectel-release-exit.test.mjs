@@ -1012,12 +1012,13 @@ const frozenAvatarTimerFixSource = () => frozenGitBlob(reviewedAvatarTimerFixBlo
 const frozenStorybookManifest = () => frozenGitBlob(reviewedStorybookManifestBlob, 'Storybook manifest')
 const frozenStorybookLock = () => frozenGitBlob(reviewedStorybookLockBlob, 'Storybook lockfile')
 
+// Removing the full detached-fixture set is cumulative (69 measured removals: 105.5s).
 afterAll(() => {
   for (const directory of fixtureWorktrees.reverse()) {
     const result = spawnSync('git', ['worktree', 'remove', directory], { cwd: root, encoding: 'utf8' })
     if (result.status !== 0) throw new Error(result.stdout + result.stderr)
   }
-}, { timeout: 60_000 })
+}, { timeout: 300_000 })
 const redeployDefinitions = `. ${shellQuote(resolve(root, 'deploy/selectel/redeploy.sh'))}`
 
 test('MAX video installer host pin accepts only the historic blob or this exact reviewed blob', () => {
