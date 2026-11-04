@@ -1057,6 +1057,119 @@ test('MAX-FULL: revoked viewer loses family access and rejoins with retained his
   await usedInviteContext.close()
 })
 
+for (const hostSurface of ['MAX', 'Telegram', 'PWA'] as const) {
+test(`MAX-FULL: ${hostSurface} surface creates one invite and can independently copy or share both provider links`, async ({ page: initialPage, browser }, testInfo) => {
+  let page = initialPage
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  const ownerMaxId = 7_300_000 + Math.floor(Math.random() * 100_000)
+  const ownerToken = await signInMax(page, { id: ownerMaxId, first_name: 'Invite links owner' })
+  const suffix = randomUUID()
+  const childName = `Invite child ${suffix.slice(0, 8)}`
+  const noteBody = `Invite journey ${suffix}`
+  const family = await createAuditFamily(page, ownerToken, `Invite links ${suffix}`, childName, noteBody)
+
+  let surfaceContext: Awaited<ReturnType<typeof browser.newContext>> | null = null
+  let telegramAuthRequests = 0
+  if (hostSurface === 'MAX') {
+    await page.evaluate((data) => { (window as unknown as MaxAuditWindow).WebApp.initData = data }, signedMaxInitData({ id: ownerMaxId, first_name: 'Invite links owner' }, randomUUID(), ''))
+    await page.reload()
+  } else {
+    const appUrl = new URL('/', page.url()).toString()
+    surfaceContext = await browser.newContext({ storageState: await page.context().storageState(), viewport: { width: 390, height: 844 } })
+    await surfaceContext.grantPermissions(['clipboard-read', 'clipboard-write'])
+    if (hostSurface === 'Telegram') {
+      await surfaceContext.addInitScript(() => {
+        Object.defineProperty(window, 'Telegram', { configurable: true, value: { WebApp: { initData: 'synthetic-host-surface-not-used-for-auth', version: '6.0', platform: 'ios', ready() {} } } })
+      })
+    }
+    page = await surfaceContext.newPage()
+    if (hostSurface === 'Telegram') page.on('request', (request) => { if (request.url().endsWith('/api/v1/auth/telegram')) telegramAuthRequests += 1 })
+    await page.goto(appUrl)
+  }
+  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible({ timeout: 15_000 })
+  await selectFamilyFeed(page, childName, noteBody)
+  await page.getByRole('button', { name: 'Семья' }).click()
+  await page.getByRole('button', { name: 'Пригласить родственника' }).click()
+
+  let createRequests = 0
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith(`/api/v1/families/${family.id}/invites`)) createRequests += 1
+  })
+  const createResponsePromise = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith(`/api/v1/families/${family.id}/invites`))
+  await page.getByRole('button', { name: 'Создать приглашение' }).click()
+  const createResponse = await createResponsePromise
+  expect(createResponse.status()).toBe(201)
+  const rawToken = (await createResponse.json() as { rawToken: string }).rawToken
+  expect(/^[A-Za-z0-9_-]{32,57}$/.test(rawToken)).toBe(true)
+  await expect(page.getByRole('heading', { name: 'Ссылка готова' })).toBeVisible()
+
+  const maxRegion = page.getByRole('region', { name: 'Пригласить через MAX' })
+  const telegramRegion = page.getByRole('region', { name: 'Пригласить через Telegram' })
+  const maxField = maxRegion.getByRole('textbox', { name: 'Ссылка приглашения MAX' })
+  const telegramField = telegramRegion.getByRole('textbox', { name: 'Ссылка приглашения Telegram' })
+  const expectedMaxUrl = `https://max.ru/OurMemoriesMaxBot?start=invite_${rawToken}`
+  const expectedTelegramUrl = `https://t.me/OurMemoriesDevBot?startapp=invite_${rawToken}`
+  expect(await maxField.inputValue() === expectedMaxUrl).toBe(true)
+  expect(await telegramField.inputValue() === expectedTelegramUrl).toBe(true)
+  expect(await maxField.isEditable()).toBe(false)
+  expect(await telegramField.isEditable()).toBe(false)
+  if (hostSurface === 'MAX') await page.screenshot({ path: testInfo.outputPath('cross-provider-invite-ready.png'), fullPage: true, animations: 'disabled' })
+
+  await page.evaluate(() => {
+    const target = window as typeof window & { __inviteWrites?: string[]; __inviteShareUrls?: string[] }
+    target.__inviteWrites = []
+    target.__inviteShareUrls = []
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (url: string) => { target.__inviteWrites?.push(url) } } })
+  })
+  await maxRegion.getByRole('button', { name: 'Скопировать' }).click()
+  await expect(maxRegion.getByRole('status').getByText('Ссылка MAX скопирована')).toBeVisible()
+  await telegramRegion.getByRole('button', { name: 'Скопировать' }).click()
+  await expect(telegramRegion.getByRole('status').getByText('Ссылка Telegram скопирована')).toBeVisible()
+  const copiedLinks = await page.evaluate(() => (window as typeof window & { __inviteWrites?: string[] }).__inviteWrites ?? [])
+  expect(copiedLinks.length === 2 && copiedLinks[0] === expectedMaxUrl && copiedLinks[1] === expectedTelegramUrl).toBe(true)
+
+  await page.evaluate(() => Object.defineProperty(navigator, 'share', { configurable: true, value: undefined }))
+  await maxRegion.getByRole('button', { name: 'Поделиться ссылкой MAX' }).click()
+  await expect(maxRegion.getByRole('status').getByText('Меню отправки недоступно. Ссылка MAX скопирована')).toBeVisible()
+
+  await page.evaluate(() => {
+    const target = window as typeof window & { __inviteShareUrls?: string[] }
+    Object.defineProperty(navigator, 'share', { configurable: true, value: async ({ url }: { url: string }) => { target.__inviteShareUrls?.push(url); throw new Error('Share unavailable') } })
+  })
+  await telegramRegion.getByRole('button', { name: 'Поделиться ссылкой Telegram' }).click()
+  await expect(telegramRegion.getByRole('status').getByText('Меню отправки недоступно. Ссылка Telegram скопирована')).toBeVisible()
+  const afterShareFallback = await page.evaluate(() => ({ writes: (window as typeof window & { __inviteWrites?: string[] }).__inviteWrites ?? [], shares: (window as typeof window & { __inviteShareUrls?: string[] }).__inviteShareUrls ?? [] }))
+  expect(afterShareFallback.writes.length === 4 && afterShareFallback.writes[2] === expectedMaxUrl && afterShareFallback.writes[3] === expectedTelegramUrl && afterShareFallback.shares.length === 1 && afterShareFallback.shares[0] === expectedTelegramUrl).toBe(true)
+
+  await page.evaluate(() => {
+    const target = window as typeof window & { __inviteShareUrls?: string[] }
+    Object.defineProperty(navigator, 'share', { configurable: true, value: async ({ url }: { url: string }) => { target.__inviteShareUrls?.push(url); throw new DOMException('', 'AbortError') } })
+  })
+  await maxRegion.getByRole('button', { name: 'Поделиться ссылкой MAX' }).click()
+  await expect(maxRegion.getByRole('status').getByText('Отправка отменена')).toBeVisible()
+  const afterCancellation = await page.evaluate(() => ({ writes: (window as typeof window & { __inviteWrites?: string[] }).__inviteWrites ?? [], shares: (window as typeof window & { __inviteShareUrls?: string[] }).__inviteShareUrls ?? [] }))
+  expect(afterCancellation.writes.length === 4 && afterCancellation.shares.length === 2 && afterCancellation.shares[1] === expectedMaxUrl).toBe(true)
+
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'share', { configurable: true, value: undefined })
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('Clipboard unavailable') } } })
+  })
+  await telegramRegion.getByRole('button', { name: 'Поделиться ссылкой Telegram' }).click()
+  await expect(telegramRegion.getByRole('alert').getByText('Не удалось отправить или скопировать ссылку Telegram. Выделите её в поле выше.')).toBeVisible()
+  await telegramField.focus()
+  const selectedLink = await telegramField.evaluate((input: HTMLInputElement) => input.value.slice(input.selectionStart ?? 0, input.selectionEnd ?? 0))
+  expect(selectedLink === expectedTelegramUrl).toBe(true)
+
+  expect(createRequests).toBe(1)
+  if (hostSurface === 'Telegram') expect(telegramAuthRequests).toBe(0)
+  const inviteList = await initialPage.request.get(`/api/v1/families/${family.id}/invites`, { headers: { Authorization: `Bearer ${ownerToken}` } })
+  expect(inviteList.status()).toBe(200)
+  expect((await inviteList.json() as { items: unknown[] }).items).toHaveLength(1)
+  await surfaceContext?.close()
+})
+}
+
 async function expectInviteReady(page: Page) {
   await expect(page.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('button', { name: 'Присоединиться', exact: true })).toBeVisible()

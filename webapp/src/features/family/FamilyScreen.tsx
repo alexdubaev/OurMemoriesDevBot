@@ -5,9 +5,12 @@ import { BottomNavigation } from '@/components/BottomNavigation'
 import { FamilyPresentation, type FamilyMemberActions } from '@/features/memoly-ui'
 import type { AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/host-bridge'
+import { createMaxInviteLink } from '@/platform/max-invite-link'
 import { createInvite, leaveFamily, loadFamilyUsage, revokeInvite, updateFamily, updateFamilyMember } from './api'
 import { FamilyChildAvatar } from './FamilyChildAvatar'
+import { createInviteLink as createTelegramInviteLink } from './invite-link'
 import { createInviteResult } from './invite-result'
+import { shareInviteWithFallback } from './InvitationScreens'
 import { canAddChild, familyChildren } from './model'
 import { canManageFamilyMaxChannel, useFamilyMaxChannelStatus } from './useFamilyMaxChannelStatus'
 
@@ -35,6 +38,7 @@ export function FamilyScreen({
   onAlbums,
   onRefresh,
   createInviteLink,
+  maxBotUsername,
   canOpenInstall = false,
   installLabel,
   onOpenInstall = () => undefined,
@@ -62,6 +66,7 @@ export function FamilyScreen({
   onAlbums?: () => void
   onRefresh: (options?: FamilyRefreshOptions) => Promise<void>
   createInviteLink: (rawToken: string) => string | null
+  maxBotUsername?: string
   canOpenInstall?: boolean
   installLabel?: string
   onOpenInstall?: () => void
@@ -70,8 +75,41 @@ export function FamilyScreen({
   const [savedRefreshFailed, setSavedRefreshFailed] = useState(false)
   const [inviteError, setInviteError] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [inviteReady, setInviteReady] = useState<{ url: string; expiresAt: string; inviteeDisplayName?: string } | null>(null)
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [inviteReady, setInviteReady] = useState<{ maxUrl: string | null; telegramUrl: string; expiresAt: string; inviteeDisplayName?: string } | null>(null)
+  const [inviteActions, setInviteActions] = useState({
+    max: { copyState: 'idle' as const, shareState: 'idle' as const },
+    telegram: { copyState: 'idle' as const, shareState: 'idle' as const },
+  })
+  const resetInviteActions = () => setInviteActions({
+    max: { copyState: 'idle', shareState: 'idle' },
+    telegram: { copyState: 'idle', shareState: 'idle' },
+  })
+  const inviteUrl = (provider: 'max' | 'telegram') => provider === 'max' ? inviteReady?.maxUrl : inviteReady?.telegramUrl
+  const updateInviteAction = (provider: 'max' | 'telegram', action: 'copyState' | 'shareState', value: string) => {
+    setInviteActions((current) => ({ ...current, [provider]: { ...current[provider], [action]: value } }))
+  }
+  const copyInvite = async (provider: 'max' | 'telegram') => {
+    const url = inviteUrl(provider)
+    if (!url) { updateInviteAction(provider, 'copyState', 'failed'); return }
+    try {
+      if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+      await navigator.clipboard.writeText(url)
+      updateInviteAction(provider, 'copyState', 'copied')
+    } catch {
+      updateInviteAction(provider, 'copyState', 'failed')
+    }
+  }
+  const shareInvite = async (provider: 'max' | 'telegram') => {
+    const url = inviteUrl(provider)
+    if (!url) { updateInviteAction(provider, 'shareState', 'failed'); return }
+    const share = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+      ? (value: string) => navigator.share({ url: value })
+      : undefined
+    const copy = typeof navigator !== 'undefined' && navigator.clipboard?.writeText
+      ? (value: string) => navigator.clipboard.writeText(value)
+      : undefined
+    updateInviteAction(provider, 'shareState', await shareInviteWithFallback(url, share, copy))
+  }
   const [now, setNow] = useState(() => Date.now())
   const [usage, setUsage] = useState<{ usedBytes: number; quotaBytes: number | null } | null>(null)
   const [usageFailed, setUsageFailed] = useState(false)
@@ -156,7 +194,7 @@ export function FamilyScreen({
         onOpenInstall={onOpenInstall}
           childAvatarUrl={displayedChildAvatar.url}
           childAvatarStatus={displayedChildAvatar.status}
-          copyState={copyState}
+          inviteActions={inviteActions}
           familyResponse={familyResponse}
           currentUserId={currentUserId}
           hostBridge={hostBridge}
@@ -172,27 +210,23 @@ export function FamilyScreen({
           maxChannelError={maxChannel.error}
           canManageMaxChannel={canManageMaxChannel}
           onRetryMaxChannel={maxChannel.retry}
-          onCloseInvite={() => { setInviteReady(null); setCopyState('idle') }}
+          onCloseInvite={() => { setInviteReady(null); resetInviteActions() }}
           onAllFamilies={onAllFamilies}
-          onCopyInvite={async () => {
-            if (!inviteReady) return
-            try {
-              await navigator.clipboard.writeText(inviteReady.url)
-              setCopyState('copied')
-            } catch {
-              setCopyState('failed')
-            }
-          }}
           onCreateInvite={async (input) => {
             setBusy(true)
             setError(null)
             setInviteError(false)
             try {
+              let rawToken: string | null = null
               const result = await createInviteResult({
-                create: () => createInvite(transport, familyResponse.family.id, {
-                  role: input.role,
-                  inviteeDisplayName: input.inviteeDisplayName,
-                }, input.idempotencyKey),
+                create: async () => {
+                  const created = await createInvite(transport, familyResponse.family.id, {
+                    role: input.role,
+                    inviteeDisplayName: input.inviteeDisplayName,
+                  }, input.idempotencyKey)
+                  rawToken = created.rawToken
+                  return created
+                },
                 refresh: async () => {
                   try {
                     await onRefresh({ failureMode: 'throw' })
@@ -202,10 +236,16 @@ export function FamilyScreen({
                     throw reason
                   }
                 },
-                toUrl: createInviteLink,
+                toUrl: (rawToken) => createInviteLink(rawToken) ?? createTelegramInviteLink(rawToken),
               })
-              setInviteReady({ ...result, inviteeDisplayName: input.inviteeDisplayName })
-              setCopyState('idle')
+              if (!rawToken) throw new Error('Не удалось создать ссылку приглашения.')
+              setInviteReady({
+                maxUrl: createMaxInviteLink(rawToken, maxBotUsername),
+                telegramUrl: createTelegramInviteLink(rawToken),
+                expiresAt: result.expiresAt,
+                inviteeDisplayName: input.inviteeDisplayName,
+              })
+              resetInviteActions()
             } catch (reason) {
               setInviteError(true)
               throw reason
@@ -230,14 +270,8 @@ export function FamilyScreen({
           onRevokeInvite={async (invite) => run(() => revokeInvite(
             transport, familyResponse.family.id, invite.id,
           ), true)}
-          onShareInvite={async () => {
-            if (!inviteReady || !navigator.share) return
-            try {
-              await navigator.share({ url: inviteReady.url })
-            } catch {
-              // Sharing was cancelled or unavailable.
-            }
-          }}
+          onCopyInvite={copyInvite}
+          onShareInvite={shareInvite}
           onUpdateMember={async (member, input) => run(() => updateFamilyMember(
             transport, familyResponse.family.id, member.userId, { ...input, expectedVersion: member.version },
           ), true)}
