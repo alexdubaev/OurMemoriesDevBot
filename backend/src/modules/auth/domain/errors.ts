@@ -9,6 +9,8 @@ export type AuthFailureKind =
   | 'session_invalid'
   | 'telegram_init_data_invalid'
   | 'telegram_init_data_replayed'
+  | 'telegram_link_invalid'
+  | 'telegram_link_conflict'
   | 'max_init_data_invalid'
   | 'max_init_data_replayed'
   | 'browser_link_invalid'

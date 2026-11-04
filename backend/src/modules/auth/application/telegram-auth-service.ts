@@ -1,5 +1,6 @@
 import { sessionExpiresAt, type SessionMetadata } from '../domain/session'
 import { AuthFailure } from '../domain/errors'
+import { hashTelegramLinkToken } from './telegram-link-service'
 import type {
   AccessTokens,
   Clock,
@@ -37,6 +38,9 @@ export class TelegramAuthService {
     }
 
     const now = this.dependencies.clock.now()
+    const isLink = verified.startParam?.startsWith('link_') ?? false
+    const linkToken = isLink ? verified.startParam!.match(/^link_([A-Za-z0-9_-]{43})$/)?.[1] : undefined
+    if (isLink && !linkToken) throw new AuthFailure('telegram_link_invalid', 'Invalid link payload')
     const existingSessionId = await this.currentSessionId(presentedRefreshToken, now)
     const refreshToken = this.dependencies.refreshTokens.create()
     const exchanged = await this.dependencies.repository.exchangeTelegramIdentity({
@@ -44,6 +48,11 @@ export class TelegramAuthService {
       fingerprintHash: verified.replayFingerprintHash,
       replayExpiresAt: new Date(now.getTime() + 5 * 60 * 1000),
       existingSessionId,
+      link: linkToken ? {
+        tokenHash: hashTelegramLinkToken(linkToken),
+        authDateSeconds: verified.authDateSeconds,
+        sourceCreatedAfter: new Date(now.getTime() - this.dependencies.sessionAbsoluteTtlDays * 86400_000),
+      } : undefined,
       now,
       session: {
         refreshTokenHash: this.dependencies.refreshTokens.hash(refreshToken),
@@ -53,6 +62,9 @@ export class TelegramAuthService {
       },
     })
 
+    if (exchanged.state === 'link_invalid' || exchanged.state === 'link_conflict') {
+      throw new AuthFailure(exchanged.state === 'link_invalid' ? 'telegram_link_invalid' : 'telegram_link_conflict', 'Telegram link rejected')
+    }
     if (exchanged.state === 'replayed') {
       throw new AuthFailure(
         'telegram_init_data_replayed',
