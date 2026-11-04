@@ -1,7 +1,7 @@
 <!-- autopilot:progress -->
 # memoLy — альбомные истории: обсуждения и акварель
 
-Текущая сборка: `.autopilot/2026-11-04-memoly-albums-watercolor-social--wip/`. Сервер, общий social adapter и четыре внутренних экрана реализованы. Итоговые review/FULL/merge/release ещё выполняются; это не отчёт об успешном выпуске.
+Текущая сборка: `.autopilot/2026-11-04-memoly-albums-watercolor-social--wip/`. Сервер, общий social adapter и четыре внутренних экрана реализованы. Одно независимое review без подтверждённых P0/P1/P2 и clean-clone social3/3 пройдены. Первый FULL выявил public-import boundary; адресное исправление и exact-source rebind проверены. Финальный FULL/merge/release ещё выполняются; это не отчёт об успешном выпуске.
 
 ## Договорились — не пересматривать
 
@@ -14,7 +14,7 @@
 
 ## Не доделано
 
-- Завершить exact-source recovery patch, одно независимое technical review, FULL, squash merge и guarded deploy/smoke; факты публикуются в PR и внешнем HANDOFF.
+- Завершить итоговый canonical FULL на исправленном чистом source, squash merge и guarded deploy/smoke; факты публикуются в PR и внешнем HANDOFF.
 - Физический iPhone/MAX: клавиатура/safe-area/Back, pinch и возврат к плитке остаются ручной проверкой; desktop/CDP не являются device acceptance.
 
 ## Известные баги

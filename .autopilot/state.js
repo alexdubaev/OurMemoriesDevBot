@@ -13,7 +13,7 @@ window.STATE =
   "skillDir": "C:/Users/Alexandr/.codex/skills/autopilot",
   "baseCommit": "7e60b958",
   "startedAt": "2026-11-04T12:20:45+03:00",
-  "updatedAt": "2026-11-04T14:09:54+03:00",
+  "updatedAt": "2026-11-04T14:16:04+03:00",
   "finishedAt": null,
   "stages": [
     {
@@ -55,12 +55,14 @@ window.STATE =
     },
     {
       "id": "review",
-      "status": "active",
-      "startedAt": "2026-11-04T14:09:54+03:00"
+      "status": "done",
+      "startedAt": "2026-11-04T14:09:54+03:00",
+      "finishedAt": "2026-11-04T14:16:03+03:00"
     },
     {
       "id": "final",
-      "status": "pending"
+      "status": "active",
+      "startedAt": "2026-11-04T14:16:03+03:00"
     }
   ],
   "requirements": {
@@ -257,7 +259,11 @@ window.STATE =
     "items": []
   },
   "concerns": [],
-  "blind": null,
+  "blind": {
+    "checked": 3,
+    "matched": 3,
+    "mismatches": []
+  },
   "beats": [
     "2026-11-04T12:20:45+03:00",
     "2026-11-04T12:21:20+03:00",
@@ -283,9 +289,11 @@ window.STATE =
     "2026-11-04T13:35:16+03:00",
     "2026-11-04T13:39:31+03:00",
     "2026-11-04T13:39:32+03:00",
-    "2026-11-04T14:09:54+03:00"
+    "2026-11-04T14:09:54+03:00",
+    "2026-11-04T14:16:03+03:00",
+    "2026-11-04T14:16:04+03:00"
   ],
-  "rev": 30,
+  "rev": 32,
   "waiting": null,
   "waits": [
     {
@@ -473,6 +481,20 @@ window.STATE =
       "k": "stage",
       "id": "review",
       "act": "start"
+    },
+    {
+      "t": "2026-11-04T14:16:03+03:00",
+      "k": "stage",
+      "id": "final",
+      "act": "start"
+    },
+    {
+      "t": "2026-11-04T14:16:04+03:00",
+      "k": "gate",
+      "g": "G4",
+      "ok": true,
+      "checked": 3,
+      "matched": 3
     }
   ],
   "reqList": [
@@ -895,6 +917,12 @@ window.STATE =
       "ok": true,
       "at": "2026-11-04T13:18:39+03:00",
       "problems": 0
+    },
+    "G4": {
+      "ok": true,
+      "at": "2026-11-04T14:16:04+03:00",
+      "checked": 3,
+      "matched": 3
     }
   },
   "result": null
