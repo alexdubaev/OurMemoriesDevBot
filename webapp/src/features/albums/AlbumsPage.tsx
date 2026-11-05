@@ -14,16 +14,19 @@ import { albumsApi, createAlbumRequestScope, createAlbumScopeFailureSink, isAlbu
 import { AlbumForm } from './AlbumForms'
 import { groupAlbumsByChild } from './child-groups'
 import { AlbumEntryDetail } from './AlbumEntryDetail'
+import { MonthEntryDetail } from './MonthEntryDetail'
+import { MonthAddPhotos } from './MonthAddPhotos'
+import { MonthCoverPicker, YearAlbumCoverCandidates } from './MonthCoverPicker'
 import { EntryEditor } from './EntryEditor'
 import { WorkshopGallery } from './WorkshopGallery'
 import { ComposerHost } from './ComposerHost'
-import { coverSource, dateLabel, filled, kindNames, categories, suggestions, monthAgeLabel, type AlbumSource } from './model'
+import { entryCover, dateLabel, filled, kindNames, categories, suggestions, monthAgeLabel, type AlbumSource } from './model'
 import { AlbumCatalogPresentation } from './AlbumCatalogPresentation'
 import { AlbumWatercolor, AlbumWatercolorFooter } from './AlbumWatercolor'
 import { SourcePreview } from './SourcePreview'
 import './albums.css'
 
-type Route = 'catalog' | 'create' | 'album' | 'overview' | 'entry' | 'edit-entry' | 'edit-album' | 'cover'
+type Route = 'catalog' | 'create' | 'album' | 'overview' | 'entry' | 'edit-entry' | 'edit-album' | 'cover' | 'month-cover' | 'month-add' | 'month-photo-remove'
 type DeleteConfirmation = { kind: 'album' | 'entry' | 'month'; albumId: string; entryId?: string; version: number; scopeKey: string; route: Route }
 export type AlbumsPageProps = {
   accountId: string; familyId: string; familyName: string; timezone: string; membershipEpoch: number; active: boolean
@@ -92,6 +95,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
   const [offline, setOffline] = useState(() => !navigator.onLine)
   const [upload, setUpload] = useState<{ attach: (memory: MemoryDto) => Promise<void>; attachPhotos: (mediaIds: string[]) => Promise<void> } | null>(null)
   const [revision, setRevision] = useState(0)
+  const [monthRevision, setMonthRevision] = useState(0)
   const pending = useRef(false)
   const paging = useRef(false)
   const requestGeneration = useRef(0)
@@ -100,6 +104,9 @@ export function AlbumsPage(props: AlbumsPageProps) {
   const scrolls = useRef<Partial<Record<Route, number>>>({ catalog: 0 })
   const focus = useRef<Partial<Record<Route, HTMLElement>>>({})
   const routeRef = useRef(route)
+  const entryReturn = useRef<'album' | 'overview'>('album')
+  const monthViewerOpen = useRef(false)
+  const onMonthViewerOpenChange = useCallback((open: boolean) => { monthViewerOpen.current = open }, [])
   const clearWorkshopFocus = useCallback(() => { setWorkshopFocusId(null); setWorkshopFocusTop(null) }, [])
   const backRef = useRef<() => void>(() => undefined)
   useLayoutEffect(() => { routeRef.current = route }, [route])
@@ -148,18 +155,19 @@ export function AlbumsPage(props: AlbumsPageProps) {
   }, [api, filter, revision, album?.id])
   async function refreshAlbum(id: string, refreshEntry = false) {
     const generation = ++albumRead.current
-    const [fresh, page, summary] = await Promise.all([api.album(id), api.entries(id, undefined, category, year), album?.kind === 'workshop' ? api.groups(id) : Promise.resolve(null)])
-    const detail = refreshEntry && entry ? await api.entry(id, entry.id) : null
+    const month = album?.kind === 'year'
+    const [fresh, page, summary] = await Promise.all([api.album(id), api.entries(id, undefined, category, year, month), album?.kind === 'workshop' ? api.groups(id) : Promise.resolve(null)])
+    const detail = refreshEntry && entry ? await api.entry(id, entry.id, month) : null
     if (scopeController.isAborted() || activeAlbumId.current !== id || generation !== albumRead.current) return
     setAlbum(fresh.album); setEntries(page.items); setEntryCursor(page.nextCursor)
     if (summary) setGroups(summary.groups)
     if (detail) setEntry(detail.entry)
-    setSavedRefreshFailed(false); setError(null); setConflict(false)
+    setLoading(false); setSavedRefreshFailed(false); setError(null); setConflict(false)
   }
   useEffect(() => {
     if (!album) return
     const id = album.id; const generation = ++requestGeneration.current
-    void Promise.all([api.entries(id, undefined, category, year), album.kind === 'workshop' ? api.groups(id) : Promise.resolve(null)]).then(([page, summary]) => {
+    void Promise.all([api.entries(id, undefined, category, year, album.kind === 'year'), album.kind === 'workshop' ? api.groups(id) : Promise.resolve(null)]).then(([page, summary]) => {
       if (generation !== requestGeneration.current || scopeController.isAborted()) return
       setEntries(page.items); setEntryCursor(page.nextCursor); if (summary) setGroups(summary.groups)
     }).catch((reason) => { if (generation === requestGeneration.current) fail(reason) }).finally(() => { if (generation === requestGeneration.current && !scopeController.isAborted()) setLoading(false) })
@@ -170,9 +178,11 @@ export function AlbumsPage(props: AlbumsPageProps) {
   const back = useCallback(() => {
     if (deleteConfirmation) { setDeleteConfirmation(null); return }
     if (pending.current) return
-    if (upload) return
+    if (upload || route === 'month-add' || monthViewerOpen.current) return
     if (route === 'edit-entry') { navigate(entry ? 'entry' : 'album'); return }
-    if (route === 'entry' || route === 'overview' || route === 'edit-album' || route === 'cover') { navigate('album'); return }
+    if (route === 'month-cover' || route === 'month-photo-remove') { navigate('entry'); return }
+    if (route === 'entry') { navigate(entryReturn.current); return }
+    if (route === 'overview' || route === 'edit-album' || route === 'cover') { navigate('album'); return }
     if (route === 'album') { activeAlbumId.current = null; albumRead.current += 1; setLoading(true); setError(null); setAlbum(null); setEntry(null); setCategory(undefined); setYear(undefined); setWorkshopFocusId(null); navigate('catalog'); return }
     if (route === 'create') { navigate('catalog'); return }
     props.onFeed()
@@ -198,14 +208,15 @@ export function AlbumsPage(props: AlbumsPageProps) {
     if (!album || pending.current) return
     pending.current = true; setBusy(true); setError(null)
     try {
-      const result = await api.entry(album.id, item.id)
+      const result = await api.entry(album.id, item.id, album.kind === 'year')
       if (scopeController.isAborted() || activeAlbumId.current !== album.id) return
       setEntry(result.entry); setAlbum((current) => current ? { ...current, version: result.entry.aggregateVersion } : current)
       if (album.kind === 'workshop' && trigger?.dataset.albumTile) { setWorkshopFocusId(trigger.dataset.albumTile); setWorkshopFocusTop(trigger.getBoundingClientRect().top) }
       // Workshop tiles are virtualized. Restore them by logical ID after the
       // gallery has measured and remounted the tile, never by an old node ref.
       if (trigger && album.kind !== 'workshop') focus.current[route] = trigger
-      scrolls.current.entry = 0; navigate(result.entry.kind === 'month' && !filled(result.entry) && result.entry.capabilities.edit ? 'edit-entry' : 'entry')
+      entryReturn.current = route === 'overview' ? 'overview' : 'album'
+      scrolls.current.entry = 0; navigate('entry')
     } catch (reason) { fail(reason) }
     finally { pending.current = false; if (!scopeController.isAborted()) setBusy(false) }
   }
@@ -213,7 +224,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
     if (paging.current || loading || conflict) return
     paging.current = true; setLoadingMore(true); const generation = requestGeneration.current
     try {
-      if (album && entryCursor) { const page = await api.entries(album.id, entryCursor, category, year); if (generation === requestGeneration.current && !scopeController.isAborted()) { setEntries((old) => [...new Map([...old, ...page.items].map((item) => [item.id, item])).values()]); setEntryCursor(page.nextCursor) } }
+      if (album && entryCursor) { const page = await api.entries(album.id, entryCursor, category, year, album.kind === 'year'); if (generation === requestGeneration.current && !scopeController.isAborted()) { setEntries((old) => [...new Map([...old, ...page.items].map((item) => [item.id, item])).values()]); setEntryCursor(page.nextCursor) } }
       else if (!album && catalogCursor) { const page = await api.list(filter, catalogCursor); if (generation === requestGeneration.current && !scopeController.isAborted()) { setAlbums((old) => [...new Map([...old, ...page.items].map((item) => [item.id, item])).values()]); setCatalogCursor(page.nextCursor) } }
     } catch (reason) { fail(reason) } finally { paging.current = false; if (!scopeController.isAborted()) setLoadingMore(false) }
   }
@@ -248,10 +259,37 @@ export function AlbumsPage(props: AlbumsPageProps) {
       if (committed && !scopeController.isAborted() && activeAlbumId.current === albumId && routeRef.current === 'cover') navigate('album')
     })
   }
-  function saved(version: number) {
+  function saved(version: number, monthEntry?: AlbumEntryDto) {
     if (!album || scopeController.isAborted()) return
-    setAlbum({ ...album, version }); setUpload(null); navigate('album')
+    if (monthEntry) {
+      setEntry(monthEntry)
+      setEntries((items) => items.map((item) => item.id === monthEntry.id ? monthEntry : item))
+    }
+    setAlbum({ ...album, version }); setUpload(null); navigate(monthEntry ? 'entry' : 'album')
     void refreshAlbum(album.id).catch((reason) => { if (isAlbumScopeFailure(reason)) fail(reason); else setSavedRefreshFailed(true) })
+  }
+  function refreshMonth() {
+    if (!album) return
+    void refreshAlbum(album.id, true).then(() => {
+      if (!scopeController.isAborted() && activeAlbumId.current === album.id) setMonthRevision((value) => value + 1)
+    }).catch(fail)
+  }
+  function monthPhotoAction(sourceId: string | null) {
+    if (!album || !entry || !editable) return
+    const remove = route === 'month-photo-remove'
+    if (remove && !sourceId) return
+    void mutation(async () => {
+      if (remove) await api.removeMonthPhoto(album.id, entry.id, sourceId!, entry.version)
+      else {
+        const { entry: updated } = await api.setMonthCover(album.id, entry.id, entry.version, sourceId)
+        if (!scopeController.isAborted()) {
+          setEntry(updated)
+          setEntries((items) => items.map((item) => item.id === updated.id ? updated : item))
+        }
+      }
+    }, undefined, true).then((committed) => {
+      if (committed && !scopeController.isAborted()) navigate('entry')
+    })
   }
   function reloadCatalog() { setLoading(true); setError(null); setConflict(false); setRevision((value) => value + 1) }
   function discussionInvalidated(reason: ApiRequestError) {
@@ -264,7 +302,8 @@ export function AlbumsPage(props: AlbumsPageProps) {
   }
   function retryRead() {
     setLoading(true); setError(null); setConflict(false); setSavedRefreshFailed(false)
-    if (album) void refreshAlbum(album.id, route === 'entry').catch(fail)
+    if (album && entry?.kind === 'month' && ['entry', 'month-cover', 'month-photo-remove'].includes(route)) refreshMonth()
+    else if (album) void refreshAlbum(album.id, route === 'entry').catch(fail)
     else setRevision((value) => value + 1)
   }
   function changeCategory(value: string | undefined) { if (value === category) return; setLoading(true); setError(null); setCategory(value) }
@@ -293,7 +332,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
       void mutation(() => api.remove(target.albumId, target.version), () => { setAlbums((old) => old.filter((item) => item.id !== target.albumId)); activeAlbumId.current = null; setAlbum(null); navigate('catalog') })
       return
     }
-    void mutation(() => target.kind === 'month' ? api.clear(target.albumId, target.entryId!, target.version) : api.removeEntry(target.albumId, target.entryId!, target.version), undefined, target.kind === 'month').then((committed) => {
+    void mutation(() => target.kind === 'month' ? api.clear(target.albumId, target.entryId!, target.version, true) : api.removeEntry(target.albumId, target.entryId!, target.version), undefined, target.kind === 'month').then((committed) => {
       if (committed && !scopeController.isAborted()) { setEntry(null); navigate('album') }
     })
   }
@@ -304,7 +343,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
   const albumChild = (multiChild && album?.childId ? childList.find((item) => item.id === album.childId) : undefined) ?? props.child
   const albumGroups = multiChild ? groupAlbumsByChild(albums, childList) : null
   const years = [...new Set(groups.map((group) => group.year).filter((year): year is number => year !== null))].sort((a, b) => b - a)
-  const showNav = !upload
+  const showNav = !upload && route !== 'month-add'
   return <div className="albums-surface" data-albums-kind={album?.kind} data-albums-route={route}>
     <div hidden={Boolean(upload)}>
       {route === 'catalog' ? multiChild ? <FamilyHeaderV2 childList={childList} familyName={props.familyName} mode="feed" onAllFamilies={props.onAllFamilies} onSelectChild={props.onOpenChild} renderChildAvatar={(item) => <FamilyChildAvatar child={item} enabled={props.childAvatarsEnabled ?? false} familyId={familyId} membershipEpoch={membershipEpoch} transport={transport} />} theme={theme} /> : <ChildHeader childAvatarCrop={props.child?.avatarCrop} childAvatarStatus={props.childAvatar?.status} childAvatarUrl={props.childAvatar?.url} childName={props.child?.name ?? props.familyName} childSubtitle={props.childSubtitle} mode="feed" onAllFamilies={props.onAllFamilies} theme={theme} /> : null}
@@ -315,7 +354,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
         {route === 'catalog' ? <AlbumCatalogPresentation albums={albums} catalogCursor={catalogCursor} error={Boolean(error)} filter={filter} groups={albumGroups} loading={loading} loadingMore={loadingMore} onCreate={() => navigate('create')} onFilterChange={changeCatalogFilter} onLoadMore={() => void more()} onOpenAlbum={(item) => void openAlbum(item)} renderCover={(item) => item.cover ? image(item.cover) : null} role={role} /> : null}
         {route === 'create' ? <AlbumForm api={api} child={props.child} childProfiles={childList} defaultChildId={props.childFilter} onCancel={back} onSaved={(next) => { setAlbums((old) => [next, ...old]); void openAlbum(next) }} /> : null}
         {album && route === 'edit-album' ? <><AlbumForm album={album} api={api} child={props.child} onCancel={back} onSaved={(next) => { setAlbum(next); navigate('album') }} /><button className="albums-secondary" onClick={() => navigate('cover')} type="button">Выбрать обложку</button><button className="albums-danger" disabled={busy || conflict} onClick={askDeleteAlbum} type="button">Удалить альбом</button></> : null}
-        {album && route === 'cover' ? <><header className="albums-toolbar"><button onClick={back} type="button">‹ Назад</button><h1>Обложка альбома</h1></header><p className="albums-muted">Выберите один из доступных кадров этого альбома.</p><button className="albums-secondary" disabled={busy || conflict} onClick={() => selectCover(null)} type="button">Автоматическая обложка</button><div className="albums-picker-grid">{entries.flatMap((entry) => entry.sources).filter((source) => source.available && (source.kind === 'photo' || source.kind === 'video')).map((source) => <button aria-label="Выбрать этот кадр обложкой" className="albums-picker-item" disabled={busy || conflict} key={source.id} onClick={() => selectCover(source.id)} type="button">{image(source)}</button>)}</div>{entryCursor ? <button onClick={() => void more()} type="button">Ещё кадры</button> : null}</> : null}
+        {album && route === 'cover' ? <><header className="albums-toolbar"><button onClick={back} type="button">‹ Назад</button><h1>Обложка альбома</h1></header><p className="albums-muted">Выберите один из доступных кадров этого альбома.</p><button className="albums-secondary" disabled={busy || conflict} onClick={() => selectCover(null)} type="button">Автоматическая обложка</button>{album.kind === 'year' ? <YearAlbumCoverCandidates accountId={accountId} albumId={album.id} api={api} disabled={busy || conflict} entries={entries} key={[scopeKey, album.id, ...entries.map((item) => item.version)].join(':')} onSelect={selectCover} scopeKey={scopeKey} transport={transport} /> : <><div className="albums-picker-grid">{entries.flatMap((entry) => entry.sources).filter((source) => source.available && (source.kind === 'photo' || source.kind === 'video')).map((source) => <button aria-label="Выбрать этот кадр обложкой" className="albums-picker-item" disabled={busy || conflict} key={source.id} onClick={() => selectCover(source.id)} type="button">{image(source)}</button>)}</div>{entryCursor ? <button onClick={() => void more()} type="button">Ещё кадры</button> : null}</>}</> : null}
         {album && (route === 'album' || route === 'overview') ? <>
           <header className="albums-toolbar albums-internal-toolbar"><button onClick={back} type="button">‹ {route === 'overview' ? 'Альбом' : 'Альбомы'}</button><h1>{album.title}</h1><details className="albums-menu" key={`${album.id}:${route}`}><summary aria-label="Меню альбома">•••</summary><div className="albums-menu-content"><strong>{kindNames[album.kind]}</strong>{album.description ? <p>{album.description}</p> : null}{editable ? <button onClick={() => navigate('edit-album')} type="button">Настройки альбома</button> : null}</div></details></header>
           <section className={`albums-intro albums-kind-${album.kind}${album.kind === 'year' ? ' albums-year-intro' : ''}`}>
@@ -328,7 +367,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
           {album.kind === 'year' ? <div className="albums-year-modes"><button aria-pressed={route === 'album'} onClick={() => navigate('album')} type="button">Линия времени</button><button aria-pressed={route === 'overview'} onClick={() => navigate('overview')} type="button">Все 12 месяцев</button></div> : null}
           {loading ? <Loading /> : album.kind === 'workshop' ? <WorkshopGallery accountId={accountId} active={active} entries={entries} focusId={route === 'album' ? workshopFocusId : null} focusTop={workshopFocusTop} level={workshopLevel} onFocusRestored={clearWorkshopFocus} onLevelChange={setWorkshopLevel} onOpen={(item, trigger) => void openEntry(item, trigger)} controls={<details className="albums-workshop-filters"><summary>{category ? Object.entries(categories).find(([key]) => key === category)?.[1] : 'Все работы'}{year ? ` · ${year}` : ''}<span aria-hidden>⌄</span></summary><div className="albums-filter-options"><div aria-label="Категории работ" className="albums-chips"><button aria-pressed={!category} onClick={() => changeCategory(undefined)} type="button">Все</button>{Object.entries(categories).map(([key, label]) => <button aria-pressed={category === key} key={key} onClick={() => changeCategory(key)} type="button">{label}</button>)}</div><div aria-label="Переход к году" className="albums-chips albums-year-jump"><button aria-pressed={year === undefined} onClick={() => changeYear(undefined)} type="button">Все годы</button>{years.map((value) => <button aria-pressed={year === value} key={value} onClick={() => { changeYear(value); window.scrollTo(0, 0) }} type="button">{value}</button>)}</div><p className="albums-muted albums-gesture-hint">Два пальца меняют масштаб · один прокручивает</p></div></details>} scopeKey={scopeKey} transport={transport} /> : <div className={route === 'overview' ? 'albums-month-overview' : album.kind === 'year' ? 'albums-timeline albums-year-timeline' : album.kind === 'free' ? 'albums-free-grid' : 'albums-event-list'}>{entries.map((item, index) => <div className={`albums-entry-row${filled(item) ? ' is-filled' : ''}`} key={item.id}>
             {album.kind === 'events' && item.date.precision === 'unknown' && entries[index - 1]?.date.precision !== 'unknown' ? <h2>Без даты</h2> : null}
-            <button aria-label={item.monthNumber ? monthAgeLabel(item.monthNumber) : item.title || 'Открыть историю'} className="albums-entry-card" data-entry-id={item.id} disabled={busy} onClick={(event) => void openEntry(item, event.currentTarget)} type="button">{item.monthNumber ? <span className="albums-month-marker">{item.monthNumber}</span> : null}{filled(item) && coverSource(item.sources) ? <span className="albums-entry-image">{image(coverSource(item.sources))}</span> : null}<span className="albums-entry-copy"><strong>{item.title || (item.monthNumber ? monthAgeLabel(item.monthNumber) : 'Семейная история')}</strong>{item.caption ? <span>{item.caption.slice(0, 160)}</span> : null}<small>{item.monthNumber && !filled(item) ? role === 'full' ? 'Добавить тёплый момент' : 'Пока нет воспоминаний' : dateLabel(item.date)}{item.sourceCount ? ` · ${countLabel(item.sourceCount, ['материал', 'материала', 'материалов'])}` : ''}</small></span>{album.kind === 'year' && route === 'album' && editable && item.monthNumber && !filled(item) ? <span aria-hidden className="albums-year-add"><WebpIcon decorative name="plus" size={18} /></span> : null}<span aria-hidden>›</span></button>
+            <button aria-label={item.monthNumber ? monthAgeLabel(item.monthNumber) : item.title || 'Открыть историю'} className="albums-entry-card" data-entry-id={item.id} disabled={busy} onClick={(event) => void openEntry(item, event.currentTarget)} type="button">{item.monthNumber ? <span className="albums-month-marker">{item.monthNumber}</span> : null}{entryCover(item) ? <span className="albums-entry-image" data-entry-cover={entryCover(item)?.id}>{image(entryCover(item))}</span> : null}<span className="albums-entry-copy"><strong>{item.title || (item.monthNumber ? monthAgeLabel(item.monthNumber) : 'Семейная история')}</strong>{item.caption ? <span>{item.caption.slice(0, 160)}</span> : null}<small>{item.monthNumber && !filled(item) ? role === 'full' ? 'Добавить тёплый момент' : 'Пока нет воспоминаний' : dateLabel(item.date)}{item.sourceCount ? ` · ${countLabel(item.sourceCount, ['материал', 'материала', 'материалов'])}` : ''}</small></span>{album.kind === 'year' && route === 'album' && editable && item.monthNumber && !filled(item) ? <span aria-hidden className="albums-year-add"><WebpIcon decorative name="plus" size={18} /></span> : null}<span aria-hidden className="albums-entry-arrow">›</span></button>
             {album.kind === 'free' && editable ? <div className="albums-order-actions"><button aria-label={`Переместить историю ${index + 1} вверх`} disabled={busy || conflict || index === 0} onClick={() => void mutation(() => api.reorder(album.id, item.id, entries[index - 1].id, album.version))} type="button">↑ Вверх</button><button aria-label={`Переместить историю ${index + 1} вниз`} disabled={busy || conflict || index === entries.length - 1} onClick={() => void mutation(() => api.reorder(album.id, item.id, entries[index + 2]?.id ?? null, album.version))} type="button">↓ Вниз</button></div> : null}
           </div>)}</div>}
           {!loading && !entries.length && !error ? <div className="albums-empty"><h2>{album.kind === 'workshop' ? 'Каждая работа — маленький мир' : 'История только начинается'}</h2><p>{category || year ? 'По этому фильтру пока нет работ.' : 'Добавьте первый момент из воспоминаний или загрузите новый.'}</p></div> : null}
@@ -336,8 +375,11 @@ export function AlbumsPage(props: AlbumsPageProps) {
           <div ref={sentinel} />{entryCursor && !loading ? <button className="albums-secondary" disabled={loadingMore || conflict} onClick={() => void more()} type="button">{loadingMore ? 'Загружаем…' : 'Ещё истории'}</button> : null}
           <AlbumWatercolorFooter />
         </> : null}
-        {album && route === 'edit-entry' ? <EntryEditor accountId={accountId} album={album} api={api} birthDate={albumChild?.birthDate} canUpload={role === 'full' && album.capabilities.edit} entry={entry} key={`${album.id}:${entry?.id ?? 'new'}:${suggestedTitle}`} onCancel={back} onSaved={saved} onUpload={(attach, attachPhotos) => setUpload({ attach, attachPhotos })} scopeKey={scopeKey} timezone={props.timezone} title={suggestedTitle} transport={transport} /> : null}
-        {active && album && route === 'entry' && entry ? <AlbumEntryDetail albumId={album.id} onDiscussionInvalidated={discussionInvalidated} accountId={accountId} active busy={busy} childName={albumChild?.name ?? props.familyName} entry={entry} familyId={familyId} hostBridge={hostBridge} membershipEpoch={membershipEpoch} onBack={back} onEdit={() => navigate('edit-entry')} onRemove={askRemoveEntry} scopeKey={scopeKey} timezone={props.timezone} transport={transport} /> : null}
+        {album && route === 'edit-entry' ? <EntryEditor accountId={accountId} album={album} api={api} canUpload={role === 'full' && album.capabilities.edit} entry={entry} key={`${album.id}:${entry?.id ?? 'new'}:${suggestedTitle}`} onCancel={back} onSaved={saved} onUpload={(attach, attachPhotos) => setUpload({ attach, attachPhotos })} scopeKey={scopeKey} timezone={props.timezone} title={suggestedTitle} transport={transport} /> : null}
+        {active && album && entry?.month && route === 'entry' ? <MonthEntryDetail accountId={accountId} albumId={album.id} api={api} busy={busy} childName={albumChild?.name ?? props.familyName} entry={entry} familyId={familyId} hostBridge={hostBridge} key={[scopeKey, entry.id, entry.version, monthRevision].join(':')} membershipEpoch={membershipEpoch} onAdd={() => navigate('month-add')} onBack={back} onClear={askRemoveEntry} onCover={() => navigate('month-cover')} onDiscussionInvalidated={discussionInvalidated} onEdit={() => navigate('edit-entry')} onRefresh={refreshMonth} onRemovePhoto={() => navigate('month-photo-remove')} onViewerOpenChange={onMonthViewerOpenChange} scopeKey={scopeKey} timezone={props.timezone} transport={transport} /> : null}
+        {active && album && entry?.month && (route === 'month-cover' || route === 'month-photo-remove') ? <MonthCoverPicker accountId={accountId} albumId={album.id} api={api} busy={busy} conflict={conflict} entry={entry} key={[scopeKey, entry.id, entry.version, monthRevision].join(':')} onCancel={back} onRefresh={refreshMonth} onSave={monthPhotoAction} remove={route === 'month-photo-remove'} scopeKey={scopeKey} transport={transport} /> : null}
+        {active && album && entry?.month && route === 'month-add' ? <MonthAddPhotos accountId={accountId} albumId={album.id} api={api} entry={entry} familyId={familyId} hostBridge={hostBridge} onChanged={refreshMonth} onClose={() => navigate('entry')} scopeKey={scopeKey} transport={transport} /> : null}
+        {active && album && route === 'entry' && entry && !entry.month ? <AlbumEntryDetail albumId={album.id} onDiscussionInvalidated={discussionInvalidated} accountId={accountId} active busy={busy} childName={albumChild?.name ?? props.familyName} entry={entry} familyId={familyId} hostBridge={hostBridge} membershipEpoch={membershipEpoch} onBack={back} onEdit={() => navigate('edit-entry')} onRemove={askRemoveEntry} scopeKey={scopeKey} timezone={props.timezone} transport={transport} /> : null}
       </main>
     </div>
     <AlertDialog onOpenChange={(open) => { if (!open) setDeleteConfirmation(null) }} open={Boolean(deleteConfirmation)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{deleteConfirmation?.kind === 'album' ? 'Удалить альбом?' : deleteConfirmation?.kind === 'month' ? 'Очистить эту главу?' : 'Убрать историю из альбома?'}</AlertDialogTitle><AlertDialogDescription>{deleteConfirmation?.kind === 'album' ? 'Исходные материалы сохранятся.' : deleteConfirmation?.kind === 'month' ? 'История, комментарии и реакции этой главы будут сброшены. Номер месяца и оригиналы сохранятся.' : 'Оригиналы сохранятся.'}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={busy}>Отмена</AlertDialogCancel><AlertDialogAction className="albums-danger" disabled={busy || conflict} onClick={confirmDeletion} variant="destructive">{deleteConfirmation?.kind === 'album' ? 'Удалить альбом' : deleteConfirmation?.kind === 'month' ? 'Очистить главу' : 'Убрать историю'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
