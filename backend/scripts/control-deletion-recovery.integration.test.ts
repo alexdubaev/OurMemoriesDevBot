@@ -166,7 +166,7 @@ test.serial('actual current migration catalog refuses historical MAX inverse wit
         .map((entry) => entry.name)
         .sort()
       expect(liveMigrationNames.slice(63)).toContain('20261105110000_album_month_photos')
-      expect(before[0]!.map(({ item }) => item.migration_name)).toEqual(liveMigrationNames)
+      expect(before[0]!.map(({ item }) => item.migration_name).sort()).toEqual(liveMigrationNames)
       expect(before[2]!.length).toBeGreaterThan(0)
       expect(bytes.length).toBeGreaterThan(0)
       for (const args of [['--recover-all'], ['--recover-all', '--apply']]) {

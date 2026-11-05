@@ -13,7 +13,7 @@ window.STATE =
   "skillDir": "C:/Users/Alexandr/.codex/skills/autopilot",
   "baseCommit": "ccea672708b6ae60bdcb737ed4515e547876d233",
   "startedAt": "2026-11-05T22:37:01+03:00",
-  "updatedAt": "2026-11-05T23:54:45+03:00",
+  "updatedAt": "2026-11-06T00:02:40+03:00",
   "finishedAt": null,
   "stages": [
     {
@@ -55,12 +55,14 @@ window.STATE =
     },
     {
       "id": "review",
-      "status": "active",
-      "startedAt": "2026-11-05T23:54:45+03:00"
+      "status": "done",
+      "startedAt": "2026-11-05T23:54:45+03:00",
+      "finishedAt": "2026-11-06T00:02:40+03:00"
     },
     {
       "id": "final",
-      "status": "pending"
+      "status": "active",
+      "startedAt": "2026-11-06T00:02:40+03:00"
     }
   ],
   "requirements": {
@@ -207,7 +209,9 @@ window.STATE =
   },
   "additions": [],
   "coverage": null,
-  "concerns": [],
+  "concerns": [
+    "Selectel: принятый recovery проверяет каталог из 65 миграций, а его клиент отклоняет 97 источников. Согласовать совместимую пару до promotion."
+  ],
   "blind": null,
   "beats": [
     "2026-11-05T22:37:01+03:00",
@@ -227,9 +231,11 @@ window.STATE =
     "2026-11-05T23:17:41+03:00",
     "2026-11-05T23:17:42+03:00",
     "2026-11-05T23:43:28+03:00",
-    "2026-11-05T23:54:45+03:00"
+    "2026-11-05T23:54:45+03:00",
+    "2026-11-06T00:02:39+03:00",
+    "2026-11-06T00:02:40+03:00"
   ],
-  "rev": 21,
+  "rev": 23,
   "waiting": null,
   "waits": [],
   "log": [
@@ -377,6 +383,18 @@ window.STATE =
       "t": "2026-11-05T23:54:45+03:00",
       "k": "stage",
       "id": "review",
+      "act": "start"
+    },
+    {
+      "t": "2026-11-06T00:02:39+03:00",
+      "k": "add",
+      "key": "concerns",
+      "n": 1
+    },
+    {
+      "t": "2026-11-06T00:02:40+03:00",
+      "k": "stage",
+      "id": "final",
       "act": "start"
     }
   ],
