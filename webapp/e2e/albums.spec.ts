@@ -403,7 +403,8 @@ test('MAX authenticated albums persist year chapters and a text event through re
 })
 
 test('MAX first-year mobile baseline: two-child catalog, empty and filled months, edit, viewer, and clear', async ({ page }) => {
-  test.setTimeout(120_000)
+  const queueRetryAllowance = 60_000
+  test.setTimeout(120_000 + queueRetryAllowance)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   const initData = signedInitData()
@@ -450,10 +451,30 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await expect(page.locator('.albums-timeline .albums-entry-card')).toHaveCount(12)
   const consoleErrors: string[] = []
   const pageErrors: string[] = []
-  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()) })
+  let monthUploadActive = false
+  let monthPhotoPath = ''
+  let monthBatchPath = ''
+  const uploadPath = `/api/v1/families/${familyId}/uploads`
+  const uploadFinalizePath = new RegExp(`^${uploadPath}/[0-9a-f-]{36}/finalize$`, 'i')
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return
+    const text = message.text()
+    if (monthUploadActive && text === 'Failed to load resource: the server responded with a status of 429 (Too Many Requests)') {
+      let pathname: string
+      try { pathname = new URL(message.location().url).pathname } catch { pathname = '' }
+      if (pathname && (pathname === monthPhotoPath || pathname === monthBatchPath || pathname === uploadPath || uploadFinalizePath.test(pathname))) return
+    }
+    consoleErrors.push(text)
+  })
   page.on('pageerror', (error) => pageErrors.push(error.message))
   const yearAlbum = ((await (await page.request.get(`/api/v1/families/${familyId}/albums`, { headers })).json()) as { items: Array<{ id: string; childId: string | null; kind: string }> }).items.find((album) => album.kind === 'year')!
   expect(yearAlbum.childId).toBe(mishaId)
+  const entriesPath = `/api/v1/families/${familyId}/albums/${yearAlbum.id}/entries`
+  const months = await page.request.get(`${entriesPath}?view=month-summary`, { headers })
+  expect(months.ok()).toBe(true)
+  const firstMonth = ((await months.json()) as { items: Array<{ id: string; monthNumber: number }> }).items.find((month) => month.monthNumber === 1)!
+  monthPhotoPath = `${entriesPath}/${firstMonth.id}/photos`
+  monthBatchPath = `${entriesPath}/${firstMonth.id}/photo-batches`
   for (const album of [
     { kind: 'workshop', title: 'Мастерская Лили', childId: lilyaId },
     { kind: 'events', title: 'Первые открытия Лили', childId: lilyaId },
@@ -577,10 +598,47 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
     [188, 133, 43, 640, 480], [99, 59, 119, 480, 640], [44, 137, 145, 640, 450], [154, 110, 86, 540, 540],
   ]
   const upload = page.getByLabel('Выбрать фотографии с устройства')
-  await upload.setInputFiles(photos.map(([r, g, b, width, height], index) => ({
-    name: `month-synthetic-${index}.png`, mimeType: 'image/png', buffer: solidPng(r, g, b, width, height),
-  })))
-  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 7 · добавлено: 7' })).toBeVisible({ timeout: 35_000 })
+  async function uploadMonthPhotos(files: Parameters<typeof upload.setInputFiles>[0], expectedStatus: string) {
+    monthUploadActive = true
+    try {
+      await upload.setInputFiles(files)
+      await expect(page.getByRole('status').filter({ hasText: expectedStatus })).toBeVisible({ timeout: 35_000 + queueRetryAllowance })
+    } finally {
+      monthUploadActive = false
+    }
+  }
+  const attachRoute = `**${monthPhotoPath}`
+  let rateLimitedAttach: { key: string; body: string | null; sentAt: number } | undefined
+  let retriedAttach = false
+  await page.route(attachRoute, async (route) => {
+    const request = route.request()
+    if (request.method() !== 'POST') return route.continue()
+    const key = request.headers()['idempotency-key']!
+    if (!rateLimitedAttach) {
+      expect(key).toBeTruthy()
+      rateLimitedAttach = { key, body: request.postData(), sentAt: performance.now() }
+      await route.fulfill({
+        status: 429, headers: { 'Retry-After': '1' },
+        json: { error: { code: 'RATE_LIMITED', message: 'Retry after one second', requestId: randomUUID() } },
+      })
+      return
+    }
+    if (!retriedAttach) {
+      expect(key).toBe(rateLimitedAttach.key)
+      expect(request.postData()).toBe(rateLimitedAttach.body)
+      expect(performance.now() - rateLimitedAttach.sentAt).toBeGreaterThanOrEqual(950)
+      retriedAttach = true
+    }
+    await route.continue()
+  })
+  try {
+    await uploadMonthPhotos(photos.map(([r, g, b, width, height], index) => ({
+      name: `month-synthetic-${index}.png`, mimeType: 'image/png', buffer: solidPng(r, g, b, width, height),
+    })), 'Выбрано: 7 · добавлено: 7')
+    expect(retriedAttach).toBe(true)
+  } finally {
+    await page.unroute(attachRoute)
+  }
   await page.getByRole('button', { name: 'Вернуться к месяцу', exact: true }).click()
   await expect(page.locator('[data-month-photo]')).toHaveCount(7)
   const lead = page.locator('.month-collage-cover')
@@ -620,11 +678,10 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await expect(lead).toHaveAttribute('data-month-cover', chosenCover!)
   await page.getByRole('button', { name: 'Добавить фотографии', exact: true }).click()
   await page.getByRole('button', { name: 'С устройства', exact: true }).click()
-  await upload.setInputFiles([
+  await uploadMonthPhotos([
     { name: 'not-a-photo.mov', mimeType: 'video/quicktime', buffer: Buffer.alloc(64) },
     ...Array.from({ length: 11 }, (_, index) => ({ name: `extra-${index}.png`, mimeType: 'image/png', buffer: solidPng(100, 140, index, 32, 48) })),
-  ])
-  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 12 · добавлено: 11 · с ошибкой: 1' })).toBeVisible({ timeout: 35_000 })
+  ], 'Выбрано: 12 · добавлено: 11 · с ошибкой: 1')
   await expect(page.getByText(/Здесь можно добавлять только фотографии\./)).toBeVisible()
   await page.getByRole('button', { name: 'Вернуться к месяцу', exact: true }).click()
   await expect(lead).toHaveAttribute('data-month-cover', chosenCover!)

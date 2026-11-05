@@ -125,10 +125,10 @@ function MonthPhotoFlow({ api, albumId, entry, familyId, accountId, scopeKey, tr
     {queue && progress ? <>
       <p aria-live="polite" role="status">Выбрано: {progress.total} · добавлено: {progress.saved}{progress.failed ? ` · с ошибкой: ${progress.failed}` : ''}</p>
       <progress aria-label="Ход добавления фотографий" max={progress.total} value={Math.min(progress.total, progress.saved + progress.failed + (progress.current?.fraction ?? 0))} />
-      {progress.current ? <p className="albums-muted">{phaseLabel[progress.current.phase]} · {progress.current.name}</p> : null}
+      {progress.retryDelayMs !== null ? <p className="albums-muted" role="status">Сервер просит подождать. Очередь продолжится автоматически.</p> : progress.current ? <p className="albums-muted">{phaseLabel[progress.current.phase]} · {progress.current.name}</p> : null}
       {progress.stale ? <p className="albums-error" role="alert">Месяц или доступ изменился. Вернитесь к месяцу и проверьте добавленные фотографии.</p> : null}
-      {progress.batchError ? <p className="albums-error" role="alert">{progress.batchError}</p> : null}
-      {!progress.running && progress.pending > 0 && !progress.stale && !progress.batchError ? <p role="status">Очередь остановлена. Добавленные фотографии сохранены.</p> : null}
+      {progress.queueError ? <p className="albums-error" role="alert">{progress.queueError}</p> : null}
+      {!progress.running && progress.pending > 0 && !progress.stale && !progress.queueError ? <p role="status">Очередь остановлена. Добавленные фотографии сохранены.</p> : null}
       {progress.failed ? <div className="albums-error">
         <h2>Фотографии с ошибками</h2>
         <ul>{progress.errors.slice(currentErrorPage * errorsPerPage, (currentErrorPage + 1) * errorsPerPage).map((error) => (
