@@ -20,3 +20,4 @@
 | 2026-10-23 | `2026-10-23-wishlist` | сдан | Вкладка «Подарки» в memoLy: список подарков ребёнка, бронь, «Подарено», переход в магазин — ветка feat/wishlist, не слита |
 | 2026-11-04 | `2026-11-04-memoly-albums-watercolor-social--wip` | в работе | — |
 | 2026-11-04 | `2026-11-04-memoly-telegram-launch-restore--wip` | в работе | — |
+| 2026-11-05 | `2026-11-05-memoly-month-photo-collage--wip` | в работе | — |

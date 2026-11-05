@@ -1,61 +1,58 @@
 window.STATE =
 {
   "version": 2,
-  "slug": "memoly-telegram-launch-restore",
-  "dir": "2026-11-04-memoly-telegram-launch-restore--wip",
-  "title": "Восстановление Telegram-входа memoLy",
-  "mode": "semi",
-  "depth": "normal",
-  "tier": "T0",
-  "briefFile": "2026-11-04-brief.md",
+  "slug": "memoly-month-photo-collage",
+  "dir": "2026-11-05-memoly-month-photo-collage--wip",
+  "title": "Месяцы первого года memoLy",
+  "mode": "full",
+  "depth": "strict",
+  "tier": "T2",
+  "briefFile": null,
   "memoryFile": "AGENTS.md",
   "memoryOwner": "user",
   "skillDir": "C:/Users/Alexandr/.codex/skills/autopilot",
-  "baseCommit": "e93f3ebecdd5159cf34aeb6633db333b3834dae4",
-  "startedAt": "2026-11-04T19:32:46+03:00",
-  "updatedAt": "2026-11-04T20:06:24+03:00",
+  "baseCommit": null,
+  "startedAt": "2026-11-05T22:37:01+03:00",
+  "updatedAt": "2026-11-05T22:39:25+03:00",
   "finishedAt": null,
   "stages": [
     {
       "id": "preflight",
       "status": "done",
-      "startedAt": "2026-11-04T19:32:46+03:00",
-      "finishedAt": "2026-11-04T19:32:48+03:00"
+      "startedAt": "2026-11-05T22:37:01+03:00",
+      "finishedAt": "2026-11-05T22:37:03+03:00"
     },
     {
       "id": "manifest",
       "status": "done",
-      "startedAt": "2026-11-04T19:32:48+03:00",
-      "finishedAt": "2026-11-04T19:35:05+03:00"
+      "startedAt": "2026-11-05T22:37:03+03:00",
+      "finishedAt": "2026-11-05T22:38:41+03:00"
     },
     {
       "id": "briefing",
-      "status": "done",
-      "startedAt": "2026-11-04T19:35:05+03:00",
-      "finishedAt": "2026-11-04T19:35:06+03:00"
+      "status": "skipped",
+      "startedAt": "2026-11-05T22:38:40+03:00",
+      "finishedAt": "2026-11-05T22:38:40+03:00",
+      "note": "ТЗ определяет пользовательские сценарии"
     },
     {
       "id": "spec",
       "status": "done",
-      "startedAt": "2026-11-04T19:35:06+03:00",
-      "finishedAt": "2026-11-04T19:40:56+03:00"
+      "startedAt": "2026-11-05T22:38:41+03:00",
+      "finishedAt": "2026-11-05T22:38:42+03:00"
     },
     {
       "id": "plan",
-      "status": "done",
-      "startedAt": "2026-11-04T19:40:56+03:00",
-      "finishedAt": "2026-11-04T19:42:33+03:00"
+      "status": "active",
+      "startedAt": "2026-11-05T22:38:42+03:00"
     },
     {
       "id": "build",
-      "status": "done",
-      "startedAt": "2026-11-04T19:42:33+03:00",
-      "finishedAt": "2026-11-04T20:06:24+03:00"
+      "status": "pending"
     },
     {
       "id": "review",
-      "status": "active",
-      "startedAt": "2026-11-04T20:06:24+03:00"
+      "status": "pending"
     },
     {
       "id": "final",
@@ -63,9 +60,9 @@ window.STATE =
     }
   ],
   "requirements": {
-    "total": 12,
+    "total": 15,
     "done": 0,
-    "inTicket": 12,
+    "inTicket": 15,
     "inSpec": 0,
     "placeholder": 0,
     "deferred": 0,
@@ -74,322 +71,286 @@ window.STATE =
   "tickets": [
     {
       "id": "01",
-      "title": "Telegram-вход без приёма сообщений",
+      "title": "month-api",
       "requirements": [
-        "R01",
-        "R02",
         "R03",
         "R04",
-        "R05",
-        "R06",
         "R07",
         "R08",
         "R09",
-        "R10",
-        "R11",
-        "R12"
+        "R12",
+        "R13",
+        "R14"
       ],
       "blockedBy": [],
       "wave": 1,
       "zone": [
-        "backend/src/env.ts",
-        "backend/src/modules/auth/",
-        "backend/scripts/telegram-auth-only-verification-server.ts",
-        "backend/src/telegram-auth-only.test.ts",
-        "backend/.env.example",
-        ".env.example",
-        "webapp/e2e/telegram-auth-only.spec.ts",
-        "webapp/e2e/telegram-auth-only.playwright.config.ts",
-        "docs/development/TELEGRAM_AUTH_ONLY.md"
+        "backend/prisma",
+        "backend/src/modules/albums",
+        "packages/contracts"
       ],
       "review": "нет",
       "model": "сильная",
-      "status": "repair",
+      "status": "pending",
       "retries": 0,
-      "repairs": 1,
-      "startedAt": "2026-11-04T19:42:34+03:00",
-      "repairFindings": [
-        "D01: точная metadata привязка нового auth-only source к прежнему S3-safe recovery profile, без изменения guards"
-      ]
+      "repairs": 0
+    },
+    {
+      "id": "02",
+      "title": "photo-queue",
+      "requirements": [
+        "R05",
+        "R06",
+        "R07",
+        "R11",
+        "R12",
+        "R14"
+      ],
+      "blockedBy": [
+        "01"
+      ],
+      "wave": 2,
+      "zone": [
+        "webapp/src/features/composer",
+        "webapp/src/features/albums"
+      ],
+      "review": "нет",
+      "model": "сильная",
+      "status": "pending",
+      "retries": 0,
+      "repairs": 0
+    },
+    {
+      "id": "03",
+      "title": "collage",
+      "requirements": [
+        "R01",
+        "R02",
+        "R03",
+        "R08",
+        "R10",
+        "R13",
+        "R14"
+      ],
+      "blockedBy": [
+        "01",
+        "02"
+      ],
+      "wave": 3,
+      "zone": [
+        "webapp/src/features/albums",
+        "webapp/src/features/media"
+      ],
+      "review": "нет",
+      "model": "сильная",
+      "status": "pending",
+      "retries": 0,
+      "repairs": 0
+    },
+    {
+      "id": "04",
+      "title": "release",
+      "requirements": [
+        "R15"
+      ],
+      "blockedBy": [
+        "01",
+        "02",
+        "03"
+      ],
+      "wave": 4,
+      "zone": [
+        "webapp/e2e",
+        "deploy/selectel"
+      ],
+      "review": "нет",
+      "model": "сильная",
+      "status": "pending",
+      "retries": 0,
+      "repairs": 0
     }
   ],
-  "tests": {
-    "passed": 14,
-    "failed": 0
-  },
+  "tests": null,
   "debt": {
     "placeholders": [],
     "assumptions": [],
     "emptyEnv": []
   },
   "additions": [],
-  "coverage": {
-    "found": 4,
-    "fixed": 4,
-    "deferred": 0,
-    "items": []
-  },
-  "concerns": [
-    "D02: canonical FULL ещё NOT RUN — dry-run требует точной FULL классификации трёх новых metadata/config путей; исправление не понижает профиль."
-  ],
+  "coverage": null,
+  "concerns": [],
   "blind": null,
   "beats": [
-    "2026-11-04T19:32:46+03:00",
-    "2026-11-04T19:32:48+03:00",
-    "2026-11-04T19:35:04+03:00",
-    "2026-11-04T19:35:05+03:00",
-    "2026-11-04T19:35:06+03:00",
-    "2026-11-04T19:38:47+03:00",
-    "2026-11-04T19:40:54+03:00",
-    "2026-11-04T19:40:56+03:00",
-    "2026-11-04T19:40:57+03:00",
-    "2026-11-04T19:41:01+03:00",
-    "2026-11-04T19:41:03+03:00",
-    "2026-11-04T19:41:53+03:00",
-    "2026-11-04T19:41:54+03:00",
-    "2026-11-04T19:42:32+03:00",
-    "2026-11-04T19:42:33+03:00",
-    "2026-11-04T19:42:34+03:00",
-    "2026-11-04T20:00:16+03:00",
-    "2026-11-04T20:00:17+03:00",
-    "2026-11-04T20:01:47+03:00",
-    "2026-11-04T20:03:48+03:00",
-    "2026-11-04T20:05:24+03:00",
-    "2026-11-04T20:06:24+03:00"
+    "2026-11-05T22:37:01+03:00",
+    "2026-11-05T22:37:03+03:00",
+    "2026-11-05T22:38:40+03:00",
+    "2026-11-05T22:38:41+03:00",
+    "2026-11-05T22:38:42+03:00",
+    "2026-11-05T22:38:43+03:00",
+    "2026-11-05T22:38:44+03:00",
+    "2026-11-05T22:39:22+03:00",
+    "2026-11-05T22:39:25+03:00"
   ],
-  "rev": 23,
+  "rev": 11,
   "waiting": null,
-  "waits": [
-    {
-      "kind": "action",
-      "from": "2026-11-04T20:05:24+03:00",
-      "to": "2026-11-04T20:06:24+03:00"
-    }
-  ],
+  "waits": [],
   "log": [
     {
-      "t": "2026-11-04T19:32:46+03:00",
+      "t": "2026-11-05T22:37:01+03:00",
       "k": "init"
     },
     {
-      "t": "2026-11-04T19:32:48+03:00",
+      "t": "2026-11-05T22:37:03+03:00",
       "k": "stage",
       "id": "manifest",
       "act": "start"
     },
     {
-      "t": "2026-11-04T19:35:05+03:00",
+      "t": "2026-11-05T22:38:40+03:00",
       "k": "stage",
       "id": "briefing",
-      "act": "start"
+      "act": "skip",
+      "note": "ТЗ определяет пользовательские сценарии"
     },
     {
-      "t": "2026-11-04T19:35:06+03:00",
+      "t": "2026-11-05T22:38:41+03:00",
       "k": "gate",
       "g": "G1",
-      "ok": false,
-      "open": 12,
-      "total": 12
+      "ok": true,
+      "open": 0,
+      "total": 15
     },
     {
-      "t": "2026-11-04T19:35:06+03:00",
+      "t": "2026-11-05T22:38:41+03:00",
       "k": "stage",
       "id": "spec",
       "act": "start"
     },
     {
-      "t": "2026-11-04T19:38:47+03:00",
-      "k": "tier",
-      "v": "T1"
-    },
-    {
-      "t": "2026-11-04T19:40:54+03:00",
-      "k": "gate",
-      "g": "G2",
-      "ok": true,
-      "found": 4,
-      "fixed": 4,
-      "deferred": 0
-    },
-    {
-      "t": "2026-11-04T19:40:56+03:00",
+      "t": "2026-11-05T22:38:42+03:00",
       "k": "stage",
       "id": "plan",
       "act": "start"
     },
     {
-      "t": "2026-11-04T19:40:57+03:00",
+      "t": "2026-11-05T22:38:43+03:00",
       "k": "tier",
-      "v": "T0"
+      "v": "T2"
     },
     {
-      "t": "2026-11-04T19:41:01+03:00",
+      "t": "2026-11-05T22:38:43+03:00",
       "k": "tickets",
-      "n": 1
+      "n": 4
     },
     {
-      "t": "2026-11-04T19:41:03+03:00",
+      "t": "2026-11-05T22:38:44+03:00",
       "k": "gate",
       "g": "G3",
       "ok": false,
-      "problems": 1
+      "problems": 4
     },
     {
-      "t": "2026-11-04T19:41:53+03:00",
+      "t": "2026-11-05T22:39:22+03:00",
       "k": "tickets",
-      "n": 1
+      "n": 4
     },
     {
-      "t": "2026-11-04T19:41:54+03:00",
+      "t": "2026-11-05T22:39:25+03:00",
       "k": "gate",
       "g": "G3",
       "ok": true,
       "problems": 0
-    },
-    {
-      "t": "2026-11-04T19:42:33+03:00",
-      "k": "stage",
-      "id": "build",
-      "act": "start"
-    },
-    {
-      "t": "2026-11-04T19:42:34+03:00",
-      "k": "ticket",
-      "ids": [
-        "01"
-      ],
-      "act": "start"
-    },
-    {
-      "t": "2026-11-04T20:00:16+03:00",
-      "k": "tests",
-      "passed": 14,
-      "failed": 0
-    },
-    {
-      "t": "2026-11-04T20:00:17+03:00",
-      "k": "add",
-      "key": "report",
-      "n": 2
-    },
-    {
-      "t": "2026-11-04T20:01:47+03:00",
-      "k": "ticket",
-      "ids": [
-        "01"
-      ],
-      "act": "repair",
-      "note": "D01: точная metadata привязка нового auth-only source к прежнему S3-safe recovery profile, без изменения guards"
-    },
-    {
-      "t": "2026-11-04T20:03:48+03:00",
-      "k": "add",
-      "key": "concerns",
-      "n": 1
-    },
-    {
-      "t": "2026-11-04T20:05:24+03:00",
-      "k": "ask",
-      "kind": "action",
-      "note": "Нужно отдельное разрешение только на обновление URL кнопки меню Telegram; остальная проверка и доставка продолжаются"
-    },
-    {
-      "t": "2026-11-04T20:06:24+03:00",
-      "k": "answered",
-      "kind": "action"
-    },
-    {
-      "t": "2026-11-04T20:06:24+03:00",
-      "k": "stage",
-      "id": "review",
-      "act": "start"
     }
   ],
   "reqList": [
     {
       "id": "R01",
-      "text": "«Проверить доступ к токену именно существующего @OurMemoriesDevBot, не раскрывая его.»",
+      "text": "«Заменить вертикальный список больших фотографий плотным красивым коллажем.»",
       "status": "in-ticket"
     },
     {
       "id": "R02",
-      "text": "«минимальное восстановление Telegram-авторизации с проверкой подписи»",
+      "text": "«Вверху месяца сохранить: … название „Нам N месяцев“»",
       "status": "in-ticket"
     },
     {
       "id": "R03",
-      "text": "«сессий»",
+      "text": "«У каждого из 12 месяцев может быть своя главная фотография.»",
       "status": "in-ticket"
     },
     {
       "id": "R04",
-      "text": "«семейных прав»",
+      "text": "«Сервер обязан проверить: семья → альбом → месяц → доступный источник-фотография.»",
       "status": "in-ticket"
     },
     {
       "id": "R05",
-      "text": "«Проверить изменения на изолированном стенде»",
+      "text": "«Из смешанной публикации можно выбрать отдельную фотографию.»",
       "status": "in-ticket"
     },
     {
       "id": "R06",
-      "text": "«затем безопасно выложить»",
+      "text": "«Использовать существующий direct-album photo pipeline»",
       "status": "in-ticket"
     },
     {
       "id": "R07",
-      "text": "«Проверить реальный запуск»",
+      "text": "«Пользователь может выбрать большой набор фотографий за один раз и продолжать добавлять новые позже.»",
       "status": "in-ticket"
     },
     {
       "id": "R08",
-      "text": "«фотографии»",
+      "text": "«Нельзя возвращать весь многотысячный месяц одним неограниченным JSON или монтировать все изображения сразу.»",
       "status": "in-ticket"
     },
     {
       "id": "R09",
-      "text": "«MAX-видео»",
+      "text": "«Старый full-replace API не должен трактовать усечённую страницу как полную коллекцию.»",
       "status": "in-ticket"
     },
     {
       "id": "R10",
-      "text": "«Не объединяй учётные записи автоматически и не меняй права.»",
+      "text": "«Листание должно работать через границы страниц.»",
       "status": "in-ticket"
     },
     {
       "id": "R11",
-      "text": "«Не изменяй настройки бота и не регистрируй новый webhook.»",
+      "text": "«Большой выбранный набор обрабатывается очередью.»",
       "status": "in-ticket"
     },
     {
       "id": "R12",
-      "text": "«Не выводи токены, ключи и секретные параметры.»",
+      "text": "«При смене семьи/аккаунта, отзыве доступа, удалении или очистке месяца запоздалые операции не должны пополнять новый либо уже очищенный контекст.»",
+      "status": "in-ticket"
+    },
+    {
+      "id": "R13",
+      "text": "«Уже существующие видео, голосовые и заметки не удалять, не скрывать и не терять при сохранении месяца.»",
+      "status": "in-ticket"
+    },
+    {
+      "id": "R14",
+      "text": "«Не расширять задачу до общего аудита или переделки архитектуры.»",
+      "status": "in-ticket"
+    },
+    {
+      "id": "R15",
+      "text": "«Финальный FULL относится к готовому объединённому source.»",
       "status": "in-ticket"
     }
   ],
   "gates": {
     "G1": {
-      "ok": false,
-      "at": "2026-11-04T19:35:06+03:00",
-      "open": 12,
-      "total": 12
-    },
-    "G2": {
       "ok": true,
-      "at": "2026-11-04T19:40:54+03:00",
-      "found": 4,
-      "fixed": 4,
-      "deferred": 0
+      "at": "2026-11-05T22:38:41+03:00",
+      "open": 0,
+      "total": 15
     },
     "G3": {
       "ok": true,
-      "at": "2026-11-04T19:41:54+03:00",
+      "at": "2026-11-05T22:39:25+03:00",
       "problems": 0
     }
   },
-  "result": null,
-  "report": [
-    "Физический iPhone и звук через динамик не подтверждаются desktop проверками.",
-    "Menu button Telegram остаётся на старом стенде; Main Mini App URL уже исправлен владельцем, настройки бота в этом запуске не меняются."
-  ]
+  "result": null
 }
