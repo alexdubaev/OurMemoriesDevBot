@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 export async function verifyS3AlbumSocialMigrationRoute(root, proposed) {
 root=resolve(root); proposed=resolve(proposed)
-const candidate=git('rev-parse','HEAD').trim()
+const candidate='a18469ab8a54464d491659d849fcf286973fa9e4'
 function git(...args){const r=spawnSync('git',args,{cwd:root,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout}
 const paths=git('ls-tree','-r','--name-only',candidate,'--','backend/prisma/migrations/').trim().split('\n').filter(p=>p.endsWith('/migration.sql')).sort()
 assert.equal(paths.length,65)
@@ -14,6 +14,14 @@ const adminUrl=new URL(process.env.TEST_DATABASE_URL);assert.equal(adminUrl.host
 const admin=new Client({connectionString:adminUrl.toString()});await admin.connect()
 const scratch=resolve(root,'.scratch');mkdirSync(scratch,{recursive:true})
 const fixture=mkdtempSync(resolve(scratch,'s3-route-proof-'));let cases=0
+const archivedRoot=resolve(fixture,'accepted-source');mkdirSync(archivedRoot,{recursive:true})
+const archive=spawnSync('git',['archive',candidate,'backend'],{cwd:root,maxBuffer:64*1024*1024})
+assert.equal(archive.status,0,archive.stderr?.toString())
+const extracted=spawnSync('tar',['-x','-C',archivedRoot],{input:archive.stdout})
+assert.equal(extracted.status,0,extracted.stderr?.toString())
+const historicalBackend=resolve(archivedRoot,'backend')
+const generated=spawnSync('bun',['run','prisma:generate'],{cwd:historicalBackend,env:{...process.env,DATABASE_URL:adminUrl.toString()},encoding:'utf8',timeout:90000,maxBuffer:4*1024*1024})
+assert.equal(generated.status,0,generated.stdout+'\n'+generated.stderr)
 const originalLegacy=resolve(fixture,'reviewed-max63-redeploy.sh');writeFileSync(originalLegacy,git('show','6de3da8eb4588b3fe3ebe14016ea0c8ae35c69ab:deploy/selectel/redeploy.sh'))
 const q=s=>`'${String(s).replaceAll("'","'\\''")}'`
 async function withDb(count,body){
@@ -39,7 +47,7 @@ function run(url,options={}){
   MAX_WEBHOOK_SECRET:'M'.repeat(43),MAX_INBOX_ENCRYPTION_KEY:'B'.repeat(43),MAX_MINI_APP_URL:'https://app.example.invalid',JWT_SECRET:'route-proof-synthetic-secret-0123456789',
   PRIVATE_STORAGE_DRIVER:options.storage??'s3',PRIVATE_STORAGE_ENDPOINT:'https://s3.example.invalid',PRIVATE_STORAGE_REGION:'us-east-1',PRIVATE_STORAGE_BUCKET:'synthetic-route-proof',
   PRIVATE_STORAGE_ACCESS_KEY_ID:'synthetic-only',PRIVATE_STORAGE_SECRET_ACCESS_KEY:'synthetic-only-not-provider',PRIVATE_STORAGE_FORCE_PATH_STYLE:'true',PRIVATE_STORAGE_ALLOW_REMOTE_ENDPOINT:'true',
-  SERVER_ROOT:server,APP_ROOT:root,MEMOLY_PRODUCT_SHA:options.source??candidate,FIXTURE_EVENTS:events,SELECTEL_CI_RELEASE:options.ci===false?'false':'true',SELECTEL_DEPLOY_LOCK_FD:options.lock===false?'':'9',
+  SERVER_ROOT:server,APP_ROOT:root,HISTORICAL_BACKEND_ROOT:historicalBackend,MEMOLY_PRODUCT_SHA:options.source??candidate,FIXTURE_EVENTS:events,SELECTEL_CI_RELEASE:options.ci===false?'false':'true',SELECTEL_DEPLOY_LOCK_FD:options.lock===false?'':'9',
   ADMIN_SEED_EMAIL:'',ADMIN_SEED_PASSWORD:'',DATABASE_RUNTIME_USER:''}
  const script=`. ${q(options.script??proposed)}
 preflight(){ echo PREFLIGHT >> "$FIXTURE_EVENTS"; }
@@ -48,8 +56,8 @@ backup_database(){ echo BACKUP >> "$FIXTURE_EVENTS"; }
 quiesce_all_writers(){ echo UNEXPECTED_QUIESCE >> "$FIXTURE_EVENTS"; return 74; }
 compose(){
  if [[ "$*" == *"loadEnv(process.env)"* || "$*" == *"MEMOLY_S3_SOCIAL_PHASE="* ]]; then command bun -e "\${!#}"; return; fi
- if [[ "$*" == *"deploy-selectel-database.ts"* ]]; then echo SQL_JOB >> "$FIXTURE_EVENTS"; command bun scripts/deploy-selectel-database.ts; return; fi
- if [[ "$*" == *"prisma migrate status"* ]]; then echo MIGRATION_STATUS >> "$FIXTURE_EVENTS"; command bunx --bun prisma migrate status; return; fi
+ if [[ "$*" == *"deploy-selectel-database.ts"* ]]; then echo SQL_JOB >> "$FIXTURE_EVENTS"; (cd "$HISTORICAL_BACKEND_ROOT" && command bun scripts/deploy-selectel-database.ts); return; fi
+ if [[ "$*" == *"prisma migrate status"* ]]; then echo MIGRATION_STATUS >> "$FIXTURE_EVENTS"; (cd "$HISTORICAL_BACKEND_ROOT" && command bunx --bun prisma migrate status); return; fi
  return 90
 }
 ${options.lock===false?'':`exec 9>"$SERVER_ROOT/${options.wrongLock?'wrong.lock':'.selectel-deploy.lock'}"; flock -n 9`}
@@ -81,7 +89,7 @@ try{
   console.log(`PASS real guarded ownership→Prisma→grants ${count}→65; original prefix/data preserved`);cases++
  })
  await withDb(63,async(db,url)=>{
-  for(const [opts,label] of [[{source:'c9b16813da164ad9fdbd78633e8f455bb92b1e04'},'unattested source'],[{storage:'filesystem'},'non-S3 storage'],[{ci:false},'not guarded release'],[{lock:false},'missing inherited lock'],[{wrongLock:true},'wrong inherited lock']])await reject(db,url,opts,label)
+ for(const [opts,label] of [[{source:'7679a9de70f798e6d495569c27fc6751e53c9b8e'},'unattested source'],[{storage:'filesystem'},'non-S3 storage'],[{ci:false},'not guarded release'],[{lock:false},'missing inherited lock'],[{wrongLock:true},'wrong inherited lock']])await reject(db,url,opts,label)
   const first=(await db.query('SELECT id,checksum FROM _prisma_migrations ORDER BY migration_name LIMIT 1')).rows[0]
   for(const [change,label] of [["checksum=repeat('0',64)",'SQL checksum drift'],['finished_at=NULL','unfinished prefix'],['rolled_back_at=now()','rolled-back prefix']]){
    await db.query(`UPDATE _prisma_migrations SET ${change} WHERE id=$1`,[first.id]);await reject(db,url,{},label)

@@ -154,14 +154,18 @@ describe('album PostgreSQL invariants', () => {
       source: { memoryId: null, sourceKind: 'private_storage', sourceId: assets[0]!.id } }, randomUUID())
     expect(duplicateAttach.status).toBe(204)
     expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBe(100)
-    const tailAssets = await db.mediaAsset.createManyAndReturn({ data: Array.from({ length: 1_900 }, (_, index) => ({
+    const tailAssets = await db.mediaAsset.createManyAndReturn({ data: Array.from({ length: 1_997 }, (_, index) => ({
       familyId, uploaderId: userId, sourceKind: 'upload' as const, purpose: 'memory' as const, mediaKind: 'photo' as const,
       originalKey: `synthetic/month-api-tail/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg',
       sha256: `${(index + 100).toString(16).padStart(4, '0')}${'a'.repeat(60)}`, byteSize: 3, width: 600, height: 400,
       originalStatus: 'stored' as const, renditionStatus: 'ready' as const,
     })) })
     await db.albumPhoto.createMany({ data: tailAssets.map((asset) => ({ familyId, mediaId: asset.id })) })
-    await db.albumEntrySource.createMany({ data: tailAssets.map((asset, index) => ({
+    await db.albumEntrySource.createMany({ data: tailAssets.slice(0, 97).map((asset, index) => ({
+      familyId, albumId: album.id, entryId: otherEntry.id, memoryId: null, albumPhotoMediaId: asset.id,
+      sourceKind: 'private_storage' as const, sourceId: asset.id, kind: 'photo' as const, position: index,
+    })) })
+    await db.albumEntrySource.createMany({ data: tailAssets.slice(97).map((asset, index) => ({
       familyId, albumId: album.id, entryId: entry.id, memoryId: null, albumPhotoMediaId: asset.id,
       sourceKind: 'private_storage' as const, sourceId: asset.id, kind: 'photo' as const, position: 100 + index,
     })) })
@@ -199,6 +203,12 @@ describe('album PostgreSQL invariants', () => {
     const currentAlbumVersion = (await db.album.findUniqueOrThrow({ where: { id: album.id } })).version
     const legacy = await http(`${path}/sources`, 'PUT', token, { expectedVersion: currentAlbumVersion, sources: [] }, randomUUID())
     expect(legacy.status).toBe(409)
+    const oversizedLegacyEntry = await http(`${otherPath}/sources`, 'PUT', token, { expectedVersion: currentAlbumVersion, sources: [] }, randomUUID())
+    expect(oversizedLegacyEntry.status).toBe(409)
+    expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: otherEntry.id } })).toBe(97)
+    const oversizedMetadataPatch = await http(path, 'PATCH', token, { expectedVersion: currentAlbumVersion, title: 'Не должно примениться' })
+    expect(oversizedMetadataPatch.status).toBe(409)
+    expect((await db.albumEntry.findUniqueOrThrow({ where: { id: entry.id } })).title).toBeNull()
     const beforeLegacyReplayVersion = (await db.albumEntry.findUniqueOrThrow({ where: { id: entry.id } })).version
     await expect(db.$transaction(async (tx) => {
       await tx.albumEntrySource.deleteMany({ where: { albumId: album.id, entryId: entry.id } })
