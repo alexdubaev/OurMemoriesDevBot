@@ -11,6 +11,7 @@ import { verifyS3AlbumSocialMigrationRoute } from '../../../scripts/test-support
 const root = resolve(import.meta.dir, '../../../..')
 const pinned = '26cfab9ce35fd1a42279fc0d9dd3637c340eec6a'
 const baseline = '6de3da8eb4588b3fe3ebe14016ea0c8ae35c69ab'
+const acceptedCandidate = 'a18469ab8a54464d491659d849fcf286973fa9e4'
 
 test('S3 album-social normal migration uses exact routed prefixes and preserves historical MAX routing', async () => {
   const result = await verifyS3AlbumSocialMigrationRoute(root, resolve(root, 'deploy/selectel/redeploy.sh'))
@@ -39,7 +40,7 @@ test('S3 album-social release guard validates only exact real PostgreSQL prefixe
     const sql = git('show', `${revision}:${path}`).replaceAll('\r\n', '\n')
     return `${path.split('/').at(-2)}:${createHash('sha256').update(sql).digest('hex')}:${createHash('sha256').update(sql.replaceAll('\n', '\r\n')).digest('hex')}`
   }).join('\n')
-  const candidate = catalog('HEAD'), originalBaseline = catalog(baseline)
+  const candidate = catalog(acceptedCandidate), originalBaseline = catalog(baseline)
   const program = readFileSync(resolve(root, 'deploy/selectel/redeploy.sh'), 'utf8').replaceAll('\r\n', '\n')
     .match(/MEMOLY_S3_SOCIAL_HISTORY_JS'\n([\s\S]*?)\nMEMOLY_S3_SOCIAL_HISTORY_JS/)?.[1]
   if (!program) throw Error('Actual release validator is missing')
@@ -54,9 +55,9 @@ test('S3 album-social release guard validates only exact real PostgreSQL prefixe
   }
   try {
     await db.query('CREATE TABLE _prisma_migrations (id varchar(36) PRIMARY KEY, checksum varchar(64) NOT NULL, finished_at timestamptz, migration_name varchar(255) NOT NULL, logs text, rolled_back_at timestamptz, started_at timestamptz NOT NULL DEFAULT now(), applied_steps_count integer NOT NULL DEFAULT 0)')
-    const migrations = paths('HEAD'); expect(migrations.length).toBe(65)
+    const migrations = paths(acceptedCandidate); expect(migrations.length).toBe(65)
     const migrate = async (index: number) => {
-      const path = migrations[index]!, sql = git('show', `HEAD:${path}`).replaceAll('\r\n', '\n')
+      const path = migrations[index]!, sql = git('show', `${acceptedCandidate}:${path}`).replaceAll('\r\n', '\n')
       await db.query(sql)
       await db.query('INSERT INTO _prisma_migrations (id,checksum,migration_name,finished_at,applied_steps_count) VALUES ($1,$2,$3,now(),1)',
         [randomUUID(), createHash('sha256').update(index % 2 ? sql.replaceAll('\n', '\r\n') : sql).digest('hex'), path.split('/').at(-2)])

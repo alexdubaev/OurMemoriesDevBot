@@ -119,6 +119,107 @@ describe('album PostgreSQL invariants', () => {
     expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBe(1)
   })
 
+  test('month photo pages and cover selection keep an unbounded collection intact and block legacy replacement', async () => {
+    const token = await auth(userId, scope.principal.sessionId)
+    const created = await http(`/api/v1/families/${familyId}/albums`, 'POST', token,
+      { kind: 'year', title: 'Первый год', childId }, randomUUID())
+    expect(created.status).toBe(201)
+    const album = (await created.json()).album
+    const entries = (await (await http(`/api/v1/families/${familyId}/albums/${album.id}/entries?view=month-summary`, 'GET', token)).json()).items
+    const entry = entries[0]
+    const otherEntry = entries[1]
+    const path = `/api/v1/families/${familyId}/albums/${album.id}/entries/${entry.id}`
+    const assets = await Promise.all(Array.from({ length: 100 }, (_, index) => db.mediaAsset.create({ data: {
+      familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+      originalKey: `synthetic/month-api/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg',
+      sha256: String(index % 10).repeat(64), byteSize: 3, width: 600 + index, height: 400,
+      originalStatus: 'stored', renditionStatus: 'ready',
+    } })))
+    for (let start = 0; start < assets.length; start += 48) {
+      const count = Math.min(48, assets.length - start)
+      const batch = await http(`${path}/photo-batches`, 'POST', token, { discussionGeneration: 1, membershipEpoch: 1, count }, randomUUID())
+      expect(batch.status).toBe(200)
+      const grant = (await batch.json()).grant
+      for (let offset = 0; offset < count; offset += 1) {
+        const attached = await http(`${path}/photos`, 'POST', token, {
+          grant, offset,
+          source: { memoryId: null, sourceKind: 'private_storage', sourceId: assets[start + offset]!.id },
+        }, randomUUID())
+        expect(attached.status).toBe(204)
+      }
+    }
+    const duplicateBatch = await http(`${path}/photo-batches`, 'POST', token, { discussionGeneration: 1, membershipEpoch: 1, count: 1 }, randomUUID())
+    const duplicateGrant = (await duplicateBatch.json()).grant
+    const duplicateAttach = await http(`${path}/photos`, 'POST', token, { grant: duplicateGrant, offset: 0,
+      source: { memoryId: null, sourceKind: 'private_storage', sourceId: assets[0]!.id } }, randomUUID())
+    expect(duplicateAttach.status).toBe(204)
+    expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBe(100)
+    const tailAssets = await db.mediaAsset.createManyAndReturn({ data: Array.from({ length: 1_900 }, (_, index) => ({
+      familyId, uploaderId: userId, sourceKind: 'upload' as const, purpose: 'memory' as const, mediaKind: 'photo' as const,
+      originalKey: `synthetic/month-api-tail/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg',
+      sha256: `${(index + 100).toString(16).padStart(4, '0')}${'a'.repeat(60)}`, byteSize: 3, width: 600, height: 400,
+      originalStatus: 'stored' as const, renditionStatus: 'ready' as const,
+    })) })
+    await db.albumPhoto.createMany({ data: tailAssets.map((asset) => ({ familyId, mediaId: asset.id })) })
+    await db.albumEntrySource.createMany({ data: tailAssets.map((asset, index) => ({
+      familyId, albumId: album.id, entryId: entry.id, memoryId: null, albumPhotoMediaId: asset.id,
+      sourceKind: 'private_storage' as const, sourceId: asset.id, kind: 'photo' as const, position: 100 + index,
+    })) })
+    const first = await http(`${path}/sources?kind=photo&limit=37`, 'GET', token)
+    expect(first.status).toBe(200)
+    const firstPage = await first.json()
+    expect(firstPage.items).toHaveLength(37)
+    const otherPath = `/api/v1/families/${familyId}/albums/${album.id}/entries/${otherEntry.id}`
+    const foreignCursor = await http(`${otherPath}/sources?kind=photo&limit=37&cursor=${encodeURIComponent(firstPage.nextCursor)}`, 'GET', token)
+    expect(foreignCursor.status).toBe(422)
+    const batch = await http(`${path}/photo-batches`, 'POST', token, { discussionGeneration: 1, membershipEpoch: 1, count: 1 }, randomUUID())
+    const foreignGrant = await http(`${otherPath}/photos`, 'POST', token, {
+      grant: (await batch.json()).grant, offset: 0,
+      source: { memoryId: null, sourceKind: 'private_storage', sourceId: assets[0]!.id },
+    }, randomUUID())
+    expect(foreignGrant.status).toBe(422)
+    const selected = assets[88]!
+    const selectedSource = await db.albumEntrySource.findFirstOrThrow({ where: { albumId: album.id, entryId: entry.id, sourceId: selected.id } })
+    const currentEntryVersion = (await db.albumEntry.findUniqueOrThrow({ where: { id: entry.id } })).version
+    const cover = await http(`${path}/month-cover`, 'PUT', token, { expectedVersion: currentEntryVersion, sourceId: selectedSource.id })
+    expect(cover.status).toBe(200)
+    expect((await cover.json()).entry.month).toMatchObject({ cover: { id: selectedSource.id }, photoCount: 2_000 })
+    const foreignMonthCover = await http(`${otherPath}/month-cover`, 'PUT', token, { expectedVersion: 1, sourceId: selectedSource.id })
+    expect(foreignMonthCover.status).toBe(404)
+    const viewerId = (await db.user.create({ data: { displayName: 'Зритель обложки месяца' } })).id
+    extraUserIds.push(viewerId)
+    await db.familyMember.create({ data: { familyId, userId: viewerId, role: 'viewer' } })
+    const viewerSession = await db.authSession.create({ data: { userId: viewerId, refreshTokenHash: randomUUID(), refreshTokenFamilyHash: randomUUID(), expiresAt: new Date(Date.now() + 60_000) } })
+    const viewerCover = await http(`${path}/month-cover`, 'PUT', await auth(viewerId, viewerSession.id), {
+      expectedVersion: (await db.albumEntry.findUniqueOrThrow({ where: { id: entry.id } })).version, sourceId: selectedSource.id,
+    })
+    expect(viewerCover.status).toBe(403)
+    const stale = await http(`${path}/month-cover`, 'PUT', token, { expectedVersion: currentEntryVersion, sourceId: null })
+    expect(stale.status).toBe(409)
+    const currentAlbumVersion = (await db.album.findUniqueOrThrow({ where: { id: album.id } })).version
+    const legacy = await http(`${path}/sources`, 'PUT', token, { expectedVersion: currentAlbumVersion, sources: [] }, randomUUID())
+    expect(legacy.status).toBe(409)
+    const beforeLegacyReplayVersion = (await db.albumEntry.findUniqueOrThrow({ where: { id: entry.id } })).version
+    await expect(db.$transaction(async (tx) => {
+      await tx.albumEntrySource.deleteMany({ where: { albumId: album.id, entryId: entry.id } })
+      await tx.albumEntry.update({ where: { id: entry.id }, data: { version: { increment: 1 } } })
+      await tx.albumSourceOperation.create({ data: {
+        familyId, albumId: album.id, entryId: entry.id, actorUserId: userId, operation: 'set_sources',
+        requestId: randomUUID(), payloadHash: 'f'.repeat(64),
+      } })
+    })).rejects.toThrow(/paged photo updates/i)
+    expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBe(2_000)
+    expect((await db.albumEntry.findUniqueOrThrow({ where: { id: entry.id } })).version).toBe(beforeLegacyReplayVersion)
+    const staleBatch = await http(`${path}/photo-batches`, 'POST', token, { discussionGeneration: 1, membershipEpoch: 1, count: 1 }, randomUUID())
+    const staleGrant = (await staleBatch.json()).grant
+    const beforeClear = (await db.album.findUniqueOrThrow({ where: { id: album.id } })).version
+    const cleared = await http(`${path}/clear?view=month-summary`, 'POST', token, { expectedVersion: beforeClear })
+    expect(cleared.status).toBe(200)
+    const lateAppend = await http(`${path}/photos`, 'POST', token, { grant: staleGrant, offset: 0,
+      source: { memoryId: null, sourceKind: 'private_storage', sourceId: assets[0]!.id } }, randomUUID())
+    expect(lateAppend.status).toBe(409)
+  }, { timeout: 30_000 })
+
   test('stores a finalized album photo directly without creating a feed Memory', async () => {
     const token = await auth(userId, scope.principal.sessionId)
     const album = await createAlbum()

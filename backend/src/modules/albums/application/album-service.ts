@@ -12,6 +12,14 @@ import {
   type AlbumSourceSelection,
   type UpdateAlbumEntryRequest,
   type UpdateAlbumRequest,
+  albumEntrySourcePageQuerySchema,
+  albumMonthPhotoBatchRequestSchema,
+  albumMonthPhotoAppendRequestSchema,
+  albumMonthCoverRequestSchema,
+  type AlbumEntrySourcePageQuery,
+  type AlbumMonthPhotoBatchRequest,
+  type AlbumMonthPhotoAppendRequest,
+  type AlbumMonthCoverRequest,
 } from '@web-app-demo/contracts'
 import type { FamilyScope } from '../../families'
 import type { AlbumRepository } from './album-repository'
@@ -45,7 +53,7 @@ export class AlbumService {
   remove(scope: FamilyScope, albumId: string, version: number) { return this.repository.deleteAlbum(scope, albumId, version) }
 
   async entries(scope: FamilyScope, albumId: string, query: ListAlbumEntriesQuery) {
-    const filters = { year: query.year ?? null, category: query.category ?? null }
+    const filters = { year: query.year ?? null, category: query.category ?? null, view: query.view ?? null }
     let before: { orderKey?: number; dateValue?: string | null; id: string } | undefined
     let cursorVersion: number | undefined
     if (query.cursor) {
@@ -69,14 +77,70 @@ export class AlbumService {
   async updateEntry(scope: FamilyScope, albumId: string, entryId: string, input: UpdateAlbumEntryRequest) {
     return this.repository.updateEntry(scope, albumId, entryId, updateAlbumEntryRequestSchema.parse(input))
   }
-  getEntry(scope: FamilyScope, albumId: string, entryId: string) { return this.repository.getEntry(scope, albumId, entryId) }
+  getEntry(scope: FamilyScope, albumId: string, entryId: string, view?: 'month-summary') { return this.repository.getEntry(scope, albumId, entryId, view) }
+
+  async entrySources(scope: FamilyScope, albumId: string, entryId: string, query: AlbumEntrySourcePageQuery) {
+    query = albumEntrySourcePageQuerySchema.parse(query)
+    const filters = { kind: query.kind, entryId }
+    const cursor = query.cursor ? this.readCursor(query.cursor, { familyId: scope.familyId, albumId, kind: 'month-sources', filters }) : undefined
+    const last = cursor?.last as { position: number; id: string; coverSourceId: string | null; coverId: string | null } | undefined
+    const page = await this.repository.listEntrySources(scope, albumId, entryId, query, last)
+    if (last && (last.coverSourceId !== page.coverSourceId || last.coverId !== page.coverId)) throw new AlbumFailure('version_conflict', 'Обложка месяца изменилась. Загрузите страницу фотографий заново')
+    return {
+      items: page.items,
+      nextCursor: page.hasNext && page.last
+        ? this.writeCursor({ version: 1, familyId: scope.familyId, albumId, kind: 'month-sources', filters,
+          last: { ...page.last, coverSourceId: page.coverSourceId, coverId: page.coverId } })
+        : null,
+    }
+  }
+
+  async setMonthCover(scope: FamilyScope, albumId: string, entryId: string, input: AlbumMonthCoverRequest) {
+    return this.repository.setMonthCover(scope, albumId, entryId, albumMonthCoverRequestSchema.parse(input))
+  }
+
+  async updateMonthEntry(scope: FamilyScope, albumId: string, entryId: string, input: UpdateAlbumEntryRequest, view?: 'month-summary') {
+    return this.repository.updateEntry(scope, albumId, entryId, updateAlbumEntryRequestSchema.parse(input), view)
+  }
+
+  async reserveMonthPhotos(scope: FamilyScope, albumId: string, entryId: string, input: AlbumMonthPhotoBatchRequest, requestId: string) {
+    const normalized = albumMonthPhotoBatchRequestSchema.parse(input)
+    const payloadHash = digest({ albumId, entryId, ...normalized })
+    const reservation = await this.repository.reserveMonthPhotos(scope, albumId, entryId, normalized, requestId.toLowerCase(), payloadHash)
+    const grant = this.writeCursor({
+      version: 1, familyId: scope.familyId, albumId, kind: 'month-photo-batch',
+      filters: { entryId, actorId: scope.principal.userId, sessionId: scope.principal.sessionId },
+      last: { requestId: requestId.toLowerCase(), startPosition: reservation.startPosition,
+        count: normalized.count, discussionGeneration: reservation.discussionGeneration, membershipEpoch: reservation.membershipEpoch },
+    })
+    return { grant }
+  }
+
+  async appendMonthPhoto(scope: FamilyScope, albumId: string, entryId: string, input: AlbumMonthPhotoAppendRequest, requestId: string) {
+    const normalized = albumMonthPhotoAppendRequestSchema.parse(input)
+    const cursor = this.readCursor(normalized.grant, { familyId: scope.familyId, albumId, kind: 'month-photo-batch',
+      filters: { entryId, actorId: scope.principal.userId, sessionId: scope.principal.sessionId } })
+    const grant = cursor.last as { startPosition: number; count: number; discussionGeneration: number; membershipEpoch: number }
+    if (!Number.isSafeInteger(grant.startPosition) || !Number.isSafeInteger(grant.count) || !Number.isSafeInteger(grant.discussionGeneration) ||
+        !Number.isSafeInteger(grant.membershipEpoch) || normalized.offset >= grant.count) {
+      throw new AlbumFailure('invalid_input', 'Разрешение на загрузку фотографий недействительно. Начните загрузку заново')
+    }
+    const { offset, source } = normalized
+    await this.repository.appendMonthPhoto(scope, albumId, entryId, {
+      source, position: grant.startPosition + offset,
+      discussionGeneration: grant.discussionGeneration, membershipEpoch: grant.membershipEpoch,
+    }, requestId.toLowerCase(), digest({ grant: normalized.grant, offset, source }), scope.principal.userId)
+  }
 
   async setSources(scope: FamilyScope, albumId: string, entryId: string, input: AlbumSourceSelection, key: string) {
     const normalized = albumSourceSelectionSchema.parse(input)
     return this.repository.setSources(scope, albumId, entryId, normalized, key.toLowerCase(), digest({ albumId, entryId, ...normalized }))
   }
 
-  clearEntry(scope: FamilyScope, albumId: string, entryId: string, version: number) { return this.repository.clearEntry(scope, albumId, entryId, version) }
+  clearEntry(scope: FamilyScope, albumId: string, entryId: string, version: number, view?: 'month-summary') { return this.repository.clearEntry(scope, albumId, entryId, version, view) }
+  removeMonthPhoto(scope: FamilyScope, albumId: string, entryId: string, sourceId: string, expectedVersion: number) {
+    return this.repository.removeMonthPhoto(scope, albumId, entryId, sourceId, expectedVersion)
+  }
   deleteEntry(scope: FamilyScope, albumId: string, entryId: string, version: number) { return this.repository.deleteEntry(scope, albumId, entryId, version) }
   reorder(scope: FamilyScope, albumId: string, expectedVersion: number, entryId: string, beforeEntryId: string | null) {
     return this.repository.reorderEntry(scope, albumId, { expectedVersion, entryId, beforeEntryId })
