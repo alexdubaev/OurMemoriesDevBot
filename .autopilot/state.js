@@ -11,9 +11,9 @@ window.STATE =
   "memoryFile": "AGENTS.md",
   "memoryOwner": "user",
   "skillDir": "C:/Users/Alexandr/.codex/skills/autopilot",
-  "baseCommit": null,
+  "baseCommit": "ccea672708b6ae60bdcb737ed4515e547876d233",
   "startedAt": "2026-11-05T22:37:01+03:00",
-  "updatedAt": "2026-11-05T22:39:25+03:00",
+  "updatedAt": "2026-11-05T23:54:45+03:00",
   "finishedAt": null,
   "stages": [
     {
@@ -43,16 +43,20 @@ window.STATE =
     },
     {
       "id": "plan",
-      "status": "active",
-      "startedAt": "2026-11-05T22:38:42+03:00"
+      "status": "done",
+      "startedAt": "2026-11-05T22:38:42+03:00",
+      "finishedAt": "2026-11-05T22:39:37+03:00"
     },
     {
       "id": "build",
-      "status": "pending"
+      "status": "done",
+      "startedAt": "2026-11-05T22:39:37+03:00",
+      "finishedAt": "2026-11-05T23:54:45+03:00"
     },
     {
       "id": "review",
-      "status": "pending"
+      "status": "active",
+      "startedAt": "2026-11-05T23:54:45+03:00"
     },
     {
       "id": "final",
@@ -61,8 +65,8 @@ window.STATE =
   ],
   "requirements": {
     "total": 15,
-    "done": 0,
-    "inTicket": 15,
+    "done": 14,
+    "inTicket": 1,
     "inSpec": 0,
     "placeholder": 0,
     "deferred": 0,
@@ -91,9 +95,16 @@ window.STATE =
       ],
       "review": "нет",
       "model": "сильная",
-      "status": "pending",
+      "status": "done",
       "retries": 0,
-      "repairs": 0
+      "repairs": 0,
+      "startedAt": "2026-11-05T22:39:38+03:00",
+      "finishedAt": "2026-11-05T23:07:55+03:00",
+      "tests": {
+        "passed": 13,
+        "failed": 0
+      },
+      "commit": "949b6493"
     },
     {
       "id": "02",
@@ -116,9 +127,16 @@ window.STATE =
       ],
       "review": "нет",
       "model": "сильная",
-      "status": "pending",
+      "status": "done",
       "retries": 0,
-      "repairs": 0
+      "repairs": 0,
+      "startedAt": "2026-11-05T23:07:56+03:00",
+      "finishedAt": "2026-11-05T23:17:41+03:00",
+      "tests": {
+        "passed": 2,
+        "failed": 0
+      },
+      "commit": "9399a961"
     },
     {
       "id": "03",
@@ -143,9 +161,16 @@ window.STATE =
       ],
       "review": "нет",
       "model": "сильная",
-      "status": "pending",
+      "status": "done",
       "retries": 0,
-      "repairs": 0
+      "repairs": 0,
+      "startedAt": "2026-11-05T23:17:42+03:00",
+      "finishedAt": "2026-11-05T23:43:28+03:00",
+      "tests": {
+        "passed": 2,
+        "failed": 0
+      },
+      "commit": "27d8b15d"
     },
     {
       "id": "04",
@@ -165,12 +190,16 @@ window.STATE =
       ],
       "review": "нет",
       "model": "сильная",
-      "status": "pending",
+      "status": "in-progress",
       "retries": 0,
-      "repairs": 0
+      "repairs": 0,
+      "startedAt": "2026-11-05T23:43:28+03:00"
     }
   ],
-  "tests": null,
+  "tests": {
+    "passed": 2,
+    "failed": 0
+  },
   "debt": {
     "placeholders": [],
     "assumptions": [],
@@ -189,9 +218,18 @@ window.STATE =
     "2026-11-05T22:38:43+03:00",
     "2026-11-05T22:38:44+03:00",
     "2026-11-05T22:39:22+03:00",
-    "2026-11-05T22:39:25+03:00"
+    "2026-11-05T22:39:25+03:00",
+    "2026-11-05T22:39:36+03:00",
+    "2026-11-05T22:39:37+03:00",
+    "2026-11-05T22:39:38+03:00",
+    "2026-11-05T23:07:55+03:00",
+    "2026-11-05T23:07:56+03:00",
+    "2026-11-05T23:17:41+03:00",
+    "2026-11-05T23:17:42+03:00",
+    "2026-11-05T23:43:28+03:00",
+    "2026-11-05T23:54:45+03:00"
   ],
-  "rev": 11,
+  "rev": 21,
   "waiting": null,
   "waits": [],
   "log": [
@@ -260,78 +298,158 @@ window.STATE =
       "g": "G3",
       "ok": true,
       "problems": 0
+    },
+    {
+      "t": "2026-11-05T22:39:37+03:00",
+      "k": "stage",
+      "id": "build",
+      "act": "start"
+    },
+    {
+      "t": "2026-11-05T22:39:38+03:00",
+      "k": "ticket",
+      "ids": [
+        "01"
+      ],
+      "act": "start"
+    },
+    {
+      "t": "2026-11-05T23:07:55+03:00",
+      "k": "ticket",
+      "ids": [
+        "01"
+      ],
+      "act": "done",
+      "tests": {
+        "passed": 13,
+        "failed": 0
+      }
+    },
+    {
+      "t": "2026-11-05T23:07:56+03:00",
+      "k": "ticket",
+      "ids": [
+        "02"
+      ],
+      "act": "start"
+    },
+    {
+      "t": "2026-11-05T23:17:41+03:00",
+      "k": "ticket",
+      "ids": [
+        "02"
+      ],
+      "act": "done",
+      "tests": {
+        "passed": 2,
+        "failed": 0
+      }
+    },
+    {
+      "t": "2026-11-05T23:17:42+03:00",
+      "k": "ticket",
+      "ids": [
+        "03"
+      ],
+      "act": "start"
+    },
+    {
+      "t": "2026-11-05T23:43:28+03:00",
+      "k": "ticket",
+      "ids": [
+        "03"
+      ],
+      "act": "done",
+      "tests": {
+        "passed": 2,
+        "failed": 0
+      }
+    },
+    {
+      "t": "2026-11-05T23:43:28+03:00",
+      "k": "ticket",
+      "ids": [
+        "04"
+      ],
+      "act": "start"
+    },
+    {
+      "t": "2026-11-05T23:54:45+03:00",
+      "k": "stage",
+      "id": "review",
+      "act": "start"
     }
   ],
   "reqList": [
     {
       "id": "R01",
       "text": "«Заменить вертикальный список больших фотографий плотным красивым коллажем.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R02",
       "text": "«Вверху месяца сохранить: … название „Нам N месяцев“»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R03",
       "text": "«У каждого из 12 месяцев может быть своя главная фотография.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R04",
       "text": "«Сервер обязан проверить: семья → альбом → месяц → доступный источник-фотография.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R05",
       "text": "«Из смешанной публикации можно выбрать отдельную фотографию.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R06",
       "text": "«Использовать существующий direct-album photo pipeline»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R07",
       "text": "«Пользователь может выбрать большой набор фотографий за один раз и продолжать добавлять новые позже.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R08",
       "text": "«Нельзя возвращать весь многотысячный месяц одним неограниченным JSON или монтировать все изображения сразу.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R09",
       "text": "«Старый full-replace API не должен трактовать усечённую страницу как полную коллекцию.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R10",
       "text": "«Листание должно работать через границы страниц.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R11",
       "text": "«Большой выбранный набор обрабатывается очередью.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R12",
       "text": "«При смене семьи/аккаунта, отзыве доступа, удалении или очистке месяца запоздалые операции не должны пополнять новый либо уже очищенный контекст.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R13",
       "text": "«Уже существующие видео, голосовые и заметки не удалять, не скрывать и не терять при сохранении месяца.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R14",
       "text": "«Не расширять задачу до общего аудита или переделки архитектуры.»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R15",
