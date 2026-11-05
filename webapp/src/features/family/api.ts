@@ -171,9 +171,12 @@ export async function uploadFamilyPhoto(
   idempotencyKey?: string,
   onProgress?: (loaded: number, total: number) => void,
   onAccepted?: () => void,
+  resume?: FamilyPhotoUploadResume,
 ) {
-  return uploadFamilyMedia(transport, familyId, file, 'photo', contentType, purpose, signal, onStage, idempotencyKey, onProgress, onAccepted)
+  return uploadFamilyMedia(transport, familyId, file, 'photo', contentType, purpose, signal, onStage, idempotencyKey, onProgress, onAccepted, resume)
 }
+
+export type FamilyPhotoUploadResume = { stored?: { uploadId: string; assetId: string } }
 
 export async function uploadFamilyVideo(
   transport: AuthenticatedTransport,
@@ -199,10 +202,19 @@ async function uploadFamilyMedia(
   idempotencyKey?: string,
   onProgress?: (loaded: number, total: number) => void,
   onAccepted?: () => void,
+  resume?: FamilyPhotoUploadResume,
 ) {
+  const uploadsPath = `/api/v1/families/${encodeURIComponent(familyId)}/uploads`
+  const finalize = async ({ uploadId, assetId }: NonNullable<FamilyPhotoUploadResume['stored']>) => {
+    signal?.throwIfAborted()
+    onStage?.('finalize')
+    await transport.request(`${uploadsPath}/${encodeURIComponent(uploadId)}/finalize`, finalizeMediaUploadResponseSchema, { method: 'POST', signal })
+    return assetId
+  }
+  if (resume?.stored) return finalize(resume.stored)
   onStage?.('reserve')
   const reservation = await transport.request(
-    `/api/v1/families/${encodeURIComponent(familyId)}/uploads`, reserveMediaUploadResponseSchema,
+    uploadsPath, reserveMediaUploadResponseSchema,
     {
       method: 'POST',
       body: reserveMediaUploadRequestSchema.parse({
@@ -234,14 +246,10 @@ async function uploadFamilyMedia(
   }
   signal?.throwIfAborted()
   if (!response?.ok && response?.status !== 412) throw new Error(kind === 'photo' ? 'Не удалось загрузить фотографию' : 'Не удалось загрузить видео')
+  const stored = { uploadId: reservation.upload.uploadId, assetId: reservation.assetId }
+  if (resume) resume.stored = stored
   if (response.ok) onAccepted?.()
-  onStage?.('finalize')
-  await transport.request(
-    `/api/v1/families/${encodeURIComponent(familyId)}/uploads/${encodeURIComponent(reservation.upload.uploadId)}/finalize`,
-    finalizeMediaUploadResponseSchema,
-    { method: 'POST', signal },
-  )
-  return reservation.assetId
+  return finalize(stored)
 }
 
 function putWithProgress(url: string, method: string, headers: Record<string, string>, file: File, signal: AbortSignal | undefined, onProgress: (loaded: number, total: number) => void): Promise<{ ok: boolean; status: number }> {
