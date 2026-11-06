@@ -717,6 +717,40 @@ explicit real-S3 lifecycle command in
 required for the final executable source. Bounded compatibility evidence does
 not replace final source-bound FULL verification and independent review.
 
+### Month-photo recovery profile (measurement pending)
+
+The `s3-album-month-photos` profile is a separate, exact source profile for the
+month-photo release. Its bridge source SHA is duplicated as a non-overridable
+constant in `ci-release.sh` and `redeploy.sh`; backend and webapp immutable
+image IDs, complete runtime fingerprint, and exact product executable
+fingerprint are non-overridable constants in `redeploy.sh`. Those constants
+intentionally remain empty until the accepted bridge source and its real
+production images have been measured. Release preparation fails closed while
+any verifier pin is empty; no environment setting can substitute a value.
+
+After measurement, the normal guarded release prepares rollback to that single
+bridge pair only after the full rollback-readiness verifier accepts the exact
+candidate source, host inputs, immutable images, installed Control, S3, and
+database state. The source catalog must be the exact 65-migration `a184` prefix
+plus `20261105110000_album_month_photos` with pinned LF/CRLF checksums. Before
+SQL only the exact 65-row prefix or completed 66-row candidate ledger is
+accepted; complete recovery requires all 66 rows. The 65-row schema must not
+contain month-photo columns, FK, page index, operation cursor columns, or the
+legacy replacement fence. The 66-row schema must contain all of them, enabled
+and matching the expected function names. Existing social tables, discussion
+generation, and enabled clear-discussion trigger remain required as before.
+
+No database restore or storage switch is authorized by this profile. Keep the
+normal backup, source ancestry, host lock, immutable artifact, readiness,
+gateway/auth restoration, and database-preservation protections. Root must
+insert only independently attested values in the paired constant slots after
+bridge acceptance and production image measurement; do not promote blank pins
+or infer them from a source build.
+
+The migration checksum pair is fixed to LF
+`9d7e49ece81feb98cffd937c8b98475e28ca07dcd58b73e7aa2775711f86c87d` and CRLF
+`64dfcc65f5c88ef1268b22e339e7ef934c077012da29df3fe37e6fdc08bd7340`.
+
 The guarded rollback supports these exact measured backend + webapp target pairs and source profiles:
 
 - `e383d79269a3595f4c6cabedf167335aea042cf3`, with its exact production image

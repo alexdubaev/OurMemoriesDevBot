@@ -20,6 +20,14 @@ S3_RECOVERY_SHA=26cfab9ce35fd1a42279fc0d9dd3637c340eec6a
 S3_RECOVERY_BACKEND_IMAGE_ID=sha256:0c20d3089050a00214bb51dac3ac6961622ef5d90f38a8212143851769b6662d
 S3_RECOVERY_WEBAPP_IMAGE_ID=sha256:a53f4c8b54e723d518ff70ec7051045e99708804f541c78d163984f9a43b673e
 S3_RECOVERY_RUNTIME_FINGERPRINT=d16c128505122bae2ca7536f7557dc72f45aafee15907e2419f231259272c2d2
+# These are intentionally source-pinned constants, never environment overrides.
+# Fill only after the bridge source and its immutable production images have
+# been accepted and measured. Empty values fail closed.
+MONTH_PHOTO_RECOVERY_SHA=
+MONTH_PHOTO_RECOVERY_BACKEND_IMAGE_ID=
+MONTH_PHOTO_RECOVERY_WEBAPP_IMAGE_ID=
+MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT=
+MONTH_PHOTO_EXECUTABLE_FINGERPRINT=
 MAX_VIDEO_COMPATIBILITY_FINGERPRINT=ff5758a7a3adb23b028a96e56c6deda68e83bd2f7cad6b2e54c0bd8b5cfa5ca4
 MAX_INVITE_ENTRY_COMPATIBILITY_FINGERPRINT=cda103e46f3e415d92ddcf1b7dcbe44269ccac991bc6d52534a05e8e242d1179
 MAX_VIDEO_PIN_INSTALLER_BLOB=d34a87ec84df49987dc01339481750320f10f203
@@ -683,6 +691,16 @@ migrate() {
 		rollback_verify_s3_album_social_migration_history pre-sql ||
 			die 'S3 album social migration requires the exact reviewed pre-SQL migration prefix'
 	elif git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e \
+		"$MEMOLY_PRODUCT_SHA:backend/prisma/migrations/20261105110000_album_month_photos/migration.sql" 2>/dev/null; then
+		[ -n "$MONTH_PHOTO_RECOVERY_SHA" ] && [ -n "$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT" ] &&
+			[ -n "$MONTH_PHOTO_EXECUTABLE_FINGERPRINT" ] ||
+			die 'month-photo recovery pins have not been measured; refusing database migration'
+		profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MONTH_PHOTO_RECOVERY_SHA") ||
+			die 'month-photo migration requires the exact reviewed S3 recovery profile'
+		[ "$profile" = s3-album-month-photos ] || die 'month-photo migration has an unexpected recovery profile'
+		rollback_verify_s3_album_month_photos_migration_history pre-sql ||
+			die 'month-photo migration requires the exact reviewed 65-migration prefix'
+	elif git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e \
 		"$MEMOLY_PRODUCT_SHA:backend/prisma/migrations/20261025120000_max_video_legacy_retention/migration.sql" 2>/dev/null; then
 		max_video_profile=$(rollback_source_compatibility_profile "$MEMOLY_PRODUCT_SHA" "$MAX_VIDEO_RECOVERY_BACKEND_SHA") ||
 			die 'MAX video migration requires the exact reviewed source compatibility profile'
@@ -709,6 +727,11 @@ migrate() {
 			stage='post-migration runtime grants or postconditions failed'
 		fi
 		die "$stage; schema may already have advanced; inspect migration status before retrying; private job log: $(basename "$job_log"); application services were not promoted"
+	fi
+	if git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" cat-file -e \
+		"$MEMOLY_PRODUCT_SHA:backend/prisma/migrations/20261105110000_album_month_photos/migration.sql" 2>/dev/null; then
+		rollback_verify_s3_album_month_photos_migration_history complete ||
+			die 'month-photo migration completed without the exact 66-migration schema and ledger state; application services were not promoted'
 	fi
 	if ! migration_status >/dev/null 2>&1; then
 		die "database migration applied or status is unavailable; inspect migration status before retrying; application services were not promoted"
@@ -814,6 +837,11 @@ rollback_source_compatibility_profile() {
 				"$S3_RECOVERY_SHA:$S3_RECOVERY_RUNTIME_FINGERPRINT:3d939c75a4a6ec1ac6582ac7bcec70edb015c694267bad966aa096f4813df8d2:s3-album-social"
 				"$S3_RECOVERY_SHA:$S3_RECOVERY_RUNTIME_FINGERPRINT:2cd72b36e5fb2ccd01b9533d353419931ccf8d62d919c63a79e29c283b59a63f:s3-album-social"
 				"$S3_RECOVERY_SHA:$S3_RECOVERY_RUNTIME_FINGERPRINT:6432b47cca29849707ee916f7fcdf442d687b67e4c44c33e47e73e6ed8a5b027:s3-album-social") ;;
+		"$MONTH_PHOTO_RECOVERY_SHA")
+			[ -n "$MONTH_PHOTO_RECOVERY_SHA" ] &&
+			[ -n "$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT" ] &&
+			[ -n "$MONTH_PHOTO_EXECUTABLE_FINGERPRINT" ] || return 1
+			exact_compatibility_attestations=("$MONTH_PHOTO_RECOVERY_SHA:$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT:$MONTH_PHOTO_EXECUTABLE_FINGERPRINT:s3-album-month-photos") ;;
 		e383d79269a3595f4c6cabedf167335aea042cf3)
 			attestations=("3fce2739205da927b95eb3379b1d066b61282965:3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857:candidate") ;;
 		3fce2739205da927b95eb3379b1d066b61282965)
@@ -901,7 +929,7 @@ rollback_source_compatibility_profile() {
 			control) rollback_control_host_inputs_match "$revision" || continue ;;
 			max-video) rollback_max_video_host_inputs_match "$revision" || continue ;;
 			max-video-retirement) rollback_max_video_retirement_host_inputs_match "$revision" || continue ;;
-			s3|s3-album-social) rollback_s3_host_inputs_match "$revision" || continue ;;
+			s3|s3-album-social|s3-album-month-photos) rollback_s3_host_inputs_match "$revision" || continue ;;
 		esac
 			printf '%s\n' "$profile"
 			return 0
@@ -1102,6 +1130,82 @@ try {
 } catch { process.exitCode = 1; }
 finally { await db.end().catch(() => {}); }
 MEMOLY_S3_SOCIAL_HISTORY_JS
+)" >/dev/null 2>&1
+}
+
+rollback_verify_s3_album_month_photos_migration_history() {
+	local phase=$1 baseline_catalog candidate_catalog lock_path fd_target
+	case "$phase" in
+		complete) ;;
+		pre-sql)
+			[ "${SELECTEL_CI_RELEASE:-false}" = true ] || return 1
+			[[ "${SELECTEL_DEPLOY_LOCK_FD:-}" =~ ^[0-9]+$ ]] || return 1
+			lock_path=$(readlink -f -- "$SERVER_ROOT/.selectel-deploy.lock") || return 1
+			fd_target=$(readlink "/proc/self/fd/$SELECTEL_DEPLOY_LOCK_FD" 2>/dev/null || true)
+			[ "$fd_target" = "$lock_path" ] || return 1
+			{ true >&"$SELECTEL_DEPLOY_LOCK_FD"; } 2>/dev/null || return 1
+			flock -n "$SELECTEL_DEPLOY_LOCK_FD" || return 1 ;;
+		*) return 1 ;;
+	esac
+	baseline_catalog=$(rollback_migration_catalog_checksums a18469ab8a54464d491659d849fcf286973fa9e4) || return 1
+	candidate_catalog=$(rollback_migration_catalog_checksums "$MEMOLY_PRODUCT_SHA") || return 1
+	MEMOLY_S3_MONTH_BASELINE="$baseline_catalog" MEMOLY_S3_MONTH_CANDIDATE="$candidate_catalog" MEMOLY_S3_MONTH_PHASE="$phase" \
+	compose run --rm --no-deps -e "MEMOLY_S3_MONTH_BASELINE=$baseline_catalog" \
+		-e "MEMOLY_S3_MONTH_CANDIDATE=$candidate_catalog" -e "MEMOLY_S3_MONTH_PHASE=$phase" \
+		backend bun -e "$(cat <<'MEMOLY_S3_MONTH_HISTORY_JS'
+import { Client } from 'pg';
+function parse(value) {
+  const out=[];
+  for (const line of (value??'').trim().split('\n')) {
+    const [name,lf,crlf,...extra]=line.split(':');
+    if(extra.length||!/^[0-9]+_[a-z0-9_]+$/.test(name??'')||!/^[a-f0-9]{64}$/.test(lf??'')||!/^[a-f0-9]{64}$/.test(crlf??'')||out.some(x=>x.name===name)) throw Error('catalog');
+    out.push({name,lf,crlf});
+  }
+  return out;
+}
+const db=new Client({connectionString:process.env.DATABASE_URL});
+try {
+ const base=parse(process.env.MEMOLY_S3_MONTH_BASELINE),candidate=parse(process.env.MEMOLY_S3_MONTH_CANDIDATE),phase=process.env.MEMOLY_S3_MONTH_PHASE;
+	 const suffix={name:'20261105110000_album_month_photos',lf:'9d7e49ece81feb98cffd937c8b98475e28ca07dcd58b73e7aa2775711f86c87d',crlf:'64dfcc65f5c88ef1268b22e339e7ef934c077012da29df3fe37e6fdc08bd7340'};
+ if(!['pre-sql','complete'].includes(phase)||base.length!==65||candidate.length!==66||base.some((r,i)=>r.name!==candidate[i]?.name||r.lf!==candidate[i]?.lf||r.crlf!==candidate[i]?.crlf)||JSON.stringify(candidate[65])!==JSON.stringify(suffix)) throw Error('unmeasured catalog');
+ await db.connect(); await db.query('BEGIN READ ONLY');
+ const {rows}=await db.query('SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name');
+ const count=phase==='complete'?66:rows.length;
+ if(![65,66].includes(count)||rows.length!==count||rows.some((r,i)=>!r.finished_at||r.rolled_back_at||r.migration_name!==candidate[i]?.name||![candidate[i]?.lf,candidate[i]?.crlf].includes(r.checksum))) throw Error('ledger');
+ const {rows:s}=await db.query(`SELECT
+  to_regclass('public.album_entry_comments') IS NOT NULL comments,
+  to_regclass('public.album_entry_reactions') IS NOT NULL reactions,
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_entries' AND column_name='discussion_generation' AND data_type='integer' AND is_nullable='NO' AND column_default='1') generation,
+  EXISTS(SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid WHERE t.tgrelid='public.album_entries'::regclass AND t.tgname='album_entries_legacy_clear_discussion' AND NOT t.tgisinternal AND t.tgenabled='O' AND p.proname='protect_album_discussion_on_legacy_month_clear') trigger,
+  to_regprocedure('public.protect_album_discussion_on_legacy_month_clear()') IS NOT NULL function,
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_entries' AND column_name='month_cover_source_id') coverraw,
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_entries' AND column_name='month_cover_source_id' AND data_type='uuid') covertype,
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_entries' AND column_name='next_photo_position') nextposraw,
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_entries' AND column_name='next_photo_position' AND data_type='integer') nextpostype,
+  EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.album_entries'::regclass AND conname='album_entries_month_cover_source_id_fkey') coverfkraw,
+  EXISTS(SELECT 1 FROM pg_constraint c JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=c.conkey[1] JOIN pg_class r ON r.oid=c.confrelid JOIN pg_attribute ra ON ra.attrelid=r.oid AND ra.attnum=c.confkey[1] WHERE c.conrelid='public.album_entries'::regclass AND c.conname='album_entries_month_cover_source_id_fkey' AND c.contype='f' AND c.convalidated AND c.confdeltype='n' AND a.attname='month_cover_source_id' AND r.relname='album_entry_sources' AND ra.attname='id') coverfkvalid,
+  EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.album_entries'::regclass AND conname='album_entries_next_photo_position_check') nextcheckraw,
+  EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.album_entries'::regclass AND conname='album_entries_next_photo_position_check' AND contype='c' AND pg_get_constraintdef(oid) LIKE '%next_photo_position%>= 0%') nextcheckvalid,
+  EXISTS(SELECT 1 FROM pg_class WHERE relname='album_entries_month_cover_source_id_key') coveridxraw,
+  EXISTS(SELECT 1 FROM pg_index i JOIN pg_class x ON x.oid=i.indexrelid WHERE i.indrelid='public.album_entries'::regclass AND x.relname='album_entries_month_cover_source_id_key' AND i.indisunique AND i.indisvalid AND i.indisready) coveridxvalid,
+  EXISTS(SELECT 1 FROM pg_class WHERE relname='album_entry_sources_month_page_idx') pageidxraw,
+  EXISTS(SELECT 1 FROM pg_index i JOIN pg_class x ON x.oid=i.indexrelid WHERE i.indrelid='public.album_entry_sources'::regclass AND x.relname='album_entry_sources_month_page_idx' AND i.indisvalid AND i.indisready AND replace(pg_get_indexdef(i.indexrelid), '"', '') LIKE '%(entry_id, kind, position, id)%') pageidxvalid,
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_source_operations' AND column_name='start_position') startposraw,
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_source_operations' AND column_name='start_position' AND data_type='integer') startpostype,
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_source_operations' AND column_name='count') opcountraw,
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_source_operations' AND column_name='count' AND data_type='integer') opcounttype,
+  EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.album_source_operations'::regclass AND tgname='album_source_operations_legacy_month_replace_fence') monthtriggerraw,
+  EXISTS(SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid WHERE t.tgrelid='public.album_source_operations'::regclass AND t.tgname='album_source_operations_legacy_month_replace_fence' AND NOT t.tgisinternal AND t.tgenabled='O' AND p.proname='reject_legacy_month_source_replace_after_append') monthtriggervalid,
+  to_regproc('public.reject_legacy_month_source_replace_after_append') IS NOT NULL monthfunctionraw,
+  EXISTS(SELECT 1 FROM pg_proc WHERE oid=to_regprocedure('public.reject_legacy_month_source_replace_after_append()') AND prorettype='trigger'::regtype) monthfunctionvalid`);
+ const x=s[0],social=rows.length>=65,recovery=rows.length>=65,month=rows.length===66;
+ if(!x||x.comments!==social||x.reactions!==social||x.generation!==social||x.trigger!==recovery||x.function!==recovery||
+    x.coverraw!==month||x.nextposraw!==month||x.coverfkraw!==month||x.nextcheckraw!==month||x.coveridxraw!==month||x.pageidxraw!==month||
+    x.startposraw!==month||x.opcountraw!==month||x.monthtriggerraw!==month||x.monthfunctionraw!==month||
+    (month&&(!x.covertype||!x.nextpostype||!x.coverfkvalid||!x.nextcheckvalid||!x.coveridxvalid||!x.pageidxvalid||!x.startpostype||!x.opcounttype||!x.monthtriggervalid||!x.monthfunctionvalid))) throw Error('schema');
+ await db.query('COMMIT');
+} catch { process.exitCode=1; } finally { await db.end().catch(()=>{}); }
+MEMOLY_S3_MONTH_HISTORY_JS
 )" >/dev/null 2>&1
 }
 
@@ -1582,6 +1686,7 @@ rollback_auth_gate_for_verified_pair() {
 			;;
 		"$max_video_backend_target:$max_video_webapp_target") gate=false ;;
 		"$S3_RECOVERY_SHA:$S3_RECOVERY_SHA") gate=false ;;
+		"$MONTH_PHOTO_RECOVERY_SHA:$MONTH_PHOTO_RECOVERY_SHA") gate=false ;;
 		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
 	esac
 	[[ "${MEMOLY_PRODUCT_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || die 'rollback source SHA is unknown'
@@ -1659,6 +1764,15 @@ verify_application_rollback() {
 			expected_target_runtime=$S3_RECOVERY_RUNTIME_FINGERPRINT
 			profile=s3
 			;;
+		"$MONTH_PHOTO_RECOVERY_SHA:$MONTH_PHOTO_RECOVERY_SHA")
+			[ -n "$MONTH_PHOTO_RECOVERY_SHA" ] && [ -n "$MONTH_PHOTO_RECOVERY_BACKEND_IMAGE_ID" ] &&
+			[ -n "$MONTH_PHOTO_RECOVERY_WEBAPP_IMAGE_ID" ] && [ -n "$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT" ] &&
+			[ -n "$MONTH_PHOTO_EXECUTABLE_FINGERPRINT" ] || die 'month-photo recovery artifact pins are not measured'
+			target=$MONTH_PHOTO_RECOVERY_SHA
+			expected_backend_target_runtime=$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT
+			expected_target_runtime=$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT
+			profile=s3-album-month-photos
+			;;
 		*) die 'rollback target pair has no verified runtime compatibility attestation' ;;
 	esac
 	[[ "$MEMOLY_PRODUCT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'rollback source SHA is unknown'
@@ -1694,7 +1808,7 @@ verify_application_rollback() {
 	fi
 	target_runtime=$(rollback_runtime_fingerprint "$target_runtime_revision") || die 'cannot fingerprint rollback target runtime'
 	[ "$target_runtime" = "$expected_target_runtime" ] || die 'rollback target runtime differs from the verified compatibility target'
-	if [ "$profile" = control ] || [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ] || [ "$profile" = s3 ] || [ "$profile" = s3-album-social ]; then
+	if [ "$profile" = control ] || [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ] || [ "$profile" = s3 ] || [ "$profile" = s3-album-social ] || [ "$profile" = s3-album-month-photos ]; then
 		git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" diff --quiet "$target" "$MEMOLY_PRODUCT_SHA" -- \
 			backend/Dockerfile bunfig.toml \
 			deploy/selectel/Dockerfile.webapp deploy/selectel/Caddyfile.edge.template deploy/selectel/in-place-file.sh ||
@@ -1707,6 +1821,8 @@ verify_application_rollback() {
 				die 'MAX video retirement rollback requires the exact filesystem-backed host inputs'
 		elif [ "$profile" = s3-album-social ]; then
 			rollback_s3_host_inputs_match "$MEMOLY_PRODUCT_SHA" || die 'S3 album social recovery requires the exact S3-backed host inputs'
+		elif [ "$profile" = s3-album-month-photos ]; then
+			rollback_s3_host_inputs_match "$MEMOLY_PRODUCT_SHA" || die 'S3 month-photo recovery requires the exact S3-backed host inputs'
 		elif [ "$profile" = s3 ]; then
 			[ "$migration_phase" = complete ] || die 'S3 recovery requires the exact completed migration catalog'
 			rollback_s3_host_inputs_match "$MEMOLY_PRODUCT_SHA" || die 'S3 recovery requires the exact S3-backed host inputs'
@@ -1761,6 +1877,10 @@ verify_application_rollback() {
 			expected_backend_id=$S3_RECOVERY_BACKEND_IMAGE_ID
 			expected_webapp_id=$S3_RECOVERY_WEBAPP_IMAGE_ID
 			;;
+		"$MONTH_PHOTO_RECOVERY_SHA")
+			expected_backend_id=$MONTH_PHOTO_RECOVERY_BACKEND_IMAGE_ID
+			expected_webapp_id=$MONTH_PHOTO_RECOVERY_WEBAPP_IMAGE_ID
+			;;
 	esac
 	[ "$(docker image inspect --format '{{.Id}}' "memoly-backend:$target")" = "$expected_backend_id" ] ||
 		die 'rollback backend image differs from the verified production artifact'
@@ -1771,7 +1891,7 @@ verify_application_rollback() {
 	[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "memoly-webapp:$PREVIOUS_WEBAPP_IMAGE_TAG")" = "$PREVIOUS_WEBAPP_IMAGE_TAG" ] ||
 		die 'rollback webapp image revision label mismatch'
 	configuration_backup_dir >/dev/null || die 'rollback configuration artifacts are unavailable'
-	if { [ "$profile" = albums ] || [ "$profile" = wishlist ] || [ "$profile" = control ] || [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ] || [ "$profile" = s3-album-social ]; } && [ "$migration_phase" = pre-sql ]; then
+	if { [ "$profile" = albums ] || [ "$profile" = wishlist ] || [ "$profile" = control ] || [ "$profile" = max-video ] || [ "$profile" = max-video-retirement ] || [ "$profile" = s3-album-social ] || [ "$profile" = s3-album-month-photos ]; } && [ "$migration_phase" = pre-sql ]; then
 		# The exact prefix ledger check below is the pre-SQL migration gate. Prisma
 		# migrate status intentionally reports a pending reviewed additive suffix.
 		:
@@ -1793,6 +1913,10 @@ verify_application_rollback() {
 	elif [ "$profile" = s3-album-social ]; then
 		rollback_verify_s3_album_social_migration_history "$migration_phase" ||
 			die 'S3 album social rollback requires the exact reviewed migration history for this phase'
+		rollback_verify_s3_storage_readiness
+	elif [ "$profile" = s3-album-month-photos ]; then
+		rollback_verify_s3_album_month_photos_migration_history "$migration_phase" ||
+			die 'S3 month-photo rollback requires the exact reviewed migration history for this phase'
 		rollback_verify_s3_storage_readiness
 	elif [ "$profile" = albums ]; then
 		rollback_verify_albums_migration_history "$migration_phase" ||
@@ -1851,7 +1975,8 @@ rollback() {
 	ROLLBACK_AUTH_GATE=$gate_policy render_edge_candidate
 	local running_backend backend_count backend_started=false running_backend_tag
 	if [ "$gate_policy" = false ]; then
-		if [ "$PREVIOUS_BACKEND_IMAGE_TAG" = "$S3_RECOVERY_SHA" ] && [ "$PREVIOUS_WEBAPP_IMAGE_TAG" = "$S3_RECOVERY_SHA" ]; then
+		if { [ "$PREVIOUS_BACKEND_IMAGE_TAG" = "$S3_RECOVERY_SHA" ] && [ "$PREVIOUS_WEBAPP_IMAGE_TAG" = "$S3_RECOVERY_SHA" ]; } ||
+			{ [ -n "$MONTH_PHOTO_RECOVERY_SHA" ] && [ "$PREVIOUS_BACKEND_IMAGE_TAG" = "$MONTH_PHOTO_RECOVERY_SHA" ] && [ "$PREVIOUS_WEBAPP_IMAGE_TAG" = "$MONTH_PHOTO_RECOVERY_SHA" ]; }; then
 			# Verify normal routing against the proven target, including when the
 			# failed release's backend is absent. Storage and database stay in place.
 			compose up -d --no-deps --force-recreate backend || die 'S3 rollback backend promotion failed'
@@ -2051,7 +2176,7 @@ deploy() {
 }
 
 rollback_readiness() {
-	local migration_phase=complete lock_path fd_target requested_phase=${SELECTEL_MAX_VIDEO_LEDGER_PHASE:-${SELECTEL_CONTROL_LEDGER_PHASE:-${SELECTEL_WISHLIST_LEDGER_PHASE:-${SELECTEL_ALBUMS_LEDGER_PHASE:-complete}}}}
+	local migration_phase=complete lock_path fd_target requested_phase=${SELECTEL_ALBUM_MONTH_PHOTOS_PHASE:-${SELECTEL_MAX_VIDEO_LEDGER_PHASE:-${SELECTEL_CONTROL_LEDGER_PHASE:-${SELECTEL_WISHLIST_LEDGER_PHASE:-${SELECTEL_ALBUMS_LEDGER_PHASE:-complete}}}}}
 	case "$requested_phase" in
 		complete) ;;
 		pre-sql)
