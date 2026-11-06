@@ -717,19 +717,22 @@ explicit real-S3 lifecycle command in
 required for the final executable source. Bounded compatibility evidence does
 not replace final source-bound FULL verification and independent review.
 
-### Month-photo recovery profile (measurement pending)
+### Month-photo recovery profile
 
 The `s3-album-month-photos` profile is a separate, exact source profile for the
 month-photo release. Its bridge source SHA is duplicated as a non-overridable
 constant in `ci-release.sh` and `redeploy.sh`; backend and webapp immutable
 image IDs, complete runtime fingerprint, exact product executable fingerprint,
 and the distinct exact `ci-release.sh` blob pin are non-overridable constants in
-`redeploy.sh`. Those constants
-intentionally remain empty until the accepted bridge source and its real
-production images have been measured. Release preparation fails closed while
-any verifier pin is empty; no environment setting can substitute a value.
+`redeploy.sh`. The accepted bridge is `d3eaddada18244c94e0c2790c023fd4e0819f2d9`
+from PR #276. Its clean source tree was verified on PostgreSQL before and after
+the photo migration, with a 2,000-source month and a private S3 round trip.
+Build and retain these exact recovery artifacts before the month-photo release.
 
-After measurement, the normal guarded release prepares rollback to that single
+- Backend image `sha256:3117a15769222ea1cc2039c1bc1d47e753caea17df39945596979f89aa55005a`.
+- Webapp image `sha256:7c5480d4c58e42107c40c4f46ffdfc15a45d1910b86ab7b88f57a472c58e7d36`.
+
+The normal guarded release prepares rollback to that single
 bridge pair only after the full rollback-readiness verifier accepts the exact
 candidate source, host inputs, immutable images, installed Control, S3, and
 database state. The source catalog must be the exact 65-migration `a184` prefix
@@ -743,10 +746,10 @@ generation, and enabled clear-discussion trigger remain required as before.
 
 No database restore or storage switch is authorized by this profile. Keep the
 normal backup, source ancestry, host lock, immutable artifact, readiness,
-gateway/auth restoration, and database-preservation protections. Root must
-insert only independently attested values in the paired constant slots after
-bridge acceptance and production image measurement; do not promote blank pins
-or infer them from a source build.
+gateway/auth restoration, and database-preservation protections. During an
+application rollback, the bridge serves large months in bounded pages. Chapters
+already using paged writes restrict legacy photo replacement until a compatible
+forward release returns the full editing workflow.
 
 The migration checksum pair is fixed to LF
 `9d7e49ece81feb98cffd937c8b98475e28ca07dcd58b73e7aa2775711f86c87d` and CRLF
