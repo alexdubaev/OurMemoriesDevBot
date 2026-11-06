@@ -795,6 +795,8 @@ model AlbumEntry {
   orderKey    Int                  @map("order_key")
   version     Int                  @default(1)
   discussionGeneration Int        @default(1) @map("discussion_generation")
+  monthCoverSourceId String? @unique(map: "album_entries_month_cover_source_id_key") @map("month_cover_source_id") @db.Uuid
+  nextPhotoPosition Int? @map("next_photo_position")
   createActorId   String?           @map("create_actor_id") @db.Uuid
   createOperation String?           @map("create_operation")
   createRequestId String?           @map("create_request_id") @db.Uuid
@@ -805,6 +807,7 @@ model AlbumEntry {
   family      Family               @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "album_entries_family_id_fkey")
   album       Album                @relation(fields: [albumId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entries_album_id_family_id_fkey")
   sources     AlbumEntrySource[]
+  monthCoverSource AlbumEntrySource? @relation("MonthCoverSource", fields: [monthCoverSourceId], references: [id], onDelete: SetNull, map: "album_entries_month_cover_source_id_fkey")
   sourceOperations AlbumSourceOperation[]
   comments AlbumEntryComment[]
   reactions AlbumEntryReaction[]
@@ -835,6 +838,7 @@ model AlbumEntrySource {
   memory     Memory?                @relation(fields: [memoryId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_entry_sources_memory_id_family_id_fkey")
   albumPhoto AlbumPhoto?             @relation(fields: [albumPhotoMediaId, familyId], references: [mediaId, familyId], onDelete: Cascade, map: "album_entry_sources_album_photo_family_fkey")
   coverFor   Album?                 @relation("AlbumCoverSource")
+  monthCoverFor AlbumEntry? @relation("MonthCoverSource")
 
   @@unique([id, albumId, familyId], map: "album_entry_sources_id_album_id_family_id_key")
   @@unique([entryId, memoryId, sourceKind, sourceId], map: "album_entry_sources_entry_source_key")
@@ -866,6 +870,8 @@ model AlbumSourceOperation {
   operation   String
   requestId   String     @map("request_id") @db.Uuid
   payloadHash String     @map("payload_hash")
+  startPosition Int? @map("start_position")
+  count Int?
   createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   family      Family     @relation(fields: [familyId], references: [id], onDelete: Cascade, map: "album_source_operations_family_id_fkey")
   album       Album      @relation(fields: [albumId, familyId], references: [id, familyId], onDelete: Cascade, map: "album_source_operations_album_id_family_id_fkey")

@@ -669,11 +669,15 @@ export function MemoryMediaScope({ accountId, membershipEpoch, children }: { acc
   return <VideoQueryScope.Provider value={{ accountId, membershipEpoch }}>{children}</VideoQueryScope.Provider>
 }
 
-export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, childName, familyTimezone, hostBridge, index: initialIndex, initialPhotoUrl, memory, onClose, onIndexChange, registerSeenContent, returnFocusRef, transport, preferReturnFocus = false, sourceMemories, sourcePresentation }: { childAvatarCrop?: Props['childAvatarCrop']; childAvatarStatus?: Props['childAvatarStatus']; childAvatarUrl?: Props['childAvatarUrl']; childName: string; familyTimezone: string; hostBridge: HostBridge; index: number; initialPhotoUrl?: string; memory: MemoryDto; onClose: () => void; onIndexChange: (index: number) => void; registerSeenContent?: (element: HTMLElement | null) => void; returnFocusRef: RefObject<HTMLElement | null>; transport: AuthenticatedTransport; preferReturnFocus?: boolean; sourceMemories?: Record<string, MemoryDto>; sourcePresentation?: Record<string, { authorLabel: string; dateLabel: string }> }) {
+export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, childName, familyTimezone, hostBridge, index: initialIndex, initialPhotoUrl, memory, onClose, onIndexChange, registerSeenContent, returnFocusRef, transport, preferReturnFocus = false, sourceMemories, sourcePresentation, pageWindow }: { childAvatarCrop?: Props['childAvatarCrop']; childAvatarStatus?: Props['childAvatarStatus']; childAvatarUrl?: Props['childAvatarUrl']; childName: string; familyTimezone: string; hostBridge: HostBridge; index: number; initialPhotoUrl?: string; memory: MemoryDto; onClose: () => void; onIndexChange: (index: number) => void; registerSeenContent?: (element: HTMLElement | null) => void; returnFocusRef: RefObject<HTMLElement | null>; transport: AuthenticatedTransport; preferReturnFocus?: boolean; sourceMemories?: Record<string, MemoryDto>; sourcePresentation?: Record<string, { authorLabel: string; dateLabel: string }>; pageWindow?: { offset: number; total: number; onRequestNext: () => void } }) {
   const playbackCoordinator = useContext(PlaybackContext)
   useLayoutEffect(() => { playbackCoordinator?.pauseAll() }, [playbackCoordinator])
   const [startIndex] = useState(() => Math.max(0, Math.min(initialIndex, memory.attachments.length - 1)))
-  const [index, setIndex] = useState(startIndex)
+  const [localIndex, setIndex] = useState(startIndex)
+  const index = pageWindow ? initialIndex : localIndex
+  const offset = pageWindow?.offset ?? 0
+  const total = pageWindow?.total ?? memory.attachments.length
+  const windowLength = memory.attachments.length
   const [settledIndex, setSettledIndex] = useState(startIndex)
   const indexRef = useRef(startIndex)
   const onIndexChangeRef = useRef(onIndexChange)
@@ -695,12 +699,20 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
   const onCloseRef = useRef(onClose)
   const historyMarkerId = useId()
   const historyCleanupTimerRef = useRef<number | null>(null)
-  const [viewportRef, embla] = useEmblaCarousel({ align: 'center', containScroll: 'keepSnaps', duration: 25, startIndex, watchDrag: (_api, event) => {
+  const [viewportRef, embla] = useEmblaCarousel({ align: 'center', containScroll: 'keepSnaps', duration: 25, startIndex, watchSlides: !pageWindow, watchDrag: (_api, event) => {
     if (photoZoomRef.current > 1 || pinchStart.current) return false
     if ('touches' in event && event.touches.length !== 1) return false
     const target = event.target
     return !(target instanceof Element && target.closest('button, input, select, textarea, a, [role="slider"], video[controls]'))
   } })
+  useLayoutEffect(() => {
+    if (!embla || !pageWindow) return
+    indexRef.current = index
+    embla.reInit({ startIndex: index })
+    // Changing the selected slide inside the same window uses Embla navigation.
+    // Only an offset or length change replaces the mounted window.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embla, offset, windowLength])
   useEffect(() => { onCloseRef.current = onClose }, [onClose])
   useEffect(() => { onIndexChangeRef.current = onIndexChange }, [onIndexChange])
   useEffect(() => () => { root.current?.querySelectorAll('video').forEach((video) => video.pause()) }, [])
@@ -728,7 +740,8 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
   }, [embla])
   const viewerViewportRef = useCallback((element: HTMLDivElement | null) => { viewportRef(element); registerSeenContent?.(element) }, [registerSeenContent, viewportRef])
   const navigate = (next: number) => {
-    if (next < 0 || next >= memory.attachments.length || !embla) return
+    if (next >= windowLength && offset + next < total) { pageWindow?.onRequestNext(); return }
+    if (next < 0 || next >= windowLength || !embla) return
     swipeStart.current = null
     pinchStart.current = null
     photoZoomRef.current = 1
@@ -819,7 +832,10 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
     const touch = event.changedTouches[0]
     const dx = touch.clientX - start.x
     const dy = touch.clientY - start.y
-    if (start.axis === 'horizontal') { swipeStart.current = null; return }
+    if (start.axis === 'horizontal') {
+      if (pageWindow && index === windowLength - 1 && offset + index + 1 < total && dx < -48) pageWindow.onRequestNext()
+      return
+    }
     if (media.kind === 'photo' && start.axis === 'vertical' && start.direction === 1 && dy >= 96 && dy >= Math.abs(dx) * 1.3) onCloseRef.current()
   }
   useEffect(() => {
@@ -868,17 +884,17 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
               <Typography as="span" variant="memoryMeta">{presentation?.dateLabel ?? timeLabel(activeMemory.occurredAt, familyTimezone)}</Typography>
             </div>
           </div>
-          <Typography as="span" className="memoly-viewer-count" variant="memoryMeta">{index + 1} / {memory.attachments.length}</Typography>
+          <Typography as="span" className="memoly-viewer-count" variant="memoryMeta">{offset + index + 1} / {total}</Typography>
           <button aria-label="Закрыть просмотр" className="memoly-viewer-close" onClick={onClose} type="button">
             <Typography as="span" aria-hidden="true" className="memoly-viewer-close-glyph" variant="memoryMeta">×</Typography>
           </button>
         </div>
-        <div aria-label={`${index + 1} из ${memory.attachments.length}`} className="memoly-mixed-viewer-media" data-media-kind={media.kind} data-seen-active-index={index} onTouchCancel={() => { swipeStart.current = null; pinchStart.current = null }} onTouchCancelCapture={() => { if (swipeStart.current) swipeStart.current.axis = 'cancelled'; embla?.scrollTo(indexRef.current, true) }} onTouchEnd={onMediaTouchEnd} onTouchMoveCapture={onMediaTouchMove} onTouchStart={onMediaTouchStart} role="group" ref={viewerViewportRef}>
+        <div aria-label={`${offset + index + 1} из ${total}`} className="memoly-mixed-viewer-media" data-media-kind={media.kind} data-seen-active-index={index} onTouchCancel={() => { swipeStart.current = null; pinchStart.current = null }} onTouchCancelCapture={() => { if (swipeStart.current) swipeStart.current.axis = 'cancelled'; embla?.scrollTo(indexRef.current, true) }} onTouchEnd={onMediaTouchEnd} onTouchMoveCapture={onMediaTouchMove} onTouchStart={onMediaTouchStart} role="group" ref={viewerViewportRef}>
           <div className="memoly-mixed-viewer-track">
             {memory.attachments.map((attachment, position) => {
               const active = position === index
-              const near = Math.abs(position - index) <= 1 || position === settledIndex
-              return <div aria-hidden={!active} aria-label={active ? `${position + 1} из ${memory.attachments.length}, ${attachment.kind === 'photo' ? 'фото' : 'видео'}` : undefined} className="memoly-mixed-viewer-slide" data-carousel-active={active} data-carousel-position={position + 1} inert={!active} key={attachment.id} role={active ? 'group' : undefined}>
+              const near = Math.abs(position - index) <= 1 || !pageWindow && position === settledIndex
+              return <div aria-hidden={!active} aria-label={active ? `${offset + position + 1} из ${total}, ${attachment.kind === 'photo' ? 'фото' : 'видео'}` : undefined} className="memoly-mixed-viewer-slide" data-carousel-active={active} data-carousel-position={offset + position + 1} inert={!active} key={attachment.id} role={active ? 'group' : undefined}>
                 {attachment.kind === 'photo' && near || active
                   ? <div style={attachment.kind === 'photo' ? { transform: `translate(${active ? photoPan.x : 0}px, ${active ? photoPan.y : 0}px) scale(${active ? photoZoom : 1})`, transformOrigin: 'center', touchAction: active && photoZoom > 1 ? 'none' : undefined } : undefined}><Attachment attachment={attachment} autoplay={position === startIndex && attachment.kind === 'video'} borrowedPhotoUrl={position === startIndex ? initialPhotoUrl : undefined} fullscreen hostBridge={hostBridge} memory={sourceMemories?.[attachment.id] ?? memory} photoInteractive={false} transport={transport} /></div>
                   : attachment.kind === 'video' && near
@@ -889,8 +905,8 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
           </div>
         </div>
         {activeMemory.body.trim() ? <Typography className="memoly-viewer-caption" variant="memoryMeta">{activeMemory.body}</Typography> : null}
-        {memory.attachments.length > 1 ? <div aria-label="Вложения воспоминания" className="memoly-viewer-thumbnails">{memory.attachments.map((attachment, thumbnailIndex) => <ViewerThumbnail attachment={attachment} index={thumbnailIndex + 1} total={memory.attachments.length} key={attachment.id} active={thumbnailIndex === index} onSelect={() => navigate(thumbnailIndex)} transport={transport} />)}</div> : null}
-        {memory.attachments.length > 1 ? <div className="memoly-mixed-viewer-nav"><button disabled={index === 0} onClick={() => navigate(index - 1)} type="button"><Typography as="span" variant="memoryMeta">Назад</Typography></button><button disabled={index === memory.attachments.length - 1} onClick={() => navigate(index + 1)} type="button"><Typography as="span" variant="memoryMeta">Далее</Typography></button></div> : null}
+        {windowLength > 1 ? <div aria-label="Вложения воспоминания" className="memoly-viewer-thumbnails">{memory.attachments.map((attachment, thumbnailIndex) => <ViewerThumbnail attachment={attachment} index={offset + thumbnailIndex + 1} total={total} key={attachment.id} active={thumbnailIndex === index} onSelect={() => navigate(thumbnailIndex)} transport={transport} />)}</div> : null}
+        {total > 1 ? <div className="memoly-mixed-viewer-nav"><button disabled={offset + index === 0} onClick={() => navigate(index - 1)} type="button"><Typography as="span" variant="memoryMeta">Назад</Typography></button><button disabled={offset + index === total - 1} onClick={() => navigate(index + 1)} type="button"><Typography as="span" variant="memoryMeta">Далее</Typography></button></div> : null}
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   </DialogPrimitive.Root>

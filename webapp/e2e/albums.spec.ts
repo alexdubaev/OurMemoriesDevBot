@@ -370,9 +370,13 @@ test('MAX authenticated albums persist year chapters and a text event through re
   await page.getByRole('button', { name: 'Все 12 месяцев', exact: true }).click()
   await expect(page.locator('.albums-month-overview .albums-entry-card')).toHaveCount(12)
   await page.getByRole('button', { name: 'Нам 7 месяцев', exact: true }).click()
+  await page.getByLabel('Меню месяца', { exact: true }).click()
+  await page.getByRole('button', { name: 'Редактировать историю', exact: true }).click()
   await page.getByLabel('История').fill('Синтетическая история седьмого месяца')
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByText('Синтетическая история седьмого месяца')).toBeVisible()
+  await page.getByRole('button', { name: '‹ Назад', exact: true }).click()
+  await page.getByRole('button', { name: '‹ Альбом', exact: true }).click()
   await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
   await page.getByRole('button', { name: 'Создать альбом', exact: true }).click()
   await page.getByRole('button', { name: /Первые открытия/ }).click()
@@ -399,6 +403,8 @@ test('MAX authenticated albums persist year chapters and a text event through re
 })
 
 test('MAX first-year mobile baseline: two-child catalog, empty and filled months, edit, viewer, and clear', async ({ page }) => {
+  const queueRetryAllowance = 60_000
+  test.setTimeout(120_000 + queueRetryAllowance)
   await page.setViewportSize({ width: 390, height: 844 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   const initData = signedInitData()
@@ -445,10 +451,30 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await expect(page.locator('.albums-timeline .albums-entry-card')).toHaveCount(12)
   const consoleErrors: string[] = []
   const pageErrors: string[] = []
-  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()) })
+  let monthUploadActive = false
+  let monthPhotoPath = ''
+  let monthBatchPath = ''
+  const uploadPath = `/api/v1/families/${familyId}/uploads`
+  const uploadFinalizePath = new RegExp(`^${uploadPath}/[0-9a-f-]{36}/finalize$`, 'i')
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return
+    const text = message.text()
+    if (monthUploadActive && text === 'Failed to load resource: the server responded with a status of 429 (Too Many Requests)') {
+      let pathname: string
+      try { pathname = new URL(message.location().url).pathname } catch { pathname = '' }
+      if (pathname && (pathname === monthPhotoPath || pathname === monthBatchPath || pathname === uploadPath || uploadFinalizePath.test(pathname))) return
+    }
+    consoleErrors.push(text)
+  })
   page.on('pageerror', (error) => pageErrors.push(error.message))
   const yearAlbum = ((await (await page.request.get(`/api/v1/families/${familyId}/albums`, { headers })).json()) as { items: Array<{ id: string; childId: string | null; kind: string }> }).items.find((album) => album.kind === 'year')!
   expect(yearAlbum.childId).toBe(mishaId)
+  const entriesPath = `/api/v1/families/${familyId}/albums/${yearAlbum.id}/entries`
+  const months = await page.request.get(`${entriesPath}?view=month-summary`, { headers })
+  expect(months.ok()).toBe(true)
+  const firstMonth = ((await months.json()) as { items: Array<{ id: string; monthNumber: number }> }).items.find((month) => month.monthNumber === 1)!
+  monthPhotoPath = `${entriesPath}/${firstMonth.id}/photos`
+  monthBatchPath = `${entriesPath}/${firstMonth.id}/photo-batches`
   for (const album of [
     { kind: 'workshop', title: 'Мастерская Лили', childId: lilyaId },
     { kind: 'events', title: 'Первые открытия Лили', childId: lilyaId },
@@ -554,22 +580,123 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await page.setViewportSize({ width: 390, height: 844 })
 
   await page.getByRole('button', { name: 'Нам 1 месяц', exact: true }).click()
-  await expect(page.locator('[data-albums-route="edit-entry"]')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Нам 1 месяц', exact: true })).toBeVisible()
+  await expect(page.getByText('Фотографий пока нет', { exact: true })).toBeVisible()
+  for (const width of [320, 390, 430]) {
+    await page.setViewportSize({ width, height: 844 })
+    await capture(`month-empty-${width}`)
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByLabel('Меню месяца', { exact: true }).click()
+  await page.getByRole('button', { name: 'Редактировать историю', exact: true }).click()
   await page.getByLabel('История').fill('Первый синтетический момент')
-  await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Добавить фото в альбом' })).toBeVisible()
-  const photoBytes = solidPng(24, 48, 240)
-  await page.locator('#photo-composer-files').setInputFiles({ name: 'first-year-blue.png', mimeType: 'image/png', buffer: photoBytes })
-  await page.getByRole('button', { name: 'Добавить в альбом (1)', exact: true }).click()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await page.getByRole('button', { name: 'Добавить фотографии', exact: true }).click()
+  await page.getByRole('button', { name: 'С устройства', exact: true }).click()
+  const photos = [
+    [24, 48, 240, 640, 420], [65, 110, 90, 480, 640], [185, 113, 120, 540, 540],
+    [188, 133, 43, 640, 480], [99, 59, 119, 480, 640], [44, 137, 145, 640, 450], [154, 110, 86, 540, 540],
+  ]
+  const upload = page.getByLabel('Выбрать фотографии с устройства')
+  async function uploadMonthPhotos(files: Parameters<typeof upload.setInputFiles>[0], expectedStatus: string) {
+    monthUploadActive = true
+    try {
+      await upload.setInputFiles(files)
+      await expect(page.getByRole('status').filter({ hasText: expectedStatus })).toBeVisible({ timeout: 35_000 + queueRetryAllowance })
+    } finally {
+      monthUploadActive = false
+    }
+  }
+  const attachRoute = `**${monthPhotoPath}`
+  let rateLimitedAttach: { key: string; body: string | null; sentAt: number } | undefined
+  let retriedAttach = false
+  await page.route(attachRoute, async (route) => {
+    const request = route.request()
+    if (request.method() !== 'POST') return route.continue()
+    const key = request.headers()['idempotency-key']!
+    if (!rateLimitedAttach) {
+      expect(key).toBeTruthy()
+      rateLimitedAttach = { key, body: request.postData(), sentAt: performance.now() }
+      await route.fulfill({
+        status: 429, headers: { 'Retry-After': '1' },
+        json: { error: { code: 'RATE_LIMITED', message: 'Retry after one second', requestId: randomUUID() } },
+      })
+      return
+    }
+    if (!retriedAttach) {
+      expect(key).toBe(rateLimitedAttach.key)
+      expect(request.postData()).toBe(rateLimitedAttach.body)
+      expect(performance.now() - rateLimitedAttach.sentAt).toBeGreaterThanOrEqual(950)
+      retriedAttach = true
+    }
+    await route.continue()
+  })
+  try {
+    await uploadMonthPhotos(photos.map(([r, g, b, width, height], index) => ({
+      name: `month-synthetic-${index}.png`, mimeType: 'image/png', buffer: solidPng(r, g, b, width, height),
+    })), 'Выбрано: 7 · добавлено: 7')
+    expect(retriedAttach).toBe(true)
+  } finally {
+    await page.unroute(attachRoute)
+  }
+  await page.getByRole('button', { name: 'Вернуться к месяцу', exact: true }).click()
+  await expect(page.locator('[data-month-photo]')).toHaveCount(7)
+  const lead = page.locator('.month-collage-cover')
+  const initialCover = await lead.getAttribute('data-month-cover')
+  expect(initialCover).toBeTruthy()
+  const initialLead = (await lead.boundingBox())!
+  const firstLower = (await page.getByRole('button', { name: 'Открыть фото 2', exact: true }).boundingBox())!
+  expect(initialLead.width / initialLead.height).toBeCloseTo(1.5, 2)
+  expect(firstLower.y - initialLead.y - initialLead.height).toBeCloseTo(2, 0)
+  await expect(page.getByRole('button', { name: 'Открыть фото 2', exact: true })).toHaveCSS('border-radius', '0px')
+  for (const width of [320, 390, 430]) {
+    await page.setViewportSize({ width, height: 844 })
+    await capture(`month-filled-${width}`)
+  }
+  await page.setViewportSize({ width: 320, height: 844 })
+  await page.evaluate(() => document.documentElement.style.setProperty('font-size', '32px', 'important'))
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await capture('month-filled-320-text-200')
+  await page.evaluate(() => document.documentElement.style.removeProperty('font-size'))
+  await page.setViewportSize({ width: 390, height: 844 })
+  const changeCover = page.getByRole('button', { name: 'Изменить обложку месяца', exact: true })
+  const coverTarget = (await changeCover.boundingBox())!
+  expect(coverTarget.width).toBeGreaterThanOrEqual(44)
+  expect(coverTarget.height).toBeGreaterThanOrEqual(44)
+  await changeCover.click()
+  await expect(page.locator('[data-mixed-viewer]')).toHaveCount(0)
+  const candidate = page.getByRole('button', { name: 'Фото 4', exact: true })
+  const chosenCover = await candidate.getAttribute('data-month-choice')
+  await candidate.click()
+  await expect(page.getByLabel('Предпросмотр выбранной фотографии')).toBeVisible()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(lead).toHaveAttribute('data-month-cover', chosenCover!)
+  await expect(page.locator(`[data-month-photo="${chosenCover}"]`)).toHaveCount(1)
+  await changeCover.click()
+  await page.getByRole('button', { name: 'Выбирать автоматически', exact: true }).click()
+  await page.getByRole('button', { name: 'Отмена', exact: true }).click()
+  await expect(lead).toHaveAttribute('data-month-cover', chosenCover!)
+  await page.getByRole('button', { name: 'Добавить фотографии', exact: true }).click()
+  await page.getByRole('button', { name: 'С устройства', exact: true }).click()
+  await uploadMonthPhotos([
+    { name: 'not-a-photo.mov', mimeType: 'video/quicktime', buffer: Buffer.alloc(64) },
+    ...Array.from({ length: 11 }, (_, index) => ({ name: `extra-${index}.png`, mimeType: 'image/png', buffer: solidPng(100, 140, index, 32, 48) })),
+  ], 'Выбрано: 12 · добавлено: 11 · с ошибкой: 1')
+  await expect(page.getByText(/Здесь можно добавлять только фотографии\./)).toBeVisible()
+  await page.getByRole('button', { name: 'Вернуться к месяцу', exact: true }).click()
+  await expect(lead).toHaveAttribute('data-month-cover', chosenCover!)
+  await expect(page.getByText('18 фотографий', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '‹ Назад', exact: true }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   await expect(page.locator('.albums-timeline .albums-entry-row.is-filled')).toHaveCount(1)
+  await expect(page.locator('.albums-timeline [data-entry-cover]')).toHaveAttribute('data-entry-cover', chosenCover!)
 
   await page.getByLabel('Меню альбома', { exact: true }).click()
   await page.getByRole('button', { name: 'Настройки альбома' }).click()
   await page.getByRole('button', { name: 'Выбрать обложку', exact: true }).click()
   await expect(page.locator('[data-albums-route="cover"]')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Выбрать этот кадр обложкой' })).toBeVisible()
-  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой' }).click()
+  await expect(page.getByRole('button', { name: 'Выбрать этот кадр обложкой' }).first()).toBeVisible()
+  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой' }).first().click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   await expect(yearIntro).toContainText('1 из 12 месяцев заполнено')
   await expect(yearIntro.locator('progress')).toHaveJSProperty('value', 1)
@@ -578,6 +705,7 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await capture('year-filled-390')
   await page.getByRole('button', { name: 'Все 12 месяцев', exact: true }).click()
   await expect(page.locator('.albums-month-overview .albums-entry-card')).toHaveCount(12)
+  await expect(page.locator('.albums-month-overview [data-entry-cover]')).toHaveAttribute('data-entry-cover', chosenCover!)
   await capture('year-overview-390')
   await page.getByRole('button', { name: 'Линия времени', exact: true }).click()
   for (const width of [320, 430]) {
@@ -619,18 +747,28 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   await page.getByRole('button', { name: '‹ Назад', exact: true }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   await page.getByRole('button', { name: 'Нам 1 месяц', exact: true }).click()
-  await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+  await page.getByLabel('Меню месяца', { exact: true }).click()
+  await page.getByRole('button', { name: 'Редактировать историю', exact: true }).click()
   await page.getByLabel('История').fill('Отредактированный синтетический момент')
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
-  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
-  await page.getByRole('button', { name: 'Нам 1 месяц', exact: true }).click()
-  await page.getByRole('button', { name: 'Открыть материал 1', exact: true }).click()
+  await expect(page.getByText('Отредактированный синтетический момент', { exact: true })).toBeVisible()
+  await expect(lead).toHaveAttribute('data-month-cover', chosenCover!)
+  const openMaterial = page.getByRole('button', { name: 'Открыть фото 1', exact: true })
+  await openMaterial.click()
   await expect(page.locator('[data-mixed-viewer]')).toBeVisible()
-  await expect.poll(() => page.locator('[data-mixed-viewer] img').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
-  const openMaterial = page.getByRole('button', { name: 'Открыть материал 1', exact: true })
+  await expect.poll(() => page.locator('[data-mixed-viewer] [data-carousel-active=true] img').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  await expect(page.locator('[data-mixed-viewer]')).toContainText('1 / 18')
   await page.getByRole('button', { name: 'Закрыть просмотр', exact: true }).click()
   await expect(page.locator('[data-mixed-viewer]')).toHaveCount(0)
   await expect(openMaterial).toBeFocused()
+  await page.getByLabel('Меню месяца', { exact: true }).click()
+  await page.getByRole('button', { name: 'Убрать фотографию', exact: true }).click()
+  await page.locator(`[data-month-choice="${chosenCover}"]`).click()
+  await page.getByRole('button', { name: 'Убрать из месяца', exact: true }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Убрать фотографию', exact: true }).click()
+  await expect(lead).toHaveAttribute('data-month-cover', initialCover!)
+  await expect(page.getByText('17 фотографий', { exact: true })).toBeVisible()
+  await page.getByLabel('Меню месяца', { exact: true }).click()
   await page.getByRole('button', { name: 'Очистить главу', exact: true }).click()
   const clearConfirmation = page.getByRole('alertdialog')
   await expect(clearConfirmation).toContainText('Номер месяца и оригиналы сохранятся')
@@ -692,6 +830,57 @@ test('album new upload opens photos directly and central Add keeps its chooser',
   await page.evaluate(() => (window as unknown as { __albumsTriggerBack: () => void }).__albumsTriggerBack())
   await expect(page.getByRole('heading', { name: 'Сохранено в семейную ленту' })).toHaveCount(0)
   await expect(page.locator('[data-navigation-surface="family"]')).toBeVisible()
+})
+
+test('a large month keeps bounded tiles and navigates the photo window past a page boundary', async ({ page }) => {
+  await openSynthetic(page, 'albums=24&monthPhotos=2000')
+  await page.getByRole('button', { name: 'Первый год Алисы' }).click()
+  await page.getByRole('button', { name: 'Нам 1 месяц', exact: true }).click()
+  await expect(page.getByText('2000 фотографий', { exact: true })).toBeVisible()
+  const gallery = page.locator('.month-collage')
+  const tile = (index: number) => page.getByRole('button', { name: `Открыть фото ${index}`, exact: true })
+  await expect(tile(2)).toBeVisible()
+  const initial = await tile(2).evaluate((node) => {
+    const box = node.getBoundingClientRect()
+    return { top: box.top + window.scrollY, width: box.width, height: box.height }
+  })
+  await gallery.evaluate((node) => window.scrollTo(0, node.getBoundingClientRect().bottom + window.scrollY - window.innerHeight * 0.65))
+  await expect(tile(24)).toBeVisible()
+  await tile(24).click()
+  const viewer = page.locator('[data-mixed-viewer]')
+  await expect(viewer).toContainText('24 / 2000')
+  await viewer.getByRole('button', { name: 'Далее', exact: true }).click()
+  await expect(viewer).toContainText('25 / 2000')
+  await expect.poll(async () => (await viewer.locator('[data-carousel-position]').count())).toBeLessThanOrEqual(17)
+  await viewer.getByRole('button', { name: 'Далее', exact: true }).click()
+  await expect(viewer).toContainText('26 / 2000')
+  for (let index = 27; index <= 34; index += 1) {
+    await viewer.getByRole('button', { name: 'Далее', exact: true }).click()
+    await expect(viewer).toContainText(`${index} / 2000`)
+  }
+  const beforeClose = await page.evaluate(() => window.scrollY)
+  await viewer.getByRole('button', { name: 'Закрыть просмотр', exact: true }).click()
+  await expect(viewer).toHaveCount(0)
+  await expect(tile(24)).toBeFocused()
+  expect(Math.abs(await page.evaluate(() => window.scrollY) - beforeClose)).toBeLessThan(2)
+  expect(await gallery.locator('[data-month-photo]').count()).toBeLessThanOrEqual(85)
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await expect(tile(2)).toBeVisible()
+  expect(await tile(2).evaluate((node) => {
+    const box = node.getBoundingClientRect()
+    return { top: box.top + window.scrollY, width: box.width, height: box.height }
+  })).toEqual(initial)
+  await page.getByRole('button', { name: 'Изменить обложку месяца', exact: true }).click()
+  await page.getByRole('button', { name: 'Следующие фото', exact: true }).click()
+  const candidate = page.getByRole('button', { name: 'Фото 26', exact: true })
+  const associationId = await candidate.getAttribute('data-month-choice')
+  await candidate.click()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.locator('[data-month-cover]')).toHaveAttribute('data-month-cover', associationId!)
+  await expect(page.locator(`[data-month-photo="${associationId}"]`)).toHaveCount(1)
+  const requests = await page.evaluate(() => (window as unknown as { __albumsEvidence: { log: Array<{ path: string }> } }).__albumsEvidence.log.map(({ path }) => path))
+  expect(requests.some((path) => path.includes('/sources?') && path.includes('cursor='))).toBe(true)
+  expect(requests.filter((path) => path.includes('/memories/'))).toEqual([])
 })
 
 test('2000 works page progressively with bounded DOM, stable zoom anchor and source viewer return', async ({ page }) => {
@@ -873,13 +1062,15 @@ function expectDominantColor(pixel: number[], color: 'red' | 'blue') {
   pixel.forEach((channel, index) => { if (index !== dominantChannel) expect(channel).toBeLessThan(80) })
 }
 
-function solidPng(red: number, green: number, blue: number) {
+function solidPng(red: number, green: number, blue: number, width = 1, height = 1) {
   const header = Buffer.alloc(13)
-  header.writeUInt32BE(1, 0)
-  header.writeUInt32BE(1, 4)
+  header.writeUInt32BE(width, 0)
+  header.writeUInt32BE(height, 4)
   header[8] = 8
   header[9] = 2
-  const imageData = Buffer.from([0, red, green, blue])
+  const row = Buffer.alloc(1 + width * 3)
+  for (let x = 1; x < row.length; x += 3) row.set([red, green, blue], x)
+  const imageData = Buffer.concat(Array.from({ length: height }, () => row))
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(imageData)), pngChunk('IEND', Buffer.alloc(0))])
 }
 

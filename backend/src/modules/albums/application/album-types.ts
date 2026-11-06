@@ -9,6 +9,11 @@ export type {
   ListAlbumsQuery,
   UpdateAlbumEntryRequest,
   UpdateAlbumRequest,
+  AlbumMonthSummary,
+  AlbumEntrySourcePageQuery,
+  AlbumMonthPhotoBatchRequest,
+  AlbumMonthPhotoAppendRequest,
+  AlbumMonthCoverRequest,
 } from '@web-app-demo/contracts'
 export type {
   AlbumMemoryPickerItem,

@@ -11,6 +11,13 @@ import './selectel-frontend-release.test.mjs'
 const root = resolve(import.meta.dirname, '..')
 const release = readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8').replaceAll('\r\n', '\n')
 const redeployScript = readFileSync(resolve(root, 'deploy/selectel/redeploy.sh'), 'utf8').replaceAll('\r\n', '\n')
+const historicalReleaseSource = 'a18469ab8a54464d491659d849fcf286973fa9e4'
+const historicalCiRelease = execFileSync('git', ['show', `${historicalReleaseSource}:deploy/selectel/ci-release.sh`], {
+  cwd: root, encoding: 'utf8',
+}).replaceAll('\r\n', '\n')
+const historicalCiReleaseBlob = execFileSync('git', ['rev-parse', `${historicalReleaseSource}:deploy/selectel/ci-release.sh`], {
+  cwd: root, encoding: 'utf8',
+}).trim()
 const slowTest = (name, fn) => test(name, { timeout: 60_000 }, fn)
 const shellLiteral = (value) => `'${String(value).replaceAll("'", "'\\''")}'`
 const shellQuote = (value) => shellLiteral(gitBashPath(value))
@@ -1022,9 +1029,7 @@ afterAll(() => {
 const redeployDefinitions = `. ${shellQuote(resolve(root, 'deploy/selectel/redeploy.sh'))}`
 
 test('MAX video installer host pin accepts only the historic blob or this exact reviewed blob', () => {
-  const currentInstallerBlob = execFileSync('git', ['hash-object', 'deploy/selectel/ci-release.sh'], {
-    cwd: root, encoding: 'utf8',
-  }).trim()
+  const reviewedInstallerBlob = historicalCiReleaseBlob
   const invoke = (installerBlob) => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
     input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(root)}\n` +
@@ -1039,7 +1044,8 @@ test('MAX video installer host pin accepts only the historic blob or this exact 
   })
 
   assert.equal(invoke('d34a87ec84df49987dc01339481750320f10f203').status, 0, 'historic installer remains accepted')
-  assert.equal(invoke(currentInstallerBlob).status, 0, 'reviewed installer blob is accepted')
+  assert.equal(reviewedInstallerBlob, 'cab916ae9d2e9144f1918ffe07987c35900cb502')
+  assert.equal(invoke(reviewedInstallerBlob).status, 0, 'installer blob from the accepted a184 source is accepted')
   assert.notEqual(invoke('1'.repeat(40)).status, 0, 'arbitrary installer drift remains rejected')
 })
 
@@ -2639,7 +2645,7 @@ test('member avatar frontend retains only the measured d299 MAX recovery pair', 
   const source = commitFrozenSourceFiles({ root: sourceDirectory, sha: baseline }, reviewedMemberAvatarProductionBlobs,
     'apply exact member-avatar production blobs')
   const installed = commitSourceFile({ root: source.root, sha: source.sha }, 'deploy/selectel/ci-release.sh',
-    readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8'),
+    historicalCiRelease,
     'pin the exact accepted MAX rollback verifier installer')
   assert.equal(productionCompatibilityFingerprint(installed.root), expectedCompatibility)
 
@@ -2688,7 +2694,7 @@ test('MAX family invite entry retains only its measured d299 recovery pair', {
   const source = commitFrozenSourceFiles(avatarSource, reviewedFamilyInviteEntryProductionBlobs,
     'freeze exact family-invite production input blobs')
   const installed = commitSourceFile({ root: source.root, sha: source.sha }, 'deploy/selectel/ci-release.sh',
-    readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8'),
+    historicalCiRelease,
     'pin the exact accepted MAX rollback verifier installer')
   assert.equal(productionCompatibilityFingerprint(installed.root), expectedCompatibility)
 
@@ -2739,7 +2745,7 @@ test('MAX video recovery accepts only its exact reconstructed executable profile
   if (added.status !== 0) throw new Error(added.stdout + added.stderr)
   fixtureWorktrees.push(sourceDirectory)
   const source = commitSourceFile({ root: sourceDirectory, sha: baseline }, 'deploy/selectel/ci-release.sh',
-    readFileSync(resolve(root, 'deploy/selectel/ci-release.sh'), 'utf8'),
+    historicalCiRelease,
     'pin the exact MAX rollback verifier installer')
   assert.equal(productionCompatibilityFingerprint(source.root), expectedCompatibility)
 
@@ -3495,7 +3501,7 @@ test('MAX video migration stops all old writers after backup and before migratio
     'set -euo pipefail', redeployDefinitions,
     `APP_ROOT=${shellQuote(root)}`, `SERVER_ROOT=${shellQuote(serverRoot)}`,
     `MAX_VIDEO_EVENTS=${shellQuote(events)}`,
-    `MEMOLY_PRODUCT_SHA=${currentGitHead()}`,
+    `MEMOLY_PRODUCT_SHA=${historicalReleaseSource}`,
     'SELECTEL_CI_RELEASE=true', 'SELECTEL_DEPLOY_LOCK_FD=9',
     'preflight() { echo preflight >> "$MAX_VIDEO_EVENTS"; }',
     'validate_database_target() { echo database-target >> "$MAX_VIDEO_EVENTS"; }',
@@ -3526,7 +3532,7 @@ test('MAX retention migration refuses to run when its exact candidate fingerprin
     'set -euo pipefail', redeployDefinitions,
     `APP_ROOT=${shellQuote(root)}`, `SERVER_ROOT=${shellQuote(serverRoot)}`,
     `MAX_VIDEO_EVENTS=${shellQuote(events)}`,
-    `MEMOLY_PRODUCT_SHA=${currentGitHead()}`,
+    `MEMOLY_PRODUCT_SHA=${historicalReleaseSource}`,
     'SELECTEL_CI_RELEASE=true', 'SELECTEL_DEPLOY_LOCK_FD=9',
     'preflight() { echo preflight >> "$MAX_VIDEO_EVENTS"; }',
     'validate_database_target() { echo database-target >> "$MAX_VIDEO_EVENTS"; }',

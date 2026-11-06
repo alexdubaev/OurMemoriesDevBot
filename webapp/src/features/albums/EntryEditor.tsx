@@ -7,7 +7,7 @@ import { albumPhotoSources, categories, dateLabel, memorySources, monthAgeLabel,
 import { SourcePicker } from './SourcePicker'
 import { SourcePreview } from './SourcePreview'
 
-type Props = { album: AlbumDto; entry: AlbumEntryDto | null; title?: string; api: AlbumsApi; accountId: string; scopeKey: string; transport: AuthenticatedTransport; timezone: string; birthDate?: string | null; canUpload: boolean; onUpload: (attachMemory: (memory: MemoryDto) => Promise<void>, attachPhotos: (mediaIds: string[]) => Promise<void>) => void; onCancel: () => void; onSaved: (version: number) => void }
+type Props = { album: AlbumDto; entry: AlbumEntryDto | null; title?: string; api: AlbumsApi; accountId: string; scopeKey: string; transport: AuthenticatedTransport; timezone: string; canUpload: boolean; onUpload: (attachMemory: (memory: MemoryDto) => Promise<void>, attachPhotos: (mediaIds: string[]) => Promise<void>) => void; onCancel: () => void; onSaved: (version: number, monthEntry?: AlbumEntryDto) => void }
 export function EntryEditor(props: Props) {
   const { album, entry, api, accountId, scopeKey, transport, timezone } = props
   const [title, setTitle] = useState(entry?.title ?? props.title ?? '')
@@ -30,6 +30,7 @@ export function EntryEditor(props: Props) {
   const attempt = useRef<Attempt | null>(null)
   const workshop = album.kind === 'workshop'
   const event = album.kind === 'events'
+  const month = entry?.kind === 'month'
   const date = precision === 'unknown' ? { precision, value: null } as const : { precision, value } as AlbumEntryDto['date']
   function choose(next: AlbumSource[]) {
     setSources(next); setPicker(false)
@@ -50,6 +51,7 @@ export function EntryEditor(props: Props) {
     }
     const operation = attempt.current; saving.current = true; setBusy(true); setLocked(true)
     try {
+      let monthEntry: AlbumEntryDto | undefined
       if (!entry) {
         while (operation.next < operation.inputs.length) {
           const index = operation.next
@@ -62,16 +64,17 @@ export function EntryEditor(props: Props) {
       } else {
         const input = operation.inputs[0]
         if (!operation.metadataSaved) {
-          const result = await api.updateEntry(album.id, entry.id, { expectedVersion: operation.version, title: input.title, caption: input.caption, childQuote: input.childQuote, category: input.category, date: input.date })
+          const result = await api.updateEntry(album.id, entry.id, { expectedVersion: operation.version, title: input.title, caption: input.caption, ...(!month ? { childQuote: input.childQuote, category: input.category } : {}), date: input.date }, month)
           operation.version = result.entry.aggregateVersion; operation.metadataSaved = true
+          if (month) monthEntry = result.entry
         }
-        if (JSON.stringify(sourceRefs(entry.sources)) !== JSON.stringify(input.sources)) {
+        if (!month && JSON.stringify(sourceRefs(entry.sources)) !== JSON.stringify(input.sources)) {
           operation.sourceInput ??= { expectedVersion: operation.version, sources: input.sources }
           const result = await api.sources(album.id, entry.id, operation.sourceInput, operation.sourceKey)
           operation.version = result.entry.aggregateVersion
         }
       }
-      props.onSaved(operation.version)
+      props.onSaved(operation.version, monthEntry)
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === 'AbortError') return
       const isConflict = reason instanceof ApiRequestError && reason.status === 409
@@ -81,15 +84,7 @@ export function EntryEditor(props: Props) {
       if (propagate) throw reason
     } finally { saving.current = false; setBusy(false) }
   }
-  const suggestion = (() => {
-    if (!entry?.monthNumber || !props.birthDate) return null
-    const born = props.birthDate.slice(0, 10); const [year, month, day] = born.split('-').map(Number)
-    if (!year || !month || !day) return null
-    const from = new Date(Date.UTC(year, month - 1 + entry.monthNumber - 1, 1)).toISOString().slice(0, 10)
-    const to = new Date(Date.UTC(year, month - 1 + entry.monthNumber + 1, 0)).toISOString().slice(0, 10)
-    return { from, to }
-  })()
-  if (picker) return <SourcePicker accountId={accountId} api={api} initial={sources} onCancel={() => setPicker(false)} onChoose={choose} photosOnly={workshop} scopeKey={scopeKey} suggestion={suggestion} transport={transport} />
+  if (picker) return <SourcePicker accountId={accountId} api={api} initial={sources} onCancel={() => setPicker(false)} onChoose={choose} photosOnly={workshop} scopeKey={scopeKey} transport={transport} />
   return <section className="albums-editor">
     <header className="albums-toolbar"><button disabled={busy} onClick={props.onCancel} type="button">‹ Назад</button><h1>{entry?.kind === 'month' ? monthAgeLabel(entry.monthNumber!) : entry ? 'Изменить историю' : workshop ? 'Добавить работу' : 'Новая история'}</h1></header>
     <form onSubmit={(event) => { event.preventDefault(); void save() }}>
@@ -99,16 +94,16 @@ export function EntryEditor(props: Props) {
         <label className="albums-field">Когда это было<select onChange={(event) => { setPrecision(event.target.value as typeof precision); setValue('') }} value={precision}><option value="unknown">Не помню дату</option><option value="day">Точная дата</option><option value="month">Месяц</option><option value="year">Год</option></select></label>
         {precision !== 'unknown' ? <label className="albums-field">{precision === 'day' ? 'Дата' : precision === 'month' ? 'Месяц и год' : 'Год'}<input max={precision === 'year' ? '9999' : undefined} min={precision === 'year' ? '1' : undefined} onChange={(event) => setValue(event.target.value)} required type={precision === 'day' ? 'date' : precision === 'month' ? 'month' : 'number'} value={value} /></label> : null}
         {workshop ? <><label className="albums-field">Категория<select onChange={(event) => setCategory(event.target.value as typeof category)} value={category ?? 'other'}>{Object.entries(categories).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><label className="albums-field">Слова ребёнка<textarea onChange={(event) => setQuote(event.target.value)} rows={3} value={quote} /><small>{[...quote].length}/8000</small></label></> : null}
-        <h2>Материалы · {sources.length}</h2>
+        {!month ? <><h2>Материалы · {sources.length}</h2>
         <div className="albums-selected-sources">{sources.map((source, index) => <div key={sourceKey(source)}><SourcePreview accountId={accountId} scopeKey={scopeKey} source={source} transport={transport} /><button aria-label={`Убрать материал ${index + 1}`} onClick={() => setSources((current) => current.filter((item) => sourceKey(item) !== sourceKey(source)))} type="button">Убрать</button>{index > 0 ? <button aria-label={`Сделать материал ${index + 1} главным`} onClick={() => setSources([source, ...sources.filter((item) => sourceKey(item) !== sourceKey(source))])} type="button">Главный</button> : <small>Главный</small>}</div>)}</div>
         <button className="albums-secondary" onClick={() => setPicker(true)} type="button">Выбрать из воспоминаний</button>
         {props.canUpload ? <button className="albums-secondary" onClick={() => props.onUpload(async (memory) => { const next = [...new Map([...sources, ...memorySources(memory)].map((source) => [sourceKey(source), source])).values()]; setSources(next); await save(next, true) }, async (mediaIds) => { const next = [...new Map([...sources, ...albumPhotoSources(mediaIds)].map((source) => [sourceKey(source), source])).values()]; setSources(next); await save(next, true) })} type="button">Загрузить новое</button> : null}
         {workshop && !entry && sources.length > 1 ? <label className="albums-checkbox"><input checked={separate} onChange={(event) => setSeparate(event.target.checked)} type="checkbox" />Каждое фото — отдельная работа. Снимите отметку для ракурсов одной работы.</label> : null}
-        <p className="albums-muted">{dateLabel(date)} · Убирается только связь с альбомом, оригиналы сохраняются.</p>
+        <p className="albums-muted">{dateLabel(date)} · Убирается только связь с альбомом, оригиналы сохраняются.</p></> : null}
       </fieldset>
       {completed ? <p role="status">Сохранено работ: {completed}</p> : null}
       {error ? <p className="albums-error" role="alert">{error}</p> : null}
-      {conflict ? <button className="albums-secondary" disabled={busy} onClick={() => { setBusy(true); void Promise.all([api.album(album.id), entry ? api.entry(album.id, entry.id) : Promise.resolve(null)]).then(([fresh, detail]) => { setCurrentVersion(fresh.album.version); if (detail) { setTitle(detail.entry.title ?? ''); setCaption(detail.entry.caption ?? ''); setSources(detail.entry.sources); setQuote(detail.entry.childQuote ?? ''); setCategory(detail.entry.category); setPrecision(detail.entry.date.precision); setValue(detail.entry.date.value ?? '') } attempt.current = null; setConflict(false); setLocked(false); setError(null) }).catch(() => setError('Не удалось обновить данные. Повторите загрузку.')).finally(() => setBusy(false)) }} type="button">Обновить данные</button> : <button className="albums-primary" disabled={busy} type="submit">{busy ? 'Сохраняем…' : locked ? 'Повторить сохранение' : 'Сохранить'}</button>}
+      {conflict ? <button className="albums-secondary" disabled={busy} onClick={() => { setBusy(true); void Promise.all([api.album(album.id), entry ? api.entry(album.id, entry.id, month) : Promise.resolve(null)]).then(([fresh, detail]) => { setCurrentVersion(fresh.album.version); if (detail) { setTitle(detail.entry.title ?? ''); setCaption(detail.entry.caption ?? ''); setSources(detail.entry.sources); setQuote(detail.entry.childQuote ?? ''); setCategory(detail.entry.category); setPrecision(detail.entry.date.precision); setValue(detail.entry.date.value ?? '') } attempt.current = null; setConflict(false); setLocked(false); setError(null) }).catch(() => setError('Не удалось обновить данные. Повторите загрузку.')).finally(() => setBusy(false)) }} type="button">Обновить данные</button> : <button className="albums-primary" disabled={busy} type="submit">{busy ? 'Сохраняем…' : locked ? 'Повторить сохранение' : 'Сохранить'}</button>}
       <button disabled={busy} onClick={props.onCancel} type="button">Отмена</button>
     </form>
   </section>

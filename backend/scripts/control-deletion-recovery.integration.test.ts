@@ -132,13 +132,13 @@ for (const lineEndingMode of ['lf', 'mixed'] as const) test.serial(`reviewed MAX
   }
 }, process.platform === 'win32' ? 900_000 : 720_000)
 
-test.serial('actual current65 refuses historical MAX inverse without changing the ledger, recovery data or media bytes', async () => {
+test.serial('actual current migration catalog refuses historical MAX inverse without changing the ledger, recovery data or media bytes', async () => {
   const base = new URL(requireIntegrationDatabaseUrl()!)
   const name = `control_delete_recovery_${process.pid}_${randomUUID().replaceAll('-', '').slice(0, 8)}_test`
   const ownUrl = new URL(base); ownUrl.pathname = `/${name}`
   const admin = new Client({ connectionString: base.toString() })
   const scratch = resolve(root, '.scratch'); mkdirSync(scratch, { recursive: true })
-  const fixture = mkdtempSync(resolve(scratch, 'current65-max-refusal-'))
+  const fixture = mkdtempSync(resolve(scratch, 'current-candidate-max-refusal-'))
   const storageRoot = resolve(fixture, 'media'), state = resolve(fixture, 'state.json')
   const env = { ...process.env, NODE_ENV: 'test', CHECKPOINT_DISABLE: '1', TEST_SKIP_DOCKER: '1',
     DATABASE_URL: ownUrl.toString(), TEST_DATABASE_URL: ownUrl.toString(), PRIVATE_STORAGE_DRIVER: 'filesystem',
@@ -160,7 +160,13 @@ test.serial('actual current65 refuses historical MAX inverse without changing th
         return rows
       }
       const before = await snapshot(), bytes = mediaByteSnapshot(storageRoot)
-      expect(before[0]).toHaveLength(65)
+      const migrationRoot = resolve(backendRoot, 'prisma/migrations')
+      const liveMigrationNames = readdirSync(migrationRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && readdirSync(resolve(migrationRoot, entry.name)).includes('migration.sql'))
+        .map((entry) => entry.name)
+        .sort()
+      expect(liveMigrationNames.slice(63)).toContain('20261105110000_album_month_photos')
+      expect(before[0]!.map(({ item }) => item.migration_name).sort()).toEqual(liveMigrationNames)
       expect(before[2]!.length).toBeGreaterThan(0)
       expect(bytes.length).toBeGreaterThan(0)
       for (const args of [['--recover-all'], ['--recover-all', '--apply']]) {

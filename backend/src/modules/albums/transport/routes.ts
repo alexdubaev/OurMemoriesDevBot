@@ -5,6 +5,11 @@ import { z } from 'zod'
 import {
   albumParamsSchema,
   albumEntryParamsSchema,
+  albumEntryViewQuerySchema,
+  albumEntrySourcePageQuerySchema,
+  albumMonthPhotoBatchRequestSchema,
+  albumMonthPhotoAppendRequestSchema,
+  albumMonthCoverRequestSchema,
   clearAlbumEntryRequestSchema,
   createAlbumRequestSchema,
   ifMatchVersionHeadersSchema,
@@ -32,7 +37,6 @@ import { errorResponse, requestIdFrom, validationErrorResponse } from '../../../
 const familyParams = z.object({ familyId: z.uuid().toLowerCase() }).strict()
 const entryParams = albumEntryParamsSchema
 const versionBody = z.object({ expectedVersion: z.number().int().positive() }).strict()
-const monthSourcesQuery = z.object({ cursor: z.string().min(1).max(2048).optional(), limit: z.coerce.number().int().min(2).max(24).default(24) }).strict()
 const scope = (user: AuthHttpEnv['Variables']['user'], familyId: string) => ({ familyId, principal: { userId: user.id, sessionId: user.sessionId } })
 
 export function createAlbumRoutes({ requireAuth, service, social }: { requireAuth: MiddlewareHandler<AuthHttpEnv>; service: AlbumService; social: AlbumSocialService }) {
@@ -102,16 +106,39 @@ export function createAlbumRoutes({ requireAuth, service, social }: { requireAut
   }))
   routes.get('/families/:familyId/albums/:albumId/entries/:entryId', (c) => run(c, async () => {
     const p = entryParams.parse(c.req.param())
-    return c.json({ entry: await service.getEntry(scope(c.var.user, p.familyId), p.albumId, p.entryId) })
-  }))
-  routes.get('/families/:familyId/albums/:albumId/entries/:entryId/month-sources', (c) => run(c, async () => {
-    const p = entryParams.parse(c.req.param())
-    return c.json(await service.monthSources(scope(c.var.user, p.familyId), p.albumId, p.entryId, monthSourcesQuery.parse(c.req.query())))
+    const query = albumEntryViewQuerySchema.parse(c.req.query())
+    return c.json({ entry: await service.getEntry(scope(c.var.user, p.familyId), p.albumId, p.entryId, query.view) })
   }))
   routes.patch('/families/:familyId/albums/:albumId/entries/:entryId', (c) => run(c, async () => {
     const p = entryParams.parse(c.req.param())
+    const query = albumEntryViewQuerySchema.parse(c.req.query())
     const input = updateAlbumEntryRequestSchema.parse(await c.req.json())
-    return c.json({ entry: await service.updateEntry(scope(c.var.user, p.familyId), p.albumId, p.entryId, input) })
+    return c.json({ entry: await service.updateMonthEntry(scope(c.var.user, p.familyId), p.albumId, p.entryId, input, query.view) })
+  }))
+  routes.get('/families/:familyId/albums/:albumId/entries/:entryId/sources', (c) => run(c, async () => {
+    const p = entryParams.parse(c.req.param())
+    return c.json(await service.entrySources(scope(c.var.user, p.familyId), p.albumId, p.entryId, albumEntrySourcePageQuerySchema.parse(c.req.query())))
+  }))
+  routes.put('/families/:familyId/albums/:albumId/entries/:entryId/month-cover', (c) => run(c, async () => {
+    const p = entryParams.parse(c.req.param())
+    return c.json({ entry: await service.setMonthCover(scope(c.var.user, p.familyId), p.albumId, p.entryId, albumMonthCoverRequestSchema.parse(await c.req.json())) })
+  }))
+  routes.post('/families/:familyId/albums/:albumId/entries/:entryId/photo-batches', (c) => run(c, async () => {
+    const p = entryParams.parse(c.req.param())
+    const key = idempotencyKeyHeadersSchema.parse({ 'idempotency-key': c.req.header('idempotency-key') })['idempotency-key']
+    return c.json(await service.reserveMonthPhotos(scope(c.var.user, p.familyId), p.albumId, p.entryId, albumMonthPhotoBatchRequestSchema.parse(await c.req.json()), key))
+  }))
+  routes.post('/families/:familyId/albums/:albumId/entries/:entryId/photos', (c) => run(c, async () => {
+    const p = entryParams.parse(c.req.param())
+    const key = idempotencyKeyHeadersSchema.parse({ 'idempotency-key': c.req.header('idempotency-key') })['idempotency-key']
+    await service.appendMonthPhoto(scope(c.var.user, p.familyId), p.albumId, p.entryId, albumMonthPhotoAppendRequestSchema.parse(await c.req.json()), key)
+    return c.body(null, 204)
+  }))
+  routes.delete('/families/:familyId/albums/:albumId/entries/:entryId/photos/:sourceId', (c) => run(c, async () => {
+    const p = entryParams.extend({ sourceId: z.uuid().toLowerCase() }).parse(c.req.param())
+    const input = ifMatchVersionHeadersSchema.parse({ 'if-match': c.req.header('if-match') })
+    await service.removeMonthPhoto(scope(c.var.user, p.familyId), p.albumId, p.entryId, p.sourceId, input['if-match'])
+    return c.body(null, 204)
   }))
   routes.put('/families/:familyId/albums/:albumId/entries/:entryId/sources', (c) => run(c, async () => {
     const p = entryParams.parse(c.req.param())
@@ -120,8 +147,9 @@ export function createAlbumRoutes({ requireAuth, service, social }: { requireAut
   }))
   routes.post('/families/:familyId/albums/:albumId/entries/:entryId/clear', (c) => run(c, async () => {
     const p = entryParams.parse(c.req.param())
+    const query = albumEntryViewQuerySchema.parse(c.req.query())
     const input = clearAlbumEntryRequestSchema.parse(await c.req.json())
-    return c.json({ entry: await service.clearEntry(scope(c.var.user, p.familyId), p.albumId, p.entryId, input.expectedVersion) })
+    return c.json({ entry: await service.clearEntry(scope(c.var.user, p.familyId), p.albumId, p.entryId, input.expectedVersion, query.view) })
   }))
   routes.delete('/families/:familyId/albums/:albumId/entries/:entryId', (c) => run(c, async () => {
     const p = entryParams.parse(c.req.param())
@@ -169,6 +197,9 @@ async function socialBody(c: Context<AuthHttpEnv>): Promise<unknown> {
 async function run(c: Context<AuthHttpEnv>, operation: () => Promise<Response>) {
   try { return await operation() }
   catch (error) {
+    if (legacyMonthReplacementFence(error)) {
+      return c.json({ error: { code: 'CONFLICT', message: 'В этом месяце уже используется постраничное добавление фотографий. Обновите приложение перед заменой списка целиком', requestId: requestIdFrom(c) } }, 409)
+    }
     if (error instanceof z.ZodError) return c.json(validationErrorResponse(error.issues, requestIdFrom(c)), 422)
     if (error instanceof MemoryFailure) {
       const status = error.kind === 'media_unavailable' || error.kind === 'not_found' ? 404 : error.kind === 'forbidden' ? 403 : error.kind === 'invalid_input' ? 422 : 409
@@ -182,4 +213,14 @@ async function run(c: Context<AuthHttpEnv>, operation: () => Promise<Response>) 
     }
     throw error
   }
+}
+
+function legacyMonthReplacementFence(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const value = error as { message?: unknown; meta?: unknown; cause?: unknown }
+  if (typeof value.message === 'string' && value.message.includes('paged photo updates')) return true
+  const meta = value.meta
+  if (meta && typeof meta === 'object' && typeof (meta as { message?: unknown }).message === 'string' &&
+      (meta as { message: string }).message.includes('paged photo updates')) return true
+  return value.cause !== error && legacyMonthReplacementFence(value.cause)
 }

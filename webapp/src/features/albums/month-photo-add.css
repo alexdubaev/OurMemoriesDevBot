@@ -1,0 +1,16 @@
+.month-photo-add {
+  overflow-wrap: anywhere;
+}
+
+.month-photo-add button {
+  min-height: 44px;
+}
+
+.month-photo-add progress {
+  width: 100%;
+  accent-color: var(--albums-accent, #416d58);
+}
+
+.month-photo-add li + li {
+  margin-block-start: 8px;
+}

@@ -37,3 +37,4 @@ export {
   uploadFamilyVideo,
 } from './api'
 export { createFamilyErrorMessage } from './bootstrap'
+export type { FamilyPhotoUploadResume } from './api'

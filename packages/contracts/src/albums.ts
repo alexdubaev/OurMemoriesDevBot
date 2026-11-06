@@ -69,6 +69,30 @@ export const listAlbumEntriesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(96).default(48),
   year: z.coerce.number().int().min(1).max(9999).optional(),
   category: albumEntryCategorySchema.optional(),
+  view: z.literal('month-summary').optional(),
+}).strict()
+export const albumEntryViewQuerySchema = z.object({ view: z.literal('month-summary').optional() }).strict()
+export const albumEntrySourcePageQuerySchema = z.object({
+  cursor: z.string().min(1).max(2048).optional(),
+  kind: z.enum(['photo','other','cover-media']).default('photo'),
+  limit: z.coerce.number().int().min(1).max(48).default(24),
+}).strict()
+export const albumMonthPhotoBatchRequestSchema = z.object({
+  discussionGeneration: z.number().int().positive(),
+  membershipEpoch: z.number().int().nonnegative(),
+  count: z.number().int().positive().max(48),
+}).strict()
+export const albumMonthPhotoBatchGrantSchema = z.object({
+  grant: z.string().min(1).max(2048),
+}).strict()
+export const albumMonthPhotoAppendRequestSchema = z.object({
+  grant: z.string().min(1).max(2048),
+  offset: z.number().int().nonnegative().max(47),
+  source: albumSourceRefSchema,
+}).strict()
+export const albumMonthCoverRequestSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  sourceId: uuid.nullable(),
 }).strict()
 export const createAlbumEntryRequestSchema = z.object({
   expectedVersion: z.number().int().positive(),
@@ -124,6 +148,14 @@ export const albumSourceDtoSchema = z.object({
   body: z.string().nullable(),
   occurredAt: z.string().datetime().nullable(),
 }).strict()
+export const albumMonthSummarySchema = z.object({
+  cover: albumSourceDtoSchema.nullable(),
+  coverSourceId: uuid.nullable(),
+  photoCount: z.number().int().nonnegative(),
+  otherCount: z.number().int().nonnegative(),
+  discussionGeneration: z.number().int().positive(),
+  membershipEpoch: z.number().int().nonnegative(),
+}).strict()
 export const albumDtoSchema = z.object({
   id: uuid,
   kind: albumKindSchema,
@@ -151,11 +183,13 @@ export const albumEntryDtoSchema = z.object({
   order: z.number().int().nonnegative(),
   sourceCount: z.number().int().nonnegative(),
   sources: z.array(albumSourceDtoSchema).max(96),
+  month: albumMonthSummarySchema.optional(),
   aggregateVersion: z.number().int().positive(),
   capabilities: z.object({ edit: z.boolean(), delete: z.boolean() }).strict(),
 }).strict()
 export const albumPageSchema = z.object({ items: z.array(albumDtoSchema).max(50), nextCursor: z.string().nullable() }).strict()
 export const albumEntryPageSchema = z.object({ items: z.array(albumEntryDtoSchema).max(96), nextCursor: z.string().nullable() }).strict()
+export const albumEntrySourcePageSchema = z.object({ items: z.array(albumSourceDtoSchema).max(48), nextCursor: z.string().nullable() }).strict()
 export const albumResponseSchema = z.object({ album: albumDtoSchema }).strict()
 export const albumEntryResponseSchema = z.object({ entry: albumEntryDtoSchema }).strict()
 export const albumMutationSchema = z.object({ album: albumDtoSchema, replayed: z.boolean() }).strict()
@@ -177,6 +211,11 @@ export type CreateAlbumRequest = z.infer<typeof createAlbumRequestSchema>
 export type AlbumSourceSelection = z.infer<typeof albumSourceSelectionSchema>
 export type ListAlbumsQuery = z.infer<typeof listAlbumsQuerySchema>
 export type ListAlbumEntriesQuery = z.infer<typeof listAlbumEntriesQuerySchema>
+export type AlbumMonthSummary = z.infer<typeof albumMonthSummarySchema>
+export type AlbumEntrySourcePageQuery = z.infer<typeof albumEntrySourcePageQuerySchema>
+export type AlbumMonthPhotoBatchRequest = z.infer<typeof albumMonthPhotoBatchRequestSchema>
+export type AlbumMonthPhotoAppendRequest = z.infer<typeof albumMonthPhotoAppendRequestSchema>
+export type AlbumMonthCoverRequest = z.infer<typeof albumMonthCoverRequestSchema>
 export type UpdateAlbumRequest = z.infer<typeof updateAlbumRequestSchema>
 export type CreateAlbumEntryRequest = z.infer<typeof createAlbumEntryRequestSchema>
 export type UpdateAlbumEntryRequest = z.infer<typeof updateAlbumEntryRequestSchema>
