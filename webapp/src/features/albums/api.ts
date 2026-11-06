@@ -1,7 +1,8 @@
 import { albumEntryMutationSchema, albumEntryPageSchema, albumEntryResponseSchema, albumMutationSchema, albumPageSchema, albumResponseSchema, createAlbumEntryRequestSchema, createAlbumRequestSchema, mediaPickerPageSchema, updateAlbumEntryRequestSchema, updateAlbumRequestSchema, albumSourceSelectionSchema, workshopGroupsSchema, type AlbumKind } from '@web-app-demo/contracts'
-import type { z } from 'zod'
+import { z } from 'zod'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { ApiRequestError } from '@/platform/api'
+const monthSourcesPageSchema = z.object({ items: albumEntryPageSchema.shape.items.element.shape.sources, total: z.number().int().nonnegative(), nextCursor: z.string().nullable() }).strict()
 
 export function albumsApi(transport: AuthenticatedTransport, familyId: string, scopedSignal: AbortSignal | (() => AbortSignal), onScopeUnavailable: (error: ApiRequestError) => void) {
   const root = `/api/v1/families/${encodeURIComponent(familyId)}/albums`
@@ -21,6 +22,7 @@ export function albumsApi(transport: AuthenticatedTransport, familyId: string, s
     remove: (id: string, version: number) => remove(`${root}/${id}`, version),
     entries: (id: string, cursor?: string, category?: string, year?: number) => request(`${root}/${id}/entries?${query({ limit: 48, cursor, category, year })}`, albumEntryPageSchema),
     entry: (id: string, entryId: string) => request(`${root}/${id}/entries/${entryId}`, albumEntryResponseSchema),
+    monthSources: (id: string, entryId: string, cursor?: string) => request(`${root}/${id}/entries/${entryId}/month-sources?${query({ limit: 24, cursor })}`, monthSourcesPageSchema),
     createEntry: (id: string, input: z.input<typeof createAlbumEntryRequestSchema>, key: string) => request(`${root}/${id}/entries`, albumEntryMutationSchema, 'POST', createAlbumEntryRequestSchema.parse(input), key),
     updateEntry: (id: string, entryId: string, input: z.input<typeof updateAlbumEntryRequestSchema>) => request(`${root}/${id}/entries/${entryId}`, albumEntryResponseSchema, 'PATCH', updateAlbumEntryRequestSchema.parse(input)),
     sources: (id: string, entryId: string, input: z.input<typeof albumSourceSelectionSchema>, key: string) => request(`${root}/${id}/entries/${entryId}/sources`, albumEntryResponseSchema, 'PUT', albumSourceSelectionSchema.parse(input), key),

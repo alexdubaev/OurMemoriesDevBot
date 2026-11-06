@@ -9,26 +9,39 @@ import { SourcePreview } from './SourcePreview'
 import { AlbumEntrySocial } from './AlbumEntrySocial'
 import { filled } from './model'
 
-export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, accountId, membershipEpoch, scopeKey, transport, familyId, timezone, childName, hostBridge, active, onBack, onEdit, onRemove, onUpload, busy }: { albumId: string; onDiscussionInvalidated: (error: ApiRequestError) => void; entry: AlbumEntryDto; accountId: string; membershipEpoch: number; scopeKey: string; transport: AuthenticatedTransport; familyId: string; timezone: string; childName: string; hostBridge: HostBridge; active: boolean; onBack: () => void; onEdit: () => void; onRemove: () => void; onUpload?: () => void; busy: boolean }) {
+export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, accountId, membershipEpoch, scopeKey, transport, familyId, timezone, childName, hostBridge, active, onBack, onEdit, onRemove, onUpload, busy, loadMonthSources }: { albumId: string; onDiscussionInvalidated: (error: ApiRequestError) => void; entry: AlbumEntryDto; accountId: string; membershipEpoch: number; scopeKey: string; transport: AuthenticatedTransport; familyId: string; timezone: string; childName: string; hostBridge: HostBridge; active: boolean; onBack: () => void; onEdit: () => void; onRemove: () => void; onUpload?: () => void; busy: boolean; loadMonthSources?: (cursor?: string) => Promise<{ items: AlbumSource[]; total: number; nextCursor: string | null }> }) {
   const [viewer, setViewer] = useState<{ memory: MemoryDto; index: number; sourceMemories: Record<string, MemoryDto>; sourcePresentation: Record<string, { authorLabel: string; dateLabel: string }> } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [monthSources, setMonthSources] = useState<AlbumSource[]>(entry.sources)
+  const [pageCursor, setPageCursor] = useState<string | undefined>()
+  const [nextPageCursor, setNextPageCursor] = useState<string | null>(null)
+  const [pageHistory, setPageHistory] = useState<Array<string | undefined>>([])
+  const [pageBusy, setPageBusy] = useState(false)
   const controller = useRef<AbortController | null>(null)
   const trigger = useRef<HTMLElement | null>(null)
   useEffect(() => () => controller.current?.abort(), [])
+  useEffect(() => { setMonthSources(entry.sources); setPageCursor(undefined); setNextPageCursor(null); setPageHistory([]) }, [entry.id, entry.sources])
+  async function moveMonthPage(cursor: string | undefined, history: Array<string | undefined>) {
+    if (!loadMonthSources) return
+    setPageBusy(true)
+    try { const page = await loadMonthSources(cursor); setMonthSources(page.items); setNextPageCursor(page.nextCursor); setPageCursor(cursor); setPageHistory(history) }
+    catch { setError('Не удалось загрузить фотографии. Повторите попытку.') }
+    finally { setPageBusy(false) }
+  }
   async function open(source: AlbumSource, element: HTMLElement) {
     if (!source.available) return
     controller.current?.abort(); const request = new AbortController(); controller.current = request
     trigger.current = element; setLoading(true); setError(null)
     try {
-      const memoryIds = [...new Set(entry.sources.filter((item) => item.available && item.memoryId).map((item) => item.memoryId!))]
+      const memoryIds = [...new Set(monthSources.filter((item) => item.available && item.memoryId).map((item) => item.memoryId!))]
       const fresh = await Promise.allSettled(memoryIds.map((id) => loadMemory(transport, familyId, id, request.signal)))
       if (request.signal.aborted) return
       const memories = new Map(fresh.flatMap((result) => result.status === 'fulfilled' ? [[result.value.id, result.value] as const] : []))
       const memory = source.memoryId ? memories.get(source.memoryId) : undefined
       if (source.memoryId && !memory) { setError('Оригинал больше недоступен. Обновите альбом.'); return }
       const ownerByAttachment = new Map<string, MemoryDto>()
-      const attachments = entry.sources.flatMap((selected) => {
+      const attachments = monthSources.flatMap((selected) => {
         if (!selected.available) return []
         if (selected.memoryId === null) {
           const attachment = selected.attachment
@@ -56,7 +69,7 @@ export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, acco
         likes: { count: 0, likedByMe: false }, capabilities: { edit: false, delete: false, like: false },
       }
       const sourceMemories: Record<string, MemoryDto> = {}
-      const sourcePresentation = Object.fromEntries(entry.sources.filter((item) => item.available && item.memoryId === null).map((item) => [item.sourceId, { authorLabel: 'Фото в альбоме', dateLabel: entry.date.precision === 'unknown' ? 'Без даты' : dateLabel(entry.date) }]))
+      const sourcePresentation = Object.fromEntries(monthSources.filter((item) => item.available && item.memoryId === null).map((item) => [item.sourceId, { authorLabel: 'Фото в альбоме', dateLabel: entry.date.precision === 'unknown' ? 'Без даты' : dateLabel(entry.date) }]))
       for (const attachment of attachments) {
         const owner = ownerByAttachment.get(attachment.id)
         sourceMemories[attachment.id] = owner ? { ...owner, attachments } : displayMemory
@@ -69,7 +82,8 @@ export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, acco
     <section className="albums-entry-detail"><header className="albums-toolbar"><button disabled={busy} onClick={onBack} type="button">‹ Назад</button><h1>{entry.title || (entry.monthNumber ? monthAgeLabel(entry.monthNumber) : 'Маленькое творение')}</h1></header>
       <p className="albums-kicker">{dateLabel(entry.date)}{entry.category ? ` · ${categories[entry.category]}` : ''}</p>
       {entry.caption ? <p className="albums-story">{entry.caption}</p> : null}{entry.childQuote ? <blockquote>«{entry.childQuote}»</blockquote> : null}
-      <div className="albums-detail-sources">{entry.sources.map((source, index) => <article key={sourceKey(source)}>{source.kind === 'note' && source.available ? <p className="albums-note">{source.body || 'Заметка без текста'}</p> : <button aria-label={`Открыть ${source.kind === 'voice' ? 'голосовое' : 'материал'} ${index + 1}`} disabled={!source.available || loading} onClick={(event) => void open(source, event.currentTarget)} type="button"><SourcePreview accountId={accountId} active={active} scopeKey={scopeKey} source={source} transport={transport} /></button>}{!source.available ? <p>Оригинал недоступен</p> : null}</article>)}</div>
+      <div className="albums-detail-sources">{monthSources.map((source, index) => <article key={sourceKey(source)}>{source.kind === 'note' && source.available ? <p className="albums-note">{source.body || 'Заметка без текста'}</p> : <button aria-label={`Открыть ${source.kind === 'voice' ? 'голосовое' : 'материал'} ${index + 1}`} disabled={!source.available || loading} onClick={(event) => void open(source, event.currentTarget)} type="button"><SourcePreview accountId={accountId} active={active} scopeKey={scopeKey} source={source} transport={transport} /></button>}{!source.available ? <p>Оригинал недоступен</p> : null}</article>)}</div>
+      {loadMonthSources && entry.sourceCount > entry.sources.length ? <div className="albums-form-actions">{pageHistory.length ? <button disabled={pageBusy} onClick={() => void moveMonthPage(pageHistory.at(-1), pageHistory.slice(0, -1))} type="button">Предыдущие фотографии</button> : null}{nextPageCursor ? <button disabled={pageBusy} onClick={() => void moveMonthPage(nextPageCursor, [...pageHistory, pageCursor])} type="button">{pageBusy ? 'Загружаем…' : `Следующие фотографии · ${entry.sourceCount}`}</button> : null}</div> : null}
       {loading ? <p role="status">Открываем оригинал…</p> : null}{error ? <p className="albums-error" role="alert">{error}</p> : null}
       {entry.kind !== 'month' || filled(entry) ? <AlbumEntrySocial accountId={accountId} albumId={albumId} entryId={entry.id} familyId={familyId} hostBridge={hostBridge} key={`${scopeKey}:${albumId}:${entry.id}`} membershipEpoch={membershipEpoch} onInvalidated={onDiscussionInvalidated} timezone={timezone} transport={transport} /> : null}
       {entry.capabilities.edit ? <div className="albums-form-actions"><button className="albums-primary" disabled={busy} onClick={onEdit} type="button">Изменить</button>{onUpload ? <button className="albums-secondary" disabled={busy} onClick={onUpload} type="button">Загрузить новое</button> : null}<button className="albums-danger" disabled={busy} onClick={onRemove} type="button">{entry.kind === 'month' ? 'Очистить главу' : 'Убрать из альбома'}</button></div> : null}
