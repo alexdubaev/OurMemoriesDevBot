@@ -14,6 +14,7 @@ import type { FamilyScope } from '../../families'
 export type AlbumListCursor = { createdAt: string; id: string }
 export type EntryListCursor = { orderKey?: number; dateValue?: string | null; id: string }
 export type PickerListCursor = { occurredAt: string; id: string }
+export type MonthSourceCursor = { position: number; id: string }
 
 export interface AlbumRepository {
   listAlbums(scope: FamilyScope, input: { kind?: AlbumKind; filter: 'all' | 'template' | 'custom'; childId?: string; limit: number; before?: AlbumListCursor }): Promise<{ items: AlbumDto[]; hasNext: boolean; last: AlbumListCursor | null }>
@@ -24,6 +25,7 @@ export interface AlbumRepository {
   listEntries(scope: FamilyScope, albumId: string, input: { limit: number; year?: number; category?: string; before?: EntryListCursor }): Promise<{ items: AlbumEntryDto[]; hasNext: boolean; last: EntryListCursor | null; albumVersion: number }>
   createEntry(scope: FamilyScope, albumId: string, input: CreateAlbumEntryRequest, key: string, payloadHash: string): Promise<{ entry: AlbumEntryDto; replayed: boolean }>
   getEntry(scope: FamilyScope, albumId: string, entryId: string): Promise<AlbumEntryDto>
+  monthSources(scope: FamilyScope, albumId: string, entryId: string, limit: number, before?: MonthSourceCursor): Promise<{ sources: AlbumEntryDto['sources']; total: number; hasNext: boolean; last: MonthSourceCursor | null }>
   updateEntry(scope: FamilyScope, albumId: string, entryId: string, input: UpdateAlbumEntryRequest): Promise<AlbumEntryDto>
   clearEntry(scope: FamilyScope, albumId: string, entryId: string, expectedVersion: number): Promise<AlbumEntryDto>
   deleteEntry(scope: FamilyScope, albumId: string, entryId: string, expectedVersion: number): Promise<void>

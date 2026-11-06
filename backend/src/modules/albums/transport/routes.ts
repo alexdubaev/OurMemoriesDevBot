@@ -32,6 +32,7 @@ import { errorResponse, requestIdFrom, validationErrorResponse } from '../../../
 const familyParams = z.object({ familyId: z.uuid().toLowerCase() }).strict()
 const entryParams = albumEntryParamsSchema
 const versionBody = z.object({ expectedVersion: z.number().int().positive() }).strict()
+const monthSourcesQuery = z.object({ cursor: z.string().min(1).max(2048).optional(), limit: z.coerce.number().int().min(2).max(24).default(24) }).strict()
 const scope = (user: AuthHttpEnv['Variables']['user'], familyId: string) => ({ familyId, principal: { userId: user.id, sessionId: user.sessionId } })
 
 export function createAlbumRoutes({ requireAuth, service, social }: { requireAuth: MiddlewareHandler<AuthHttpEnv>; service: AlbumService; social: AlbumSocialService }) {
@@ -102,6 +103,10 @@ export function createAlbumRoutes({ requireAuth, service, social }: { requireAut
   routes.get('/families/:familyId/albums/:albumId/entries/:entryId', (c) => run(c, async () => {
     const p = entryParams.parse(c.req.param())
     return c.json({ entry: await service.getEntry(scope(c.var.user, p.familyId), p.albumId, p.entryId) })
+  }))
+  routes.get('/families/:familyId/albums/:albumId/entries/:entryId/month-sources', (c) => run(c, async () => {
+    const p = entryParams.parse(c.req.param())
+    return c.json(await service.monthSources(scope(c.var.user, p.familyId), p.albumId, p.entryId, monthSourcesQuery.parse(c.req.query())))
   }))
   routes.patch('/families/:familyId/albums/:albumId/entries/:entryId', (c) => run(c, async () => {
     const p = entryParams.parse(c.req.param())

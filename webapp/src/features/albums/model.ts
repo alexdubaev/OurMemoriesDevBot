@@ -4,7 +4,10 @@ export type AlbumSource = AlbumEntryDto['sources'][number]
 export type SourceRef = AlbumSourceSelection['sources'][number]
 export const sourceKey = (source: SourceRef) => `${source.memoryId}:${source.sourceKind}:${source.sourceId}`
 export const sourceRefs = (sources: SourceRef[]) => sources.map(({ memoryId, sourceKind, sourceId }) => ({ memoryId, sourceKind, sourceId }))
-export const filled = (entry: AlbumEntryDto) => Boolean(entry.caption?.trim() || entry.sources.some((source) => source.available))
+export const filled = (entry: AlbumEntryDto) => Boolean(entry.caption?.trim() || entry.sourceCount > 0 || entry.sources.some((source) => source.available))
+export function shouldShowMonthSourceNavigation(state: { sourceCount: number; loadedCount: number; nextCursor: string | null; hasPrevious: boolean; retryable: boolean }) {
+  return Boolean(state.nextCursor || state.hasPrevious || state.retryable)
+}
 export const categories = { drawing: 'Рисунки', applique: 'Аппликации', craft: 'Поделки', building: 'Постройки', other: 'Другое' } as const
 export const kindNames = { year: 'Первый год', events: 'Первые открытия', workshop: 'Мастерская', free: 'Свободный альбом' } as const
 export const suggestions = ['Первая улыбка', 'Первое слово', 'Первый зубик', 'Первые шаги', 'Первый переворот']

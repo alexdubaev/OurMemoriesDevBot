@@ -71,6 +71,13 @@ export class AlbumService {
   }
   getEntry(scope: FamilyScope, albumId: string, entryId: string) { return this.repository.getEntry(scope, albumId, entryId) }
 
+  async monthSources(scope: FamilyScope, albumId: string, entryId: string, query: { limit: number; cursor?: string }) {
+    const expected = { familyId: scope.familyId, albumId, kind: 'month-sources', filters: { entryId } }
+    const before = query.cursor ? this.readCursor(query.cursor, expected).last as { position: number; id: string } : undefined
+    const page = await this.repository.monthSources(scope, albumId, entryId, query.limit, before)
+    return { items: page.sources, total: page.total, nextCursor: page.hasNext && page.last ? this.writeCursor({ version: 1, familyId: scope.familyId, albumId, kind: 'month-sources', filters: { entryId }, last: page.last }) : null }
+  }
+
   async setSources(scope: FamilyScope, albumId: string, entryId: string, input: AlbumSourceSelection, key: string) {
     const normalized = albumSourceSelectionSchema.parse(input)
     return this.repository.setSources(scope, albumId, entryId, normalized, key.toLowerCase(), digest({ albumId, entryId, ...normalized }))

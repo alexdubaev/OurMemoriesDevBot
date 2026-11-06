@@ -25,7 +25,7 @@ import type { DbClient } from '../../../db'
 import type { IdempotencyExecutor, JsonObject, PrismaTransactionClient } from '../../../idempotency'
 import { Prisma as PrismaSql } from '../../../generated/prisma/client'
 import { albumMissing, albumScopeUnavailable, albumVersionConflict, AlbumFailure } from '../domain/errors'
-import type { AlbumRepository } from '../application/album-repository'
+import type { AlbumRepository, MonthSourceCursor } from '../application/album-repository'
 
 type Role = 'full' | 'viewer'
 type AlbumCursor = { createdAt: string; id: string }
@@ -173,9 +173,13 @@ export class PrismaAlbumRepository implements AlbumRepository {
       const orderBy: Prisma.AlbumEntryOrderByWithRelationInput[] = dated
         ? [{ dateValue: { sort: direction, nulls: 'last' } }, { id: 'asc' }]
         : [{ orderKey: 'asc' }, { id: 'asc' }]
-      const rows = await tx.albumEntry.findMany({ where, orderBy, take: input.limit + 1, include: { sources: { orderBy: { position: 'asc' } } } })
+      const rows = await tx.albumEntry.findMany({ where, orderBy, take: input.limit + 1, include: { sources: { orderBy: { position: 'asc' }, ...(album.kind === 'year' ? { take: 24 } : {}) } } })
       const page = rows.slice(0, input.limit)
       const items = await projectEntries(tx, this.sourceCatalog, scope, access.role, album, page)
+      if (album.kind === 'year') {
+        for (const item of items) item.sourceCount = await countAvailableSources(tx, this.sourceCatalog, scope, item.id)
+        await applyMonthCovers(tx, this.sourceCatalog, scope, albumId, items)
+      }
       const last = page.at(-1)
       return { items, hasNext: rows.length > input.limit, last: last ? { ...(dated ? { dateValue: last.dateValue } : { orderKey: last.orderKey }), id: last.id } : null, albumVersion: album.version }
     })
@@ -230,9 +234,35 @@ export class PrismaAlbumRepository implements AlbumRepository {
       const access = await lockScope(tx, scope, false)
       const album = await tx.album.findFirst({ where: { id: albumId, familyId: scope.familyId, deletedAt: null } })
       if (!album) throw albumMissing()
-      const row = await tx.albumEntry.findFirst({ where: { id: entryId, albumId, familyId: scope.familyId, deletedAt: null }, include: { sources: { orderBy: { position: 'asc' } } } })
+      const linkCount = await tx.albumEntrySource.count({ where: { familyId: scope.familyId, albumId, entryId } })
+      const pagedWriter = album.kind === 'year' ? await monthUsesPagedWriter(tx, entryId) : false
+      const sourceTake = album.kind === 'year' ? (linkCount > 96 || pagedWriter ? 24 : 96) : undefined
+      const row = await tx.albumEntry.findFirst({ where: { id: entryId, albumId, familyId: scope.familyId, deletedAt: null }, include: { sources: { orderBy: { position: 'asc' }, ...(sourceTake ? { take: sourceTake } : {}) } } })
       if (!row) throw albumMissing()
-      return (await projectEntries(tx, this.sourceCatalog, scope, access.role, album, [row]))[0]!
+      const item = (await projectEntries(tx, this.sourceCatalog, scope, access.role, album, [row]))[0]!
+      item.sourceCount = await countAvailableSources(tx, this.sourceCatalog, scope, entryId)
+      if (album.kind === 'year') await applyMonthCovers(tx, this.sourceCatalog, scope, albumId, [item])
+      if (album.kind === 'year' && (linkCount > 96 || pagedWriter)) item.capabilities.edit = false
+      return item
+    })
+  }
+
+  async monthSources(scope: FamilyScope, albumId: string, entryId: string, limit: number, before?: MonthSourceCursor) {
+    return this.db.$transaction(async (tx) => {
+      const access = await lockScope(tx, scope, false)
+      const album = await tx.album.findFirst({ where: { id: albumId, familyId: scope.familyId, kind: 'year', deletedAt: null } })
+      if (!album) throw albumMissing()
+      const entry = await tx.albumEntry.findFirst({ where: { id: entryId, albumId, familyId: scope.familyId, deletedAt: null, kind: 'month' } })
+      if (!entry) throw albumMissing()
+      const cover = await effectiveMonthCover(tx, this.sourceCatalog, scope, albumId, entryId)
+      const rows = await tx.albumEntrySource.findMany({ where: { familyId: scope.familyId, albumId, entryId, ...(cover ? { id: { not: cover.id } } : {}), ...(before ? { OR: [{ position: { gt: before.position } }, { position: before.position, id: { gt: before.id } }] } : {}) }, orderBy: [{ position: 'asc' }, { id: 'asc' }], take: before ? limit + 1 : limit + 2 })
+      const basePage = rows.slice(0, Math.max(0, limit - (cover && !before ? 1 : 0)))
+      const page = cover && !before ? [cover, ...basePage] : basePage
+      const last = basePage.at(-1)
+      const projected = page.length ? await this.sourceCatalog.project(tx, scope, page.map((row) => ({ ...sourceRef(row), id: row.id, kind: row.kind }))) : []
+      const total = await tx.albumEntrySource.count({ where: { familyId: scope.familyId, albumId, entryId } })
+      void access
+      return { sources: projected.map(sourceDto), total, hasNext: rows.length > basePage.length, last: last ? { position: last.position, id: last.id } : null }
     })
   }
 
@@ -319,6 +349,11 @@ export class PrismaAlbumRepository implements AlbumRepository {
       }
       assertVersion(album.version, input.expectedVersion)
       const entry = await lockEntry(tx, scope.familyId, albumId, entryId)
+      if (album.kind === 'year') {
+        const locked = await tx.$queryRaw<Array<{ value: unknown }>>`SELECT to_jsonb(e)->>'next_photo_position' AS value FROM album_entries e WHERE e.id=${entryId}::uuid AND e.album_id=${albumId}::uuid AND e.family_id=${scope.familyId}::uuid`
+        const sourceTotal = await tx.albumEntrySource.count({ where: { familyId: scope.familyId, albumId, entryId } })
+        if (sourceTotal > 96 || locked[0]?.value != null) throw new AlbumFailure('conflict', 'Этот месяц использует постраничное хранение. Обновите приложение, чтобы изменить список фотографий.')
+      }
       const refs = input.sources as AlbumSourceRef[]
       const resolved = await sourceCatalog.resolve(tx, scope, refs, 'update')
       if (album.kind === 'workshop' && resolved.some((source) => source.kind !== 'photo')) throw new AlbumFailure('invalid_input', 'В мастерской можно размещать только фото работ')
@@ -557,7 +592,41 @@ function validateEntryCreate(kind: AlbumKind, input: CreateAlbumEntryRequest, so
 }
 
 async function countAvailableSources(tx: PrismaTransactionClient, catalog: AlbumSourceCatalog, scope: FamilyScope, entryId: string) {
-  const rows = await tx.albumEntrySource.findMany({ where: { entryId, familyId: scope.familyId }, orderBy: { position: 'asc' } })
-  const projected = await catalog.project(tx, scope, rows.map((row) => ({ ...sourceRef(row), id: row.id, kind: row.kind })))
-  return projected.filter(({ available }) => available).length
+  let count = 0
+  let cursor: { position: number; id: string } | undefined
+  while (true) {
+    const rows = await tx.albumEntrySource.findMany({ where: { entryId, familyId: scope.familyId, ...(cursor ? { OR: [{ position: { gt: cursor.position } }, { position: cursor.position, id: { gt: cursor.id } }] } : {}) }, orderBy: [{ position: 'asc' }, { id: 'asc' }], take: 128 })
+    if (!rows.length) return count
+    const projected = await catalog.project(tx, scope, rows.map((row) => ({ ...sourceRef(row), id: row.id, kind: row.kind })))
+    count += projected.filter(({ available }) => available).length
+    if (rows.length < 128) return count
+    const last = rows.at(-1)!
+    cursor = { position: last.position, id: last.id }
+  }
+}
+
+async function monthUsesPagedWriter(tx: PrismaTransactionClient, entryId: string) {
+  const rows = await tx.$queryRaw<Array<{ value: string | null }>>`SELECT to_jsonb(e)->>'next_photo_position' AS value FROM album_entries e WHERE e.id=${entryId}::uuid`
+  return rows[0]?.value != null
+}
+
+async function applyMonthCovers(tx: PrismaTransactionClient, catalog: AlbumSourceCatalog, scope: FamilyScope, albumId: string, entries: AlbumEntryDto[]) {
+  for (const entry of entries) {
+    const coverRow = await effectiveMonthCover(tx, catalog, scope, albumId, entry.id)
+    if (!coverRow) continue
+    const [projected] = await catalog.project(tx, scope, [{ ...sourceRef(coverRow), id: coverRow.id, kind: coverRow.kind }])
+    if (!projected?.available || projected.kind !== 'photo') continue
+    const cover = sourceDto(projected)
+      const sourceLimit = entry.sources.length
+      entry.sources = [cover, ...entry.sources.filter(({ id }) => id !== cover.id)].slice(0, sourceLimit)
+  }
+}
+
+async function effectiveMonthCover(tx: PrismaTransactionClient, catalog: AlbumSourceCatalog, scope: FamilyScope, albumId: string, entryId: string) {
+  const selected = await tx.$queryRaw<Array<{ id: string | null }>>`SELECT to_jsonb(e)->>'month_cover_source_id' AS id FROM album_entries e WHERE e.id=${entryId}::uuid AND e.album_id=${albumId}::uuid AND e.family_id=${scope.familyId}::uuid AND e.deleted_at IS NULL`
+  if (!selected[0]?.id) return null
+  const row = await tx.albumEntrySource.findFirst({ where: { id: selected[0].id, familyId: scope.familyId, albumId, entryId, kind: 'photo' } })
+  if (!row) return null
+  const [projected] = await catalog.project(tx, scope, [{ ...sourceRef(row), id: row.id, kind: row.kind }])
+  return projected?.available && projected.kind === 'photo' ? row : null
 }
