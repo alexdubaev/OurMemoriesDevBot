@@ -254,13 +254,15 @@ export class PrismaAlbumRepository implements AlbumRepository {
       if (!album) throw albumMissing()
       const entry = await tx.albumEntry.findFirst({ where: { id: entryId, albumId, familyId: scope.familyId, deletedAt: null, kind: 'month' } })
       if (!entry) throw albumMissing()
-      const rows = await tx.albumEntrySource.findMany({ where: { familyId: scope.familyId, albumId, entryId, ...(before ? { OR: [{ position: { gt: before.position } }, { position: before.position, id: { gt: before.id } }] } : {}) }, orderBy: [{ position: 'asc' }, { id: 'asc' }], take: limit + 1 })
-      const page = rows.slice(0, limit)
-      const projected = await this.sourceCatalog.project(tx, scope, page.map((row) => ({ ...sourceRef(row), id: row.id, kind: row.kind })))
+      const cover = await effectiveMonthCover(tx, this.sourceCatalog, scope, albumId, entryId)
+      const rows = await tx.albumEntrySource.findMany({ where: { familyId: scope.familyId, albumId, entryId, ...(cover ? { id: { not: cover.id } } : {}), ...(before ? { OR: [{ position: { gt: before.position } }, { position: before.position, id: { gt: before.id } }] } : {}) }, orderBy: [{ position: 'asc' }, { id: 'asc' }], take: before ? limit + 1 : limit + 2 })
+      const basePage = rows.slice(0, Math.max(0, limit - (cover && !before ? 1 : 0)))
+      const page = cover && !before ? [cover, ...basePage] : basePage
+      const last = basePage.at(-1)
+      const projected = page.length ? await this.sourceCatalog.project(tx, scope, page.map((row) => ({ ...sourceRef(row), id: row.id, kind: row.kind }))) : []
       const total = await tx.albumEntrySource.count({ where: { familyId: scope.familyId, albumId, entryId } })
-      const last = page.at(-1)
       void access
-      return { sources: projected.map(sourceDto), total, hasNext: rows.length > limit, last: last ? { position: last.position, id: last.id } : null }
+      return { sources: projected.map(sourceDto), total, hasNext: rows.length > basePage.length, last: last ? { position: last.position, id: last.id } : null }
     })
   }
 
@@ -610,13 +612,21 @@ async function monthUsesPagedWriter(tx: PrismaTransactionClient, entryId: string
 
 async function applyMonthCovers(tx: PrismaTransactionClient, catalog: AlbumSourceCatalog, scope: FamilyScope, albumId: string, entries: AlbumEntryDto[]) {
   for (const entry of entries) {
-    const selected = await tx.$queryRaw<Array<{ id: string | null }>>`SELECT to_jsonb(e)->>'month_cover_source_id' AS id FROM album_entries e WHERE e.id=${entry.id}::uuid AND e.album_id=${albumId}::uuid AND e.family_id=${scope.familyId}::uuid AND e.deleted_at IS NULL`
-    if (!selected[0]?.id) continue
-    const row = await tx.albumEntrySource.findFirst({ where: { id: selected[0].id, familyId: scope.familyId, albumId, entryId: entry.id, kind: 'photo' } })
-    if (!row) continue
-    const [projected] = await catalog.project(tx, scope, [{ ...sourceRef(row), id: row.id, kind: row.kind }])
+    const coverRow = await effectiveMonthCover(tx, catalog, scope, albumId, entry.id)
+    if (!coverRow) continue
+    const [projected] = await catalog.project(tx, scope, [{ ...sourceRef(coverRow), id: coverRow.id, kind: coverRow.kind }])
     if (!projected?.available || projected.kind !== 'photo') continue
     const cover = sourceDto(projected)
-    entry.sources = [cover, ...entry.sources.filter(({ id }) => id !== cover.id)].slice(0, 24)
+      const sourceLimit = entry.sources.length
+      entry.sources = [cover, ...entry.sources.filter(({ id }) => id !== cover.id)].slice(0, sourceLimit)
   }
+}
+
+async function effectiveMonthCover(tx: PrismaTransactionClient, catalog: AlbumSourceCatalog, scope: FamilyScope, albumId: string, entryId: string) {
+  const selected = await tx.$queryRaw<Array<{ id: string | null }>>`SELECT to_jsonb(e)->>'month_cover_source_id' AS id FROM album_entries e WHERE e.id=${entryId}::uuid AND e.album_id=${albumId}::uuid AND e.family_id=${scope.familyId}::uuid AND e.deleted_at IS NULL`
+  if (!selected[0]?.id) return null
+  const row = await tx.albumEntrySource.findFirst({ where: { id: selected[0].id, familyId: scope.familyId, albumId, entryId, kind: 'photo' } })
+  if (!row) return null
+  const [projected] = await catalog.project(tx, scope, [{ ...sourceRef(row), id: row.id, kind: row.kind }])
+  return projected?.available && projected.kind === 'photo' ? row : null
 }
