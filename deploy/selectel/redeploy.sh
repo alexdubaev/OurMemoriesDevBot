@@ -1176,7 +1176,7 @@ try {
   to_regclass('public.album_entry_comments') IS NOT NULL comments,
   to_regclass('public.album_entry_reactions') IS NOT NULL reactions,
   EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_entries' AND column_name='discussion_generation' AND data_type='integer' AND is_nullable='NO' AND column_default='1') generation,
-  EXISTS(SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid WHERE t.tgrelid='public.album_entries'::regclass AND t.tgname='album_entries_legacy_clear_discussion' AND NOT t.tgisinternal AND t.tgenabled='O' AND p.proname='protect_album_discussion_on_legacy_month_clear') trigger,
+  EXISTS(SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid WHERE t.tgrelid='public.album_entries'::regclass AND t.tgname='album_entries_legacy_clear_discussion' AND NOT t.tgisinternal AND t.tgenabled='O' AND t.tgtype=19 AND p.oid=to_regprocedure('public.protect_album_discussion_on_legacy_month_clear()') AND cardinality(t.tgattr::smallint[])=6 AND t.tgattr::smallint[] @> ARRAY(SELECT attnum::smallint FROM pg_attribute WHERE attrelid='public.album_entries'::regclass AND attname IN ('title','caption','child_quote','category','date_value','date_precision')) ) trigger,
   to_regprocedure('public.protect_album_discussion_on_legacy_month_clear()') IS NOT NULL function,
   EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_entries' AND column_name='month_cover_source_id') coverraw,
   EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_entries' AND column_name='month_cover_source_id' AND data_type='uuid') covertype,
@@ -1195,9 +1195,9 @@ try {
   EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_source_operations' AND column_name='count') opcountraw,
   EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='album_source_operations' AND column_name='count' AND data_type='integer') opcounttype,
   EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.album_source_operations'::regclass AND tgname='album_source_operations_legacy_month_replace_fence') monthtriggerraw,
-  EXISTS(SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid WHERE t.tgrelid='public.album_source_operations'::regclass AND t.tgname='album_source_operations_legacy_month_replace_fence' AND NOT t.tgisinternal AND t.tgenabled='O' AND p.proname='reject_legacy_month_source_replace_after_append') monthtriggervalid,
-  to_regproc('public.reject_legacy_month_source_replace_after_append') IS NOT NULL monthfunctionraw,
-  EXISTS(SELECT 1 FROM pg_proc WHERE oid=to_regprocedure('public.reject_legacy_month_source_replace_after_append()') AND prorettype='trigger'::regtype) monthfunctionvalid`);
+  EXISTS(SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid WHERE t.tgrelid='public.album_source_operations'::regclass AND t.tgname='album_source_operations_legacy_month_replace_fence' AND NOT t.tgisinternal AND t.tgenabled='O' AND t.tgtype=7 AND p.oid=to_regprocedure('public.reject_legacy_month_source_replace_after_append()')) monthtriggervalid,
+  to_regprocedure('public.reject_legacy_month_source_replace_after_append()') IS NOT NULL monthfunctionraw,
+  EXISTS(SELECT 1 FROM pg_proc WHERE oid=to_regprocedure('public.reject_legacy_month_source_replace_after_append()') AND pronamespace='public'::regnamespace AND prorettype='trigger'::regtype) monthfunctionvalid`);
  const x=s[0],social=rows.length>=65,recovery=rows.length>=65,month=rows.length===66;
  if(!x||x.comments!==social||x.reactions!==social||x.generation!==social||x.trigger!==recovery||x.function!==recovery||
     x.coverraw!==month||x.nextposraw!==month||x.coverfkraw!==month||x.nextcheckraw!==month||x.coveridxraw!==month||x.pageidxraw!==month||
