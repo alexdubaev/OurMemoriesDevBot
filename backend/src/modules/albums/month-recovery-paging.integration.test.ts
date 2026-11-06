@@ -15,13 +15,14 @@ test('legacy runtime pages a 2000-photo month and refuses lossy full replacement
   await f.db.mediaAsset.createMany({ data: rows.map(({ mediaId }) => ({ id: mediaId, familyId: family.id, uploaderId: owner.id, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo', originalKey: `synthetic/month-recovery/${mediaId}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg', byteSize: 3, sha256: 'b'.repeat(64), originalStatus: 'stored', renditionStatus: 'ready' })) })
   await f.db.albumPhoto.createMany({ data: rows.map(({ mediaId }) => ({ familyId: family.id, mediaId })) })
   await f.db.albumEntrySource.createMany({ data: rows.map(({ mediaId, position }) => ({ familyId: family.id, albumId: album.id, entryId: entry.id, albumPhotoMediaId: mediaId, memoryId: null, sourceKind: 'private_storage', kind: 'photo', sourceId: mediaId, position })) })
-  await f.db.$executeRawUnsafe('ALTER TABLE album_entries ADD COLUMN IF NOT EXISTS month_cover_source_id UUID')
-  const selectedCover = await f.db.albumEntrySource.findFirstOrThrow({ where: { entryId: entry.id, position: 1000 } })
-  await f.db.$executeRaw`UPDATE album_entries SET month_cover_source_id=${selectedCover.id}::uuid WHERE id=${entry.id}::uuid AND album_id=${album.id}::uuid AND family_id=${family.id}::uuid`
+  const [schema] = await f.db.$queryRaw<Array<{ hasCover: boolean }>>`SELECT to_jsonb(e) ? 'month_cover_source_id' AS "hasCover" FROM album_entries e WHERE e.id=${entry.id}::uuid`
+  const hasCover = schema?.hasCover === true
+  const selectedCover = await f.db.albumEntrySource.findFirstOrThrow({ where: { entryId: entry.id, position: hasCover ? 1000 : 0 } })
+  if (hasCover) await f.db.$executeRaw`UPDATE album_entries SET month_cover_source_id=${selectedCover.id}::uuid WHERE id=${entry.id}::uuid AND album_id=${album.id}::uuid AND family_id=${family.id}::uuid`
   const legacyEntry = await f.db.albumEntry.create({ data: { familyId: family.id, albumId: album.id, kind: 'month', monthNumber: 2, orderKey: 2 } })
   await f.db.albumEntrySource.createMany({ data: rows.slice(0, 50).map(({ mediaId, position }) => ({ familyId: family.id, albumId: album.id, entryId: legacyEntry.id, albumPhotoMediaId: mediaId, memoryId: null, sourceKind: 'private_storage', kind: 'photo', sourceId: mediaId, position })) })
-  const legacyCover = await f.db.albumEntrySource.findFirstOrThrow({ where: { entryId: legacyEntry.id, position: 30 } })
-  await f.db.$executeRaw`UPDATE album_entries SET month_cover_source_id=${legacyCover.id}::uuid WHERE id=${legacyEntry.id}::uuid AND album_id=${album.id}::uuid AND family_id=${family.id}::uuid`
+  const legacyCover = await f.db.albumEntrySource.findFirstOrThrow({ where: { entryId: legacyEntry.id, position: hasCover ? 30 : 0 } })
+  if (hasCover) await f.db.$executeRaw`UPDATE album_entries SET month_cover_source_id=${legacyCover.id}::uuid WHERE id=${legacyEntry.id}::uuid AND album_id=${album.id}::uuid AND family_id=${family.id}::uuid`
   const legacyDetail = await f.request(`/api/v1/families/${family.id}/albums/${album.id}/entries/${legacyEntry.id}`, owner.token)
   expect(legacyDetail.body.entry.sources).toHaveLength(50)
   expect(legacyDetail.body.entry.sources[0].id).toBe(legacyCover.id)
