@@ -168,7 +168,7 @@ export function MonthEntryDetail({ api, albumId, entry, accountId, membershipEpo
         <p>{[date, photoCountLabel(photoCount), otherCount ? `Другие материалы: ${otherCount}` : ''].filter(Boolean).join(' · ')}</p>
         {entry.capabilities.edit ? <button className="month-entry-add" disabled={busy} onClick={onAdd} type="button"><WebpIcon decorative name="plus" size={16} />Добавить фотографии</button> : null}
       </div>
-      {photoCount ? <MonthPhotoCollage accountId={accountId} cover={cover} onChangeCover={entry.capabilities.edit ? onCover : undefined} onOpen={openPhoto} pages={photoPages} scopeKey={scopeKey} transport={transport} />
+      {photoCount ? <MonthPhotoCollage accountId={accountId} cover={cover} onOpen={openPhoto} pages={photoPages} scopeKey={scopeKey} transport={transport} />
         : <div className="month-photo-empty"><SourcePreview accountId={accountId} scopeKey={scopeKey} transport={transport} /><p>Фотографий пока нет</p></div>}
       <div ref={sentinel} />
       {photos.loading ? <p className="albums-muted" role="status">Загружаем фотографии…</p> : null}

@@ -168,14 +168,11 @@ body:has(.albums-composer-host)>[data-slot='drawer-overlay']{z-index:70}body:has
 .month-collage .albums-preview{display:flex}
 .month-collage .albums-preview>img{object-fit:cover}
 .month-collage .month-collage-tile:focus-visible{outline-offset:-3px;z-index:1}
-.month-collage-cover-label{
+.month-collage-cover-icon{
   position:absolute;inset-inline-start:8px;inset-block-end:8px;
-  display:flex;align-items:center;flex-wrap:wrap;max-width:calc(100% - 16px);gap:0 6px;
-  padding-inline-start:8px;border-radius:8px;background:var(--albums-surface);color:var(--albums-ink);
-  font-size:.68rem;line-height:1.25
+  display:grid;place-items:center;width:24px;height:24px;border-radius:50%;
+  background:rgb(0 0 0 / .64);color:white;pointer-events:none
 }
-.month-collage-cover-label>span:last-child{padding:7px 8px 7px 0}
-.month-collage-cover-label>button{min-width:44px;padding-inline:8px;color:var(--albums-accent);font-weight:650}
 .month-photo-empty{display:grid;place-items:center;gap:6px;min-height:112px;background:var(--albums-surface);color:var(--albums-muted);padding:12px}
 .month-photo-empty>.albums-preview{background:none;width:34px;height:34px}
 .month-photo-empty>p{margin:0}
