@@ -722,8 +722,9 @@ not replace final source-bound FULL verification and independent review.
 The `s3-album-month-photos` profile is a separate, exact source profile for the
 month-photo release. Its bridge source SHA is duplicated as a non-overridable
 constant in `ci-release.sh` and `redeploy.sh`; backend and webapp immutable
-image IDs, complete runtime fingerprint, and exact product executable
-fingerprint are non-overridable constants in `redeploy.sh`. Those constants
+image IDs, complete runtime fingerprint, exact product executable fingerprint,
+and the distinct exact `ci-release.sh` blob pin are non-overridable constants in
+`redeploy.sh`. Those constants
 intentionally remain empty until the accepted bridge source and its real
 production images have been measured. Release preparation fails closed while
 any verifier pin is empty; no environment setting can substitute a value.

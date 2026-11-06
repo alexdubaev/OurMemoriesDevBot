@@ -28,6 +28,7 @@ MONTH_PHOTO_RECOVERY_BACKEND_IMAGE_ID=
 MONTH_PHOTO_RECOVERY_WEBAPP_IMAGE_ID=
 MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT=
 MONTH_PHOTO_EXECUTABLE_FINGERPRINT=
+MONTH_PHOTO_RELEASE_INSTALLER_BLOB=
 MAX_VIDEO_COMPATIBILITY_FINGERPRINT=ff5758a7a3adb23b028a96e56c6deda68e83bd2f7cad6b2e54c0bd8b5cfa5ca4
 MAX_INVITE_ENTRY_COMPATIBILITY_FINGERPRINT=cda103e46f3e415d92ddcf1b7dcbe44269ccac991bc6d52534a05e8e242d1179
 MAX_VIDEO_PIN_INSTALLER_BLOB=d34a87ec84df49987dc01339481750320f10f203
@@ -929,7 +930,8 @@ rollback_source_compatibility_profile() {
 			control) rollback_control_host_inputs_match "$revision" || continue ;;
 			max-video) rollback_max_video_host_inputs_match "$revision" || continue ;;
 			max-video-retirement) rollback_max_video_retirement_host_inputs_match "$revision" || continue ;;
-			s3|s3-album-social|s3-album-month-photos) rollback_s3_host_inputs_match "$revision" || continue ;;
+			s3|s3-album-social) rollback_s3_host_inputs_match "$revision" || continue ;;
+			s3-album-month-photos) rollback_s3_host_inputs_match "$revision" "$MONTH_PHOTO_RELEASE_INSTALLER_BLOB" || continue ;;
 		esac
 			printf '%s\n' "$profile"
 			return 0
@@ -956,7 +958,8 @@ rollback_control_host_inputs_match() {
 }
 
 rollback_max_video_host_inputs_match() {
-	local revision=$1 path expected
+	local revision=$1 path expected expected_installer_blob= installer_override=false
+	if [ "$#" -ge 2 ]; then expected_installer_blob=$2; installer_override=true; fi
 	local -a pins=(
 		"deploy/selectel/control/sampler.py:$CONTROL_PIN_SAMPLER_BLOB"
 		"deploy/selectel/control/memoly-control-sampler.service:$CONTROL_PIN_SERVICE_BLOB"
@@ -972,8 +975,13 @@ rollback_max_video_host_inputs_match() {
 	local installer_blob
 	installer_blob=$(git -c "safe.directory=$APP_ROOT" -C "$APP_ROOT" rev-parse \
 		"$revision:deploy/selectel/ci-release.sh" 2>/dev/null || true)
-	[ "$installer_blob" = "$MAX_VIDEO_PIN_INSTALLER_BLOB" ] ||
-		[ "$installer_blob" = "$MAX_VIDEO_PIN_INSTALLER_BLOB_CURRENT" ] || return 1
+	if [ "$installer_override" = true ]; then
+		[[ "$expected_installer_blob" =~ ^[0-9a-f]{40}$ ]] || return 1
+		[ "$installer_blob" = "$expected_installer_blob" ] || return 1
+	else
+		[ "$installer_blob" = "$MAX_VIDEO_PIN_INSTALLER_BLOB" ] ||
+			[ "$installer_blob" = "$MAX_VIDEO_PIN_INSTALLER_BLOB_CURRENT" ] || return 1
+	fi
 }
 
 rollback_max_video_retirement_host_inputs_match() {
@@ -983,7 +991,13 @@ rollback_max_video_retirement_host_inputs_match() {
 }
 
 rollback_s3_host_inputs_match() {
-	rollback_max_video_host_inputs_match "$1" || return 1
+	local revision=$1 expected_installer_blob
+	if [ "$#" -ge 2 ]; then
+		expected_installer_blob=$2
+		rollback_max_video_host_inputs_match "$revision" "$expected_installer_blob" || return 1
+	else
+		rollback_max_video_host_inputs_match "$revision" || return 1
+	fi
 	compose run --rm --no-deps backend bun -e 'const { loadEnv } = await import("./src/env.ts"); const env = loadEnv(process.env); if (env.PRIVATE_STORAGE_DRIVER !== "s3") process.exit(1)' >/dev/null 2>&1
 }
 
@@ -1822,7 +1836,7 @@ verify_application_rollback() {
 		elif [ "$profile" = s3-album-social ]; then
 			rollback_s3_host_inputs_match "$MEMOLY_PRODUCT_SHA" || die 'S3 album social recovery requires the exact S3-backed host inputs'
 		elif [ "$profile" = s3-album-month-photos ]; then
-			rollback_s3_host_inputs_match "$MEMOLY_PRODUCT_SHA" || die 'S3 month-photo recovery requires the exact S3-backed host inputs'
+			rollback_s3_host_inputs_match "$MEMOLY_PRODUCT_SHA" "$MONTH_PHOTO_RELEASE_INSTALLER_BLOB" || die 'S3 month-photo recovery requires the exact S3-backed host inputs'
 		elif [ "$profile" = s3 ]; then
 			[ "$migration_phase" = complete ] || die 'S3 recovery requires the exact completed migration catalog'
 			rollback_s3_host_inputs_match "$MEMOLY_PRODUCT_SHA" || die 'S3 recovery requires the exact S3-backed host inputs'
