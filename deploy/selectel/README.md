@@ -755,6 +755,20 @@ The migration checksum pair is fixed to LF
 `9d7e49ece81feb98cffd937c8b98475e28ca07dcd58b73e7aa2775711f86c87d` and CRLF
 `64dfcc65f5c88ef1268b22e339e7ef934c077012da29df3fe37e6fdc08bd7340`.
 
+The all-album photo collection extension retains this same frozen recovery pair.
+Its separately measured executable fingerprint accepts the exact 67-migration
+catalog, adding only `20261107100000_all_album_photo_collections` after migration
+66. Pre-SQL readiness accepts the completed 65/66/67 prefix appropriate to that
+candidate; complete readiness requires the whole candidate catalog. The new
+function body is checked explicitly as well as its enabled trigger. Migration 67
+has LF checksum `d0213506ff9bd58684d0f1a5703c4a2b563e3eceaeedb525150da896ac046e5d`
+and CRLF checksum `b39ace95a6500768fe9f7fabea5f9f7d7174bce6c7e25d216e520816c76786e2`.
+An isolated PostgreSQL probe using the actual frozen backend image verified
+2,000-source workshop, event and free entries: legacy replacement was rejected,
+all source IDs survived, and metadata remained writable. Recovery can display
+bounded collections; editing collections using the new APIs needs the forward
+release. Existing backup, access, storage and host safeguards remain mandatory.
+
 The guarded rollback supports these exact measured backend + webapp target pairs and source profiles:
 
 - `e383d79269a3595f4c6cabedf167335aea042cf3`, with its exact production image
