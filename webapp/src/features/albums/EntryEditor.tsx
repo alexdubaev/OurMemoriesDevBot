@@ -141,7 +141,18 @@ export function EntryEditor(props: Props) {
       } else {
         const input = operation.inputs[0]
         if (!operation.metadataSaved) {
-          const result = await api.updateEntry(album.id, operation.target!.id, { expectedVersion: operation.version, title: input.title, caption: input.caption, ...(!month ? { childQuote: input.childQuote, category: input.category } : {}), date: input.date }, month)
+          const result = await api.updateEntry(album.id, operation.target!.id, { expectedVersion: operation.version, title: input.title, caption: input.caption, ...(!month ? { childQuote: input.childQuote, category: input.category } : {}), date: input.date }, month).catch(async (reason: unknown) => {
+            const ambiguous = reason instanceof TypeError || reason instanceof ApiRequestError && reason.status >= 500 && reason.status < 600
+            if (!ambiguous) throw reason
+            let fresh: Awaited<ReturnType<AlbumsApi['entry']>>
+            try { fresh = await api.entry(album.id, operation.target!.id, month) } catch { throw reason }
+            const current = fresh.entry
+            // A lost acknowledgement is confirmed only by the same scoped resource
+            // already containing every field owned by this PATCH. Later writes still
+            // use the returned version; conflicting text and revoked access stay closed.
+            if (current.id !== operation.target!.id || !current.capabilities.edit || current.title !== input.title || current.caption !== input.caption || current.date.precision !== input.date.precision || current.date.value !== input.date.value || (!month && (current.childQuote !== input.childQuote || current.category !== input.category))) throw reason
+            return fresh
+          })
           operation.target = result.entry; operation.version = result.entry.aggregateVersion; operation.metadataSaved = true
           savedTarget.current = result.entry; savedVersion.current = operation.version
           if (month) monthEntry = result.entry
