@@ -1,5 +1,5 @@
 /* eslint-disable typographyPolicy/use-typography-component -- semantic album detail follows its scoped stylesheet. */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AlbumEntryDto, MemoryDto } from '@web-app-demo/contracts'
 import type { ApiRequestError, AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/telegram'
@@ -23,16 +23,7 @@ export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, acco
   const loadSourcesRef = useRef(loadSources)
   useEffect(() => () => { controller.current?.abort(); sourcesController.current?.abort() }, [])
   useEffect(() => { loadSourcesRef.current = loadSources }, [loadSources])
-  useEffect(() => {
-    if (entry.capabilities.edit) { setSourcePages([{ items: entry.sources, nextCursor: null }]); setSourcePageIndex(0); return }
-    sourcesController.current?.abort()
-    const request = new AbortController()
-    sourcesController.current = request
-    setSourcePageLoading(true); setSourcePageError(null)
-    void loadSourcesRef.current(entry.id, undefined, request.signal).then((page) => { if (!request.signal.aborted) { setSourcePages([page]); setSourcePageIndex(0) } }).catch(() => { if (!request.signal.aborted) setSourcePageError('Не удалось загрузить материалы. Повторите попытку.') }).finally(() => { if (!request.signal.aborted) setSourcePageLoading(false) })
-    return () => request.abort()
-  }, [entry.id, entry.sourceCount, entry.capabilities.edit])
-  const visibleSources = sourcePages[sourcePageIndex]?.items ?? entry.sources
+  const visibleSources = entry.capabilities.edit ? entry.sources : sourcePages[sourcePageIndex]?.items ?? entry.sources
   async function changeSourcePage(direction: -1 | 1) {
     if (direction < 0) { setSourcePageIndex((index) => Math.max(0, index - 1)); return }
     const next = sourcePages[sourcePageIndex]?.nextCursor
@@ -48,14 +39,19 @@ export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, acco
     } catch { if (!request.signal.aborted) setSourcePageError('Не удалось загрузить материалы. Повторите попытку.') }
     finally { if (!request.signal.aborted) setSourcePageLoading(false) }
   }
-  async function retryFirstSourcePage() {
+  const retryFirstSourcePage = useCallback(async () => {
     sourcesController.current?.abort()
     const request = new AbortController(); sourcesController.current = request
     setSourcePageLoading(true); setSourcePageError(null)
     try { const page = await loadSourcesRef.current(entry.id, undefined, request.signal); if (!request.signal.aborted) { setSourcePages([page]); setSourcePageIndex(0) } }
     catch { if (!request.signal.aborted) setSourcePageError('Не удалось загрузить материалы. Повторите попытку.') }
     finally { if (!request.signal.aborted) setSourcePageLoading(false) }
-  }
+  }, [entry.id])
+  useEffect(() => {
+    if (entry.capabilities.edit) return
+    void retryFirstSourcePage()
+    return () => sourcesController.current?.abort()
+  }, [entry.capabilities.edit, entry.version, entry.sourceCount, retryFirstSourcePage])
   async function open(source: AlbumSource, element: HTMLElement) {
     if (!source.available) return
     controller.current?.abort(); const request = new AbortController(); controller.current = request
