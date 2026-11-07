@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { deflateSync } from 'node:zlib'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { createPrisma } from '../../backend/src/db'
+import { allocatePublicationOrdinal, lockPublicationFamily } from '../../backend/src/modules/memories/infrastructure/publication-boundary'
 
 test('recovery bridge pages a two-thousand-source story without mounting its tail', async ({ page }) => {
   const databaseUrl = process.env.TEST_DATABASE_URL
@@ -30,7 +31,13 @@ test('recovery bridge pages a two-thousand-source story without mounting its tai
     const child = await db.child.create({ data: { familyId, displayName: 'Synthetic recovery child' } })
     const entry = await db.albumEntry.create({ data: { familyId, albumId: album.id, kind: 'work', title: 'Большая коллекция для восстановления', orderKey: 1, nextPhotoPosition: 2000 } })
     const ids = Array.from({ length: 2000 }, () => randomUUID())
-    await db.memory.createMany({ data: ids.map((id, index) => ({ id, familyId, childId: child.id, authorId: userId, kind: 'note', body: `Synthetic recovery note ${index}`, occurredAt: new Date('2026-01-10T12:00:00Z'), firstPublishedAt: new Date() })) })
+    await db.$transaction(async (tx) => {
+      const { trackingActivated } = await lockPublicationFamily(tx, familyId)
+      for (const [index, id] of ids.entries()) {
+        const firstPublishedOrdinal = await allocatePublicationOrdinal(tx, familyId, trackingActivated)
+        await tx.memory.create({ data: { id, familyId, childId: child.id, authorId: userId, kind: 'note', body: `Synthetic recovery note ${index}`, occurredAt: new Date('2026-01-10T12:00:00Z'), firstPublishedAt: new Date(), firstPublishedOrdinal } })
+      }
+    }, { timeout: 60_000 })
     await db.albumEntrySource.createMany({ data: ids.map((id, position) => ({ familyId, albumId: album.id, entryId: entry.id, memoryId: id, sourceKind: 'memory', sourceId: id, kind: 'note', position })) })
     await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
     await page.getByRole('button', { name: /Страховочная большая подборка/ }).click()
