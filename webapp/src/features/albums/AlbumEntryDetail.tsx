@@ -1,5 +1,5 @@
 /* eslint-disable typographyPolicy/use-typography-component -- semantic album detail follows its scoped stylesheet. */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AlbumEntryDto, MemoryDto } from '@web-app-demo/contracts'
 import type { ApiRequestError, AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/telegram'
@@ -9,26 +9,71 @@ import { SourcePreview } from './SourcePreview'
 import { AlbumEntrySocial } from './AlbumEntrySocial'
 import { filled } from './model'
 
-export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, accountId, membershipEpoch, scopeKey, transport, familyId, timezone, childName, hostBridge, active, onBack, onEdit, onRemove, onUpload, busy }: { albumId: string; onDiscussionInvalidated: (error: ApiRequestError) => void; entry: AlbumEntryDto; accountId: string; membershipEpoch: number; scopeKey: string; transport: AuthenticatedTransport; familyId: string; timezone: string; childName: string; hostBridge: HostBridge; active: boolean; onBack: () => void; onEdit: () => void; onRemove: () => void; onUpload?: () => void; busy: boolean }) {
+export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, accountId, membershipEpoch, scopeKey, transport, familyId, timezone, childName, hostBridge, active, onBack, onEdit, onRemove, onUpload, busy, loadSources }: { albumId: string; onDiscussionInvalidated: (error: ApiRequestError) => void; entry: AlbumEntryDto; accountId: string; membershipEpoch: number; scopeKey: string; transport: AuthenticatedTransport; familyId: string; timezone: string; childName: string; hostBridge: HostBridge; active: boolean; onBack: () => void; onEdit: () => void; onRemove: () => void; onUpload?: () => void; busy: boolean; loadSources: (entryId: string, cursor: string | undefined, signal: AbortSignal) => Promise<{ items: AlbumSource[]; nextCursor: string | null }> }) {
   const [viewer, setViewer] = useState<{ memory: MemoryDto; index: number; sourceMemories: Record<string, MemoryDto>; sourcePresentation: Record<string, { authorLabel: string; dateLabel: string }> } | null>(null)
+  const [sourcePages, setSourcePages] = useState<Array<{ items: AlbumSource[]; nextCursor: string | null }>>([{ items: entry.sources, nextCursor: null }])
+  const [sourcePageIndex, setSourcePageIndex] = useState(0)
+  const [sourcePageLoading, setSourcePageLoading] = useState(!entry.capabilities.edit)
+  const [sourcePageError, setSourcePageError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const controller = useRef<AbortController | null>(null)
+  const sourcesController = useRef<AbortController | null>(null)
   const trigger = useRef<HTMLElement | null>(null)
-  useEffect(() => () => controller.current?.abort(), [])
+  const loadSourcesRef = useRef(loadSources)
+  useEffect(() => () => { controller.current?.abort(); sourcesController.current?.abort() }, [])
+  useEffect(() => { loadSourcesRef.current = loadSources }, [loadSources])
+  const visibleSources = entry.capabilities.edit ? entry.sources : sourcePages[sourcePageIndex]?.items ?? entry.sources
+  async function changeSourcePage(direction: -1 | 1) {
+    if (direction < 0) { setSourcePageIndex((index) => Math.max(0, index - 1)); return }
+    const next = sourcePages[sourcePageIndex]?.nextCursor
+    if (!next || sourcePageLoading) return
+    sourcesController.current?.abort()
+    const request = new AbortController()
+    sourcesController.current = request
+    setSourcePageLoading(true); setSourcePageError(null)
+    try {
+      const page = await loadSourcesRef.current(entry.id, next, request.signal)
+      if (request.signal.aborted) return
+      setSourcePages((pages) => [...pages.slice(0, sourcePageIndex + 1), page]); setSourcePageIndex((index) => index + 1)
+    } catch { if (!request.signal.aborted) setSourcePageError('Не удалось загрузить материалы. Повторите попытку.') }
+    finally { if (!request.signal.aborted) setSourcePageLoading(false) }
+  }
+  const retryFirstSourcePage = useCallback(async () => {
+    sourcesController.current?.abort()
+    const request = new AbortController(); sourcesController.current = request
+    setSourcePageLoading(true); setSourcePageError(null)
+    try { const page = await loadSourcesRef.current(entry.id, undefined, request.signal); if (!request.signal.aborted) { setSourcePages([page]); setSourcePageIndex(0) } }
+    catch { if (!request.signal.aborted) setSourcePageError('Не удалось загрузить материалы. Повторите попытку.') }
+    finally { if (!request.signal.aborted) setSourcePageLoading(false) }
+  }, [entry.id])
+  useEffect(() => {
+    if (entry.capabilities.edit) return
+    const request = new AbortController()
+    sourcesController.current = request
+    void loadSourcesRef.current(entry.id, undefined, request.signal).then((page) => {
+      if (!request.signal.aborted) { setSourcePages([page]); setSourcePageIndex(0); setSourcePageError(null) }
+    }).catch(() => {
+      if (!request.signal.aborted) setSourcePageError('Не удалось загрузить материалы. Повторите попытку.')
+    }).finally(() => {
+      if (!request.signal.aborted) setSourcePageLoading(false)
+      if (sourcesController.current === request) sourcesController.current = null
+    })
+    return () => request.abort()
+  }, [entry.id, entry.capabilities.edit, entry.version, entry.sourceCount])
   async function open(source: AlbumSource, element: HTMLElement) {
     if (!source.available) return
     controller.current?.abort(); const request = new AbortController(); controller.current = request
     trigger.current = element; setLoading(true); setError(null)
     try {
-      const memoryIds = [...new Set(entry.sources.filter((item) => item.available && item.memoryId).map((item) => item.memoryId!))]
+      const memoryIds = [...new Set(visibleSources.filter((item) => item.available && item.memoryId).map((item) => item.memoryId!))]
       const fresh = await Promise.allSettled(memoryIds.map((id) => loadMemory(transport, familyId, id, request.signal)))
       if (request.signal.aborted) return
       const memories = new Map(fresh.flatMap((result) => result.status === 'fulfilled' ? [[result.value.id, result.value] as const] : []))
       const memory = source.memoryId ? memories.get(source.memoryId) : undefined
       if (source.memoryId && !memory) { setError('Оригинал больше недоступен. Обновите альбом.'); return }
       const ownerByAttachment = new Map<string, MemoryDto>()
-      const attachments = entry.sources.flatMap((selected) => {
+      const attachments = visibleSources.flatMap((selected) => {
         if (!selected.available) return []
         if (selected.memoryId === null) {
           const attachment = selected.attachment
@@ -56,7 +101,7 @@ export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, acco
         likes: { count: 0, likedByMe: false }, capabilities: { edit: false, delete: false, like: false },
       }
       const sourceMemories: Record<string, MemoryDto> = {}
-      const sourcePresentation = Object.fromEntries(entry.sources.filter((item) => item.available && item.memoryId === null).map((item) => [item.sourceId, { authorLabel: 'Фото в альбоме', dateLabel: entry.date.precision === 'unknown' ? 'Без даты' : dateLabel(entry.date) }]))
+      const sourcePresentation = Object.fromEntries(visibleSources.filter((item) => item.available && item.memoryId === null).map((item) => [item.sourceId, { authorLabel: 'Фото в альбоме', dateLabel: entry.date.precision === 'unknown' ? 'Без даты' : dateLabel(entry.date) }]))
       for (const attachment of attachments) {
         const owner = ownerByAttachment.get(attachment.id)
         sourceMemories[attachment.id] = owner ? { ...owner, attachments } : displayMemory
@@ -69,7 +114,9 @@ export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, acco
     <section className="albums-entry-detail"><header className="albums-toolbar"><button disabled={busy} onClick={onBack} type="button">‹ Назад</button><h1>{entry.title || (entry.monthNumber ? monthAgeLabel(entry.monthNumber) : 'Маленькое творение')}</h1></header>
       <p className="albums-kicker">{dateLabel(entry.date)}{entry.category ? ` · ${categories[entry.category]}` : ''}</p>
       {entry.caption ? <p className="albums-story">{entry.caption}</p> : null}{entry.childQuote ? <blockquote>«{entry.childQuote}»</blockquote> : null}
-      <div className="albums-detail-sources">{entry.sources.map((source, index) => <article key={sourceKey(source)}>{source.kind === 'note' && source.available ? <p className="albums-note">{source.body || 'Заметка без текста'}</p> : <button aria-label={`Открыть ${source.kind === 'voice' ? 'голосовое' : 'материал'} ${index + 1}`} disabled={!source.available || loading} onClick={(event) => void open(source, event.currentTarget)} type="button"><SourcePreview accountId={accountId} active={active} scopeKey={scopeKey} source={source} transport={transport} /></button>}{!source.available ? <p>Оригинал недоступен</p> : null}</article>)}</div>
+      <div className="albums-detail-sources">{visibleSources.map((source, index) => <article key={sourceKey(source)}>{source.kind === 'note' && source.available ? <p className="albums-note">{source.body || 'Заметка без текста'}</p> : <button aria-label={`Открыть ${source.kind === 'voice' ? 'голосовое' : 'материал'} ${index + 1}`} disabled={!source.available || loading} onClick={(event) => void open(source, event.currentTarget)} type="button"><SourcePreview accountId={accountId} active={active} scopeKey={scopeKey} source={source} transport={transport} /></button>}{!source.available ? <p>Оригинал недоступен</p> : null}</article>)}</div>
+      {sourcePageIndex > 0 || sourcePages[sourcePageIndex]?.nextCursor ? <nav aria-label="Страницы материалов" className="albums-form-actions"><button disabled={sourcePageIndex === 0 || sourcePageLoading} onClick={() => void changeSourcePage(-1)} type="button">Предыдущие материалы</button><span>Страница {sourcePageIndex + 1} · доступно {entry.sourceCount}</span><button disabled={!sourcePages[sourcePageIndex]?.nextCursor || sourcePageLoading} onClick={() => void changeSourcePage(1)} type="button">Следующие материалы</button></nav> : null}
+      {sourcePageLoading ? <p role="status">Загружаем материалы…</p> : null}{sourcePageError ? <p className="albums-error" role="alert">{sourcePageError} {sourcePageIndex === 0 ? <button onClick={() => void retryFirstSourcePage()} type="button">Повторить</button> : null}</p> : null}
       {loading ? <p role="status">Открываем оригинал…</p> : null}{error ? <p className="albums-error" role="alert">{error}</p> : null}
       {entry.kind !== 'month' || filled(entry) ? <AlbumEntrySocial accountId={accountId} albumId={albumId} entryId={entry.id} familyId={familyId} hostBridge={hostBridge} key={`${scopeKey}:${albumId}:${entry.id}`} membershipEpoch={membershipEpoch} onInvalidated={onDiscussionInvalidated} timezone={timezone} transport={transport} /> : null}
       {entry.capabilities.edit ? <div className="albums-form-actions"><button className="albums-primary" disabled={busy} onClick={onEdit} type="button">Изменить</button>{onUpload ? <button className="albums-secondary" disabled={busy} onClick={onUpload} type="button">Загрузить новое</button> : null}<button className="albums-danger" disabled={busy} onClick={onRemove} type="button">{entry.kind === 'month' ? 'Очистить главу' : 'Убрать из альбома'}</button></div> : null}

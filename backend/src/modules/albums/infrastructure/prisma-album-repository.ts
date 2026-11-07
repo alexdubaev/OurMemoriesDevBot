@@ -180,14 +180,19 @@ export class PrismaAlbumRepository implements AlbumRepository {
         : [{ orderKey: 'asc' }, { id: 'asc' }]
       const rows = await tx.albumEntry.findMany({ where, orderBy, take: input.limit + 1, include: { sources: { orderBy: [{ position: 'asc' }, { id: 'asc' }], take: input.view === 'month-summary' || (album.kind === 'year' && input.view === 'collection-summary') ? 0 : input.view === 'collection-summary' ? 1 : 97 } } })
       const page = rows.slice(0, input.limit)
-      if (!input.view) {
+      if (album.kind === 'year' && !input.view) {
         const oversized = await tx.albumEntrySource.groupBy({
           by: ['entryId'], where: { albumId, familyId: scope.familyId, entryId: { in: page.map(({ id }) => id) } },
           _count: { _all: true }, having: { entryId: { _count: { gt: 96 } } },
         })
         if (oversized.length) throw new AlbumFailure('conflict', 'В этом месяце больше материалов, чем поддерживает старая версия. Обновите приложение, чтобы просматривать фотографии по страницам')
       }
-      const items = await projectEntries(tx, this.sourceCatalog, scope, access.role, album, page, input.view, access.membershipEpoch)
+      const oversizedIds = album.kind !== 'year' && !input.view
+        ? new Set([...(await tx.albumEntrySource.groupBy({ by: ['entryId'], where: { albumId, familyId: scope.familyId, entryId: { in: page.map(({ id }) => id) } }, _count: { _all: true }, having: { entryId: { _count: { gt: 96 } } } })).map(({ entryId }) => entryId), ...page.filter(({ nextPhotoPosition }) => nextPhotoPosition !== null).map(({ id }) => id)])
+        : new Set<string>()
+      const safePage = page.map((entry) => oversizedIds.has(entry.id) ? { ...entry, sources: entry.sources.slice(0, 24) } : entry)
+      const items = await projectEntries(tx, this.sourceCatalog, scope, access.role, album, safePage, input.view, access.membershipEpoch)
+      for (const item of items) if (oversizedIds.has(item.id)) { item.sourceCount = await countAvailableSources(tx, scope, item.id); item.capabilities.edit = false }
       const last = page.at(-1)
       return { items, hasNext: rows.length > input.limit, last: last ? { ...(dated ? { dateValue: last.dateValue } : { orderKey: last.orderKey }), id: last.id } : null, albumVersion: album.version }
     })
@@ -244,8 +249,12 @@ export class PrismaAlbumRepository implements AlbumRepository {
       if (!album) throw albumMissing()
       const row = await tx.albumEntry.findFirst({ where: { id: entryId, albumId, familyId: scope.familyId, deletedAt: null }, include: { sources: { orderBy: [{ position: 'asc' }, { id: 'asc' }], take: view === 'month-summary' || (album.kind === 'year' && view === 'collection-summary') ? 0 : view === 'collection-summary' ? 1 : 97 } } })
       if (!row) throw albumMissing()
-      if (!view && row.sources.length > 96) throw legacyCollectionPaged()
-      return (await projectEntries(tx, this.sourceCatalog, scope, access.role, album, [row], view, access.membershipEpoch))[0]!
+      if (album.kind === 'year' && !view && row.sources.length > 96) throw legacyCollectionPaged()
+      const oversized = album.kind !== 'year' && !view && (row.nextPhotoPosition !== null || row.sources.length > 96 || await hasLegacyOversizedSources(tx, scope.familyId, albumId, entryId))
+      const safeRow = oversized ? { ...row, sources: row.sources.slice(0, 24) } : row
+      const item = (await projectEntries(tx, this.sourceCatalog, scope, access.role, album, [safeRow], view, access.membershipEpoch))[0]!
+      if (oversized) { item.sourceCount = await countAvailableSources(tx, scope, entryId); item.capabilities.edit = false }
+      return item
     })
   }
 
@@ -318,12 +327,12 @@ export class PrismaAlbumRepository implements AlbumRepository {
       const access = await lockScope(tx, scope, false)
       const album = await tx.album.findFirst({ where: { id: albumId, familyId: scope.familyId, deletedAt: null } })
       if (!album) throw albumMissing()
-      const entry = await tx.albumEntry.findFirst({ where: { id: entryId, albumId, familyId: scope.familyId, deletedAt: null }, select: { id: true, albumId: true, version: true, monthCoverSourceId: true } })
+      const entry = await tx.albumEntry.findFirst({ where: { id: entryId, albumId, familyId: scope.familyId, deletedAt: null, ...(album.kind === 'year' ? { kind: 'month' } : {}) }, select: { id: true, albumId: true, version: true, monthCoverSourceId: true } })
       if (!entry) throw albumMissing()
-      const cover = query.kind === 'photo' ? await projectEffectiveMonthCover(tx, this.sourceCatalog, scope, entry) : null
+      const cover = album.kind === 'year' && query.kind === 'photo' ? await projectEffectiveMonthCover(tx, this.sourceCatalog, scope, entry) : null
       const where: Prisma.AlbumEntrySourceWhereInput = {
         familyId: scope.familyId, albumId, entryId,
-        ...(query.kind === 'photo' ? { kind: 'photo', ...(album.kind === 'year' && cover?.source ? { id: { not: cover.source.id } } : {}) }
+        ...(query.kind === 'all' ? {} : query.kind === 'photo' ? { kind: 'photo', ...(album.kind === 'year' && cover?.source ? { id: { not: cover.source.id } } : {}) }
           : query.kind === 'other' ? { kind: { in: ['video','voice','note'] } }
             : query.kind === 'cover-media' ? { kind: { in: ['photo','video'] } } : {}),
         ...(before ? { OR: [{ position: { gt: before.position } }, { position: before.position, id: { gt: before.id } }] } : {}),
@@ -336,8 +345,8 @@ export class PrismaAlbumRepository implements AlbumRepository {
       const items = projected.filter(({ available }) => available).map(sourceDto)
       const last = page.at(-1)
       return { items, hasNext: rows.length > query.limit, last: last ? { position: last.position, id: last.id } : null,
-        coverSourceId: query.kind === 'photo' ? cover?.selectedId ?? null : null,
-        coverId: query.kind === 'photo' ? cover?.source?.id ?? null : null, entryVersion: entry.version }
+        coverSourceId: album.kind === 'year' && query.kind === 'photo' ? cover?.selectedId ?? null : null,
+        coverId: album.kind === 'year' && query.kind === 'photo' ? cover?.source?.id ?? null : null, entryVersion: entry.version }
     })
   }
 
@@ -938,3 +947,4 @@ async function countAvailableSources(tx: PrismaTransactionClient, scope: FamilyS
   `)
   return Number(rows[0]?.count ?? 0n)
 }
+

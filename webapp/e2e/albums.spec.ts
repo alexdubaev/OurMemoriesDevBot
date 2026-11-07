@@ -3,6 +3,65 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { deflateSync } from 'node:zlib'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { createPrisma } from '../../backend/src/db'
+import { allocatePublicationOrdinal, lockPublicationFamily } from '../../backend/src/modules/memories/infrastructure/publication-boundary'
+
+test('large existing stories page their sources and retain the unseen tail after editing', async ({ page }) => {
+  const databaseUrl = process.env.TEST_DATABASE_URL
+  if (!databaseUrl || process.env.DATABASE_URL !== databaseUrl || new URL(databaseUrl).hostname !== '127.0.0.1' || !new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Explicit isolated loopback test database required')
+  const db = createPrisma(databaseUrl)
+  let familyId = ''
+  let userId = ''
+  try {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.addInitScript((data) => { Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1', platform: 'web', ready() {} } }) }, signedInitData())
+    const exchange = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.request().method() === 'POST')
+    await page.goto('/')
+    const { accessToken } = await (await exchange).json() as { accessToken: string }
+    const headers = { Authorization: `Bearer ${accessToken}` }
+    await page.getByRole('button', { name: 'Продолжить', exact: true }).click()
+    await page.getByRole('button', { name: /Создать свою семью/ }).click()
+    await expect(page.getByTestId('bottom-navigation')).toBeVisible()
+    const home = await (await page.request.get('/api/v1/me/families', { headers })).json() as { ownFamilyId: string }
+    familyId = home.ownFamilyId
+    userId = (await db.family.findUniqueOrThrow({ where: { id: familyId } })).ownerUserId
+    const created = await page.request.post(`/api/v1/families/${familyId}/albums`, { headers: { ...headers, 'Idempotency-Key': randomUUID() }, data: { kind: 'free', title: 'Страховочная большая подборка', childId: null } })
+    expect(created.status()).toBe(201)
+    const { album } = await created.json() as { album: { id: string } }
+    const child = await db.child.create({ data: { familyId, displayName: 'Synthetic recovery child' } })
+    const entry = await db.albumEntry.create({ data: { familyId, albumId: album.id, kind: 'work', title: 'Большая коллекция для восстановления', orderKey: 1, nextPhotoPosition: 2000 } })
+    const ids = Array.from({ length: 2000 }, () => randomUUID())
+    await db.$transaction(async (tx) => {
+      const { trackingActivated } = await lockPublicationFamily(tx, familyId)
+      for (const [index, id] of ids.entries()) {
+        const firstPublishedOrdinal = await allocatePublicationOrdinal(tx, familyId, trackingActivated)
+        await tx.memory.create({ data: { id, familyId, childId: child.id, authorId: userId, kind: 'note', body: `Synthetic recovery note ${index}`, occurredAt: new Date('2026-01-10T12:00:00Z'), firstPublishedAt: new Date(), firstPublishedOrdinal } })
+      }
+    }, { timeout: 60_000 })
+    await db.albumEntrySource.createMany({ data: ids.map((id, position) => ({ familyId, albumId: album.id, entryId: entry.id, memoryId: id, sourceKind: 'memory', sourceId: id, kind: 'note', position })) })
+    await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+    await page.getByRole('button', { name: /Страховочная большая подборка/ }).click()
+    await page.getByRole('button', { name: /Большая коллекция для восстановления/ }).click()
+    const rows = page.locator('.albums-detail-sources article')
+    await expect(rows).toHaveCount(24)
+    await expect(rows.first()).toContainText('Synthetic recovery note 0')
+    await expect(page.getByRole('button', { name: 'Изменить', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Следующие материалы', exact: true }).click()
+    await expect(rows).toHaveCount(24)
+    await expect(rows.first()).toContainText('Synthetic recovery note 24')
+    await page.getByRole('button', { name: 'Предыдущие материалы', exact: true }).click()
+    await expect(rows.first()).toContainText('Synthetic recovery note 0')
+    await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+    await page.getByLabel('История').fill('Подпись большой истории')
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+    await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+    expect(await db.albumEntrySource.count({ where: { entryId: entry.id } })).toBe(2000)
+  } finally {
+    if (familyId) await db.family.deleteMany({ where: { id: familyId } })
+    if (userId) await db.user.deleteMany({ where: { id: userId } })
+    await db.$disconnect()
+  }
+})
 
 test('album deletion confirmations work without native dialogs', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
