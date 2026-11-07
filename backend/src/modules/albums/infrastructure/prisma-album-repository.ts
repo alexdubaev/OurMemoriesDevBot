@@ -476,7 +476,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
         if (album.kind === 'year' && entry.kind !== 'month') throw albumMissing()
         const resolved = await sourceCatalog.resolve(tx, scope, input.add as AlbumSourceRef[], 'update')
         if (album.kind === 'workshop' && resolved.some((source) => source.kind !== 'photo')) throw new AlbumFailure('invalid_input', 'В мастерской можно размещать только фото работ')
-        if (album.kind === 'year' && resolved.some((source) => source.kind !== 'photo' && source.kind !== 'video')) throw new AlbumFailure('invalid_input', 'В первом годе доступны только фото и видео')
+        if (album.kind === 'year' && resolved.some((source) => source.kind !== 'photo')) throw new AlbumFailure('invalid_input', 'В этом месяце можно добавлять только фотографии')
 
         const matchRefs = [...input.add, ...(input.firstSource ? [input.firstSource] : [])]
         const matchConditions: Prisma.AlbumEntrySourceWhereInput[] = [
