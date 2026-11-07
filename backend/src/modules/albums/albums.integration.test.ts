@@ -876,6 +876,17 @@ describe('album PostgreSQL invariants', () => {
     expect(maxAttached.status).toBe(200)
     const maxProjected = (await maxAttached.json()).entry.sources[0]
     expect(maxProjected).toMatchObject({ sourceKind: 'max_video', sourceId: maxReference.id, available: true, attachment: { id: maxReference.id, width: 1920, height: 1080 } })
+    const yearAlbum = await createAlbum('year')
+    const legacyMonth = await createEntry(yearAlbum.id, { kind: 'month', monthNumber: 1 })
+    const legacyVideo = await http(`/api/v1/families/${familyId}/albums/${yearAlbum.id}/entries/${legacyMonth.id}/sources`, 'PUT', ownerToken,
+      { expectedVersion: yearAlbum.version, sources: [{ memoryId: maxMemory.id, sourceKind: 'max_video', sourceId: maxReference.id }] }, randomUUID())
+    expect(legacyVideo.status).toBe(200)
+    const legacyEntry = (await legacyVideo.json()).entry
+    const refusedVideo = await http(`/api/v1/families/${familyId}/albums/${yearAlbum.id}/entries/${legacyMonth.id}/sources`, 'PATCH', ownerToken,
+      { expectedVersion: legacyEntry.aggregateVersion, add: [{ memoryId: maxMemory.id, sourceKind: 'max_video', sourceId: maxReference.id }], removeIds: [] }, randomUUID())
+    expect(refusedVideo.status).toBe(422)
+    const retainedVideo = await http(`/api/v1/families/${familyId}/albums/${yearAlbum.id}/entries/${legacyMonth.id}/sources?kind=other`, 'GET', ownerToken)
+    expect((await retainedVideo.json()).items).toMatchObject([{ id: legacyEntry.sources[0].id, kind: 'video', available: true }])
     const setCover = await http(`/api/v1/families/${familyId}/albums/${freeId}`, 'PATCH', ownerToken,
       { expectedVersion: 7, coverSourceId: photoSource.id })
     expect(setCover.status).toBe(200)
