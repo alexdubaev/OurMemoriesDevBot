@@ -907,11 +907,18 @@ test('album upload reconciles a lost metadata reply and preserves a different co
   const { entry } = await createdStory.json() as { entry: { id: string } }
   const path = `${root}/entries/${entry.id}?view=collection-summary`
   let mode: 'matching' | 'different' | null = 'matching'
+  let failAcknowledgementRead = false
   let reconciliations = 0
   let uploads = 0
   page.on('request', (request) => { if (request.method() === 'POST' && new URL(request.url()).pathname === `/api/v1/families/${familyId}/uploads`) uploads += 1 })
   await page.route(`**${path}`, async (route) => {
-    if (route.request().method() === 'GET' && mode === null) reconciliations += 1
+    if (route.request().method() === 'GET' && mode === null) {
+      reconciliations += 1
+      if (failAcknowledgementRead) {
+        failAcknowledgementRead = false
+        return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'Synthetic acknowledgement read failure', requestId: randomUUID() } }) })
+      }
+    }
     if (route.request().method() !== 'PATCH' || !mode) return route.continue()
     const activeMode = mode
     const saved = await route.fetch()
@@ -920,7 +927,7 @@ test('album upload reconciles a lost metadata reply and preserves a different co
       const savedEntry = (await saved.json()).entry as { aggregateVersion: number }
       const concurrent = await page.request.patch(path, { headers, data: { expectedVersion: savedEntry.aggregateVersion, caption: 'Другая правка' } })
       expect(concurrent.status()).toBe(200)
-    }
+    } else failAcknowledgementRead = true
     mode = null
     await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'Synthetic lost metadata response', requestId: randomUUID() } }) })
   })
@@ -931,6 +938,8 @@ test('album upload reconciles a lost metadata reply and preserves a different co
   await page.getByLabel('История').fill('Сохранено перед фотографиями')
   await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
   await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(['one', 'two'].map((name) => ({ name: `${name}.png`, mimeType: 'image/png', buffer: solidPng(40, 120, 80) })))
+  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 2 · добавлено: 1 · с ошибкой: 1' })).toBeVisible()
+  await page.getByRole('button', { name: 'Повторить неуспешные', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 2 · добавлено: 2' })).toBeVisible({ timeout: 20_000 })
   expect(reconciliations).toBeGreaterThan(0)
   expect(uploads).toBe(2)

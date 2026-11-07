@@ -31,7 +31,7 @@ export function EntryEditor(props: Props) {
   const [completed, setCompleted] = useState(0)
   const saving = useRef(false)
   type Change = Omit<AlbumSourceChanges, 'expectedVersion'>
-  type Attempt = { inputs: CreateAlbumEntryRequest[]; keys: string[]; next: number; version: number; metadataSaved: boolean; target: AlbumEntryDto | null; changes: Change[]; changeKeys: string[]; changeNext: number; creating: boolean; chosen: AlbumSource[] }
+  type Attempt = { inputs: CreateAlbumEntryRequest[]; keys: string[]; next: number; version: number; metadataSaved: boolean; metadataFailure?: unknown; target: AlbumEntryDto | null; changes: Change[]; changeKeys: string[]; changeNext: number; creating: boolean; chosen: AlbumSource[] }
   const attempt = useRef<Attempt | null>(null)
   const savedTarget = useRef(entry)
   const savedVersion = useRef(album.version)
@@ -141,18 +141,33 @@ export function EntryEditor(props: Props) {
       } else {
         const input = operation.inputs[0]
         if (!operation.metadataSaved) {
-          const result = await api.updateEntry(album.id, operation.target!.id, { expectedVersion: operation.version, title: input.title, caption: input.caption, ...(!month ? { childQuote: input.childQuote, category: input.category } : {}), date: input.date }, month).catch(async (reason: unknown) => {
-            const ambiguous = reason instanceof TypeError || reason instanceof ApiRequestError && reason.status >= 500 && reason.status < 600
-            if (!ambiguous) throw reason
+          const wantedDate = input.date ?? { precision: 'unknown', value: null }
+          async function readAcknowledgement(reason: unknown) {
             let fresh: Awaited<ReturnType<AlbumsApi['entry']>>
             try { fresh = await api.entry(album.id, operation.target!.id, month) } catch { throw reason }
             const current = fresh.entry
             // A lost acknowledgement is confirmed only by the same scoped resource
             // already containing every field owned by this PATCH. Later writes still
             // use the returned version; conflicting text and revoked access stay closed.
-            if (current.id !== operation.target!.id || !current.capabilities.edit || current.title !== input.title || current.caption !== input.caption || current.date.precision !== input.date.precision || current.date.value !== input.date.value || (!month && (current.childQuote !== input.childQuote || current.category !== input.category))) throw reason
-            return fresh
-          })
+            if (current.id === operation.target!.id && current.capabilities.edit && current.title === input.title && current.caption === input.caption && current.date.precision === wantedDate.precision && current.date.value === wantedDate.value && (month || current.childQuote === input.childQuote && current.category === input.category)) return fresh
+            operation.metadataFailure = undefined
+            if (current.id === operation.target!.id && current.capabilities.edit && current.aggregateVersion === operation.version) return null
+            throw reason
+          }
+          // If an acknowledgement read also failed, retry that read before issuing
+          // another unkeyed PATCH with a potentially obsolete version.
+          let result = operation.metadataFailure ? await readAcknowledgement(operation.metadataFailure) : null
+          if (!result) {
+            try { result = await api.updateEntry(album.id, operation.target!.id, { expectedVersion: operation.version, title: input.title, caption: input.caption, ...(!month ? { childQuote: input.childQuote, category: input.category } : {}), date: wantedDate }, month) }
+            catch (reason) {
+              const ambiguous = reason instanceof TypeError || reason instanceof ApiRequestError && reason.status >= 500 && reason.status < 600
+              if (!ambiguous) throw reason
+              operation.metadataFailure = reason
+              result = await readAcknowledgement(reason)
+              if (!result) throw reason
+            }
+          }
+          operation.metadataFailure = undefined
           operation.target = result.entry; operation.version = result.entry.aggregateVersion; operation.metadataSaved = true
           savedTarget.current = result.entry; savedVersion.current = operation.version
           if (month) monthEntry = result.entry
