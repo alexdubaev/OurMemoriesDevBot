@@ -6,7 +6,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { createPrisma } from '../../backend/src/db'
 import { allocatePublicationOrdinal, lockPublicationFamily } from '../../backend/src/modules/memories/infrastructure/publication-boundary'
 
-test('recovery bridge pages a two-thousand-source story without mounting its tail', async ({ page }) => {
+test('large existing stories page their sources and retain the unseen tail after editing', async ({ page }) => {
   const databaseUrl = process.env.TEST_DATABASE_URL
   if (!databaseUrl || process.env.DATABASE_URL !== databaseUrl || new URL(databaseUrl).hostname !== '127.0.0.1' || !new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Explicit isolated loopback test database required')
   const db = createPrisma(databaseUrl)
@@ -45,12 +45,16 @@ test('recovery bridge pages a two-thousand-source story without mounting its tai
     const rows = page.locator('.albums-detail-sources article')
     await expect(rows).toHaveCount(24)
     await expect(rows.first()).toContainText('Synthetic recovery note 0')
-    await expect(page.getByRole('button', { name: 'Изменить', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Изменить', exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Следующие материалы', exact: true }).click()
     await expect(rows).toHaveCount(24)
     await expect(rows.first()).toContainText('Synthetic recovery note 24')
     await page.getByRole('button', { name: 'Предыдущие материалы', exact: true }).click()
     await expect(rows.first()).toContainText('Synthetic recovery note 0')
+    await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+    await page.getByLabel('История').fill('Подпись большой истории')
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+    await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
     expect(await db.albumEntrySource.count({ where: { entryId: entry.id } })).toBe(2000)
   } finally {
     if (familyId) await db.family.deleteMany({ where: { id: familyId } })
@@ -88,8 +92,9 @@ test('album deletion confirmations work without native dialogs', async ({ page }
   for (const names of [['first-a.png', 'first-b.png'], ['second.png']]) {
     await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
     await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
-    await page.locator('#photo-composer-files').setInputFiles(names.map((name) => ({ name, mimeType: 'image/png', buffer: photoBytes })))
-    await page.getByRole('button', { name: `Добавить в альбом (${names.length})`, exact: true }).click()
+    await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(names.map((name) => ({ name, mimeType: 'image/png', buffer: photoBytes })))
+    await expect(page.getByRole('status').filter({ hasText: `Выбрано: ${names.length} · добавлено: ${names.length}` })).toBeVisible()
+    await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
     await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   }
   const catalog = await (await page.request.get(`/api/v1/families/${familyId}/albums`, { headers })).json() as { items: { id: string; version: number }[] }
@@ -197,8 +202,9 @@ test('MAX authenticated album cover choices save and complete the picker', async
   for (const photo of photos) {
     await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
     await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
-    await page.locator('#photo-composer-files').setInputFiles({ name: photo.name, mimeType: 'image/png', buffer: photo.bytes })
-    await page.getByRole('button', { name: 'Добавить в альбом (1)', exact: true }).click()
+    await page.getByLabel('Выбрать фотографии с устройства').setInputFiles({ name: photo.name, mimeType: 'image/png', buffer: photo.bytes })
+    await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 1 · добавлено: 1' })).toBeVisible()
+    await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
     await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   }
 
@@ -222,7 +228,9 @@ test('MAX authenticated album cover choices save and complete the picker', async
   await page.getByRole('button', { name: 'Настройки альбома', exact: true }).click()
   await page.getByRole('button', { name: 'Выбрать обложку', exact: true }).click()
   await expect(page.locator('[data-albums-route="cover"]')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true })).toHaveCount(2)
+  await expect(page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true })).toHaveCount(1)
+  await page.getByRole('button', { name: 'Ещё кадры', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true })).toHaveCount(1)
   await capture('picker-before-selection')
   let failNextCoverPatch = true
   await page.route(`**/api/v1/families/${familyId}/albums/${album.id}`, async (route) => {
@@ -231,14 +239,14 @@ test('MAX authenticated album cover choices save and complete the picker', async
     await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'Synthetic temporary failure', requestId: randomUUID() } }) })
   })
   const failedResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/v1/families/${familyId}/albums/${album.id}`) && response.request().method() === 'PATCH')
-  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true }).nth(1).click()
+  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true }).click()
   const failedResponse = await failedResponsePromise
   const routeAfterFailedPatch = await page.locator('[data-albums-route]').getAttribute('data-albums-route')
   await expect(page.getByRole('alert')).toContainText('Не удалось загрузить альбомы.')
   await expect(page.locator('[data-albums-route="cover"]')).toBeVisible()
   await capture('picker-after-failed-patch')
   const manualResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/v1/families/${familyId}/albums/${album.id}`) && response.request().method() === 'PATCH')
-  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true }).nth(1).click()
+  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true }).click()
   const manualResponse = await manualResponsePromise
   const manualPayload = await manualResponse.json() as { album?: { id: string; version: number; cover: { id: string } | null } }
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
@@ -359,16 +367,17 @@ test('MAX authenticated albums persist year chapters and a text event through re
   })
   await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
   await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Добавить фото в альбом' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Добавить фотографии' })).toBeVisible()
   await expect(page.locator('.memoly-add-page .memoly-add-caption')).toHaveCount(0)
   await expect(page.locator('.memoly-add-page .memoly-add-date')).toHaveCount(0)
   const photoBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
-  await page.locator('#photo-composer-files').setInputFiles({ name: 'album-photo.png', mimeType: 'image/png', buffer: photoBytes })
-  await page.getByRole('button', { name: 'Добавить в альбом (1)', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Повторить только прикрепление', exact: true })).toBeVisible()
+  await page.getByLabel('Выбрать фотографии с устройства').setInputFiles({ name: 'album-photo.png', mimeType: 'image/png', buffer: photoBytes })
+  await expect(page.getByRole('button', { name: 'Повторить неуспешные', exact: true })).toBeVisible()
   expect(uploadReservations).toBe(1)
   expect(albumAttachRequests).toHaveLength(1)
-  await page.getByRole('button', { name: 'Повторить только прикрепление', exact: true }).click()
+  await page.getByRole('button', { name: 'Повторить неуспешные', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 1 · добавлено: 1' })).toBeVisible()
+  await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   expect(memoryPosts).toBe(0)
   expect(uploadReservations).toBe(1)
@@ -389,13 +398,13 @@ test('MAX authenticated albums persist year chapters and a text event through re
   await expect(page.locator('.albums-entry-detail')).toBeVisible()
   if (process.env.MEMOLY_ALBUM_UPLOAD_SCREENSHOT) await page.screenshot({ fullPage: false, path: process.env.MEMOLY_ALBUM_UPLOAD_SCREENSHOT })
   const readsBeforeViewer = memoryReads.length
-  await page.getByRole('button', { name: 'Открыть материал 1', exact: true }).click()
+  await page.getByRole('button', { name: 'Открыть фото 1', exact: true }).click()
   await expect(page.locator('[data-mixed-viewer]')).toBeVisible()
   await expect(page.getByText('Фото в альбоме', { exact: true })).toBeVisible()
   await expect(page.getByText('Без даты', { exact: true })).toBeVisible()
   await expect.poll(() => page.locator('[data-mixed-viewer] img').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
   expect(memoryReads.slice(readsBeforeViewer)).toEqual([])
-  const openMaterial = page.getByRole('button', { name: 'Открыть материал 1', exact: true })
+  const openMaterial = page.getByRole('button', { name: 'Открыть фото 1', exact: true })
   await page.getByRole('button', { name: 'Закрыть просмотр', exact: true }).click()
   await expect(page.locator('[data-mixed-viewer]')).toHaveCount(0)
   await expect(openMaterial).toBeFocused()
@@ -840,31 +849,188 @@ test('MAX first-year mobile baseline: two-child catalog, empty and filled months
   expect(pageErrors).toEqual([])
 })
 
+test('all album kinds accept an eleven-photo device selection and preserve it after editing', async ({ page }, testInfo) => {
+  test.setTimeout(300_000)
+  await page.setViewportSize({ width: 390, height: 844 })
+  const initData = signedInitData()
+  await page.addInitScript((data) => { Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1', platform: 'android', ready() {} } }) }, initData)
+  const exchange = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.request().method() === 'POST')
+  await page.goto('/')
+  const auth = await (await exchange).json() as { accessToken: string }
+  const headers = { Authorization: `Bearer ${auth.accessToken}` }
+  await page.getByRole('button', { name: 'Продолжить', exact: true }).click()
+  await page.getByRole('button', { name: /Создать свою семью/ }).click()
+  await expect(page.getByRole('heading', { name: 'Расскажите о ребёнке' })).toBeVisible()
+  const home = await (await page.request.get('/api/v1/me/families', { headers })).json() as { ownFamilyId: string }
+  const familyId = home.ownFamilyId
+  const avatar = await uploadAvatar(page, headers, familyId)
+  const profile = await page.request.put(`/api/v1/families/${familyId}/child`, { headers, data: { name: 'Синтетический ребёнок', birthDate: '2025-01-02', sex: 'girl', avatarMediaId: avatar, avatarCrop: { x: 0, y: 0, width: 1, height: 1 }, expectedVersion: null } })
+  expect(profile.status()).toBe(200)
+  const family = await (await page.request.get(`/api/v1/families/${familyId}`, { headers: { ...headers, 'X-Memoly-Children': '1' } })).json() as { children: Array<{ id: string }> }
+  const cases = [
+    { kind: 'free', title: 'Большая семейная подборка', childId: null },
+    { kind: 'events', title: 'Большое открытие', childId: family.children[0].id },
+    { kind: 'workshop', title: 'Большая мастерская', childId: family.children[0].id },
+  ]
+  let pickerSources: unknown[] = []
+  let workshopAlbumId = ''
+  for (const input of cases) {
+    const response = await page.request.post(`/api/v1/families/${familyId}/albums`, { headers: { ...headers, 'Idempotency-Key': randomUUID() }, data: input })
+    expect(response.status()).toBe(201)
+    const { album } = await response.json() as { album: { id: string } }
+    if (input.kind === 'workshop') workshopAlbumId = album.id
+    let rejectedSource = false
+    let changes = 0
+    const sourceRoute = `**/api/v1/families/${familyId}/albums/${album.id}/entries/*/sources`
+    if (input.kind === 'free') await page.route(sourceRoute, async (route) => {
+      if (route.request().method() === 'PATCH' && ++changes === 1) {
+        rejectedSource = true
+        return route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ error: { code: 'VALIDATION_ERROR', message: 'Synthetic rejected attachment', requestId: randomUUID() } }) })
+      }
+      return route.continue()
+    })
+    await page.reload()
+    const hub = page.getByRole('button', { name: /Владелец/ })
+    if (await hub.count()) await hub.first().click()
+    await expect(page.getByTestId('bottom-navigation')).toBeVisible()
+    await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+    await page.getByRole('button', { name: new RegExp(input.title) }).click()
+    await page.getByRole('button', { name: input.kind === 'workshop' ? 'Добавить работу' : 'Добавить историю', exact: true }).click()
+    await page.getByLabel(input.kind === 'events' ? 'Название события' : 'Название (необязательно)').fill('Одна большая история')
+    await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+    await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(Array.from({ length: 11 }, (_, index) => ({ name: `photo-${index}.png`, mimeType: 'image/png', buffer: solidPng(index * 20, 90, 100, 100, 120) })))
+    if (input.kind === 'free') {
+      await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 11 · добавлено: 10 · с ошибкой: 1' })).toBeVisible({ timeout: 140_000 })
+      expect(rejectedSource).toBe(true)
+      await page.getByRole('button', { name: 'Повторить неуспешные', exact: true }).click()
+    }
+    await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 11 · добавлено: 11' })).toBeVisible({ timeout: 140_000 })
+    await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
+    await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+    const path = `/api/v1/families/${familyId}/albums/${album.id}/entries?view=collection-summary`
+    const stored = await (await page.request.get(path, { headers })).json() as { items: Array<{ id: string; sourceCount: number }> }
+    expect(stored.items.reduce((total, entry) => total + entry.sourceCount, 0)).toBe(11)
+    expect(stored.items.length).toBe(input.kind === 'workshop' ? 11 : 1)
+    if (input.kind === 'free') {
+      await page.unroute(sourceRoute)
+      const photos = await (await page.request.get(`/api/v1/families/${familyId}/albums/${album.id}/entries/${stored.items[0].id}/sources?kind=photo&limit=3`, { headers })).json() as { items: unknown[] }
+      pickerSources = photos.items
+    }
+    const opener = input.kind === 'workshop' ? page.locator('[data-album-tile]').first() : page.getByRole('button', { name: /Одна большая история/ }).first()
+    await opener.click()
+    await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+    await page.getByLabel('История').fill('Подпись после большой загрузки')
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+    await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+    const after = await (await page.request.get(path, { headers })).json() as { items: Array<{ sourceCount: number }> }
+    expect(after.items.reduce((total, entry) => total + entry.sourceCount, 0)).toBe(11)
+    await page.screenshot({ path: testInfo.outputPath(`album-${input.kind}-eleven-photos.png`) })
+  }
+  // A rejected later create must not recreate earlier confirmed workshop works.
+  await page.route(`**/api/v1/families/${familyId}/media-picker?*`, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [{ memoryId: randomUUID(), kind: 'photo', occurredAt: new Date().toISOString(), sources: pickerSources }], nextCursor: null }) }))
+  let creates = 0
+  await page.route(`**/api/v1/families/${familyId}/albums/${workshopAlbumId}/entries`, async (route) => {
+    if (route.request().method() === 'POST' && ++creates === 3) return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'VERSION_CONFLICT', message: 'Synthetic concurrent edit', requestId: randomUUID() } }) })
+    return route.continue()
+  })
+  await page.getByRole('button', { name: 'Добавить работу', exact: true }).click()
+  await page.getByRole('button', { name: 'Выбрать из воспоминаний', exact: true }).click()
+  for (let photo = 1; photo <= 3; photo += 1) await page.getByRole('button', { name: `Фото ${photo}`, exact: true }).click()
+  await page.getByRole('button', { name: 'Готово · 3', exact: true }).click()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Альбом уже изменили')
+  await page.getByRole('button', { name: 'Обновить данные', exact: true }).click()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  const afterConflict = await (await page.request.get(`/api/v1/families/${familyId}/albums/${workshopAlbumId}/entries?view=collection-summary`, { headers })).json() as { items: unknown[] }
+  expect(afterConflict.items).toHaveLength(14)
+  expect(creates).toBe(4)
+})
+
+test('album upload reconciles a lost metadata reply and preserves a different concurrent edit', async ({ page }) => {
+  await page.addInitScript((data) => { Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1', platform: 'web', ready() {} } }) }, signedInitData())
+  const exchange = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.request().method() === 'POST')
+  await page.goto('/')
+  const { accessToken } = await (await exchange).json() as { accessToken: string }
+  const headers = { Authorization: `Bearer ${accessToken}` }
+  await page.getByRole('button', { name: 'Продолжить', exact: true }).click()
+  await page.getByRole('button', { name: /Создать свою семью/ }).click()
+  await expect(page.getByRole('heading', { name: 'Расскажите о ребёнке' })).toBeVisible()
+  const { ownFamilyId: familyId } = await (await page.request.get('/api/v1/me/families', { headers })).json() as { ownFamilyId: string }
+  const created = await page.request.post(`/api/v1/families/${familyId}/albums`, { headers: { ...headers, 'Idempotency-Key': randomUUID() }, data: { kind: 'free', title: 'Ответ об истории', childId: null } })
+  expect(created.status()).toBe(201)
+  const { album } = await created.json() as { album: { id: string; version: number } }
+  const root = `/api/v1/families/${familyId}/albums/${album.id}`
+  const createdStory = await page.request.post(`${root}/entries`, { headers: { ...headers, 'Idempotency-Key': randomUUID() }, data: { expectedVersion: album.version, kind: 'work', title: 'История в очереди', caption: 'До обновления', sources: [] } })
+  expect(createdStory.status()).toBe(201)
+  const { entry } = await createdStory.json() as { entry: { id: string } }
+  const path = `${root}/entries/${entry.id}?view=collection-summary`
+  let mode: 'matching' | 'different' | null = 'matching'
+  let failAcknowledgementRead = false
+  let reconciliations = 0
+  let uploads = 0
+  page.on('request', (request) => { if (request.method() === 'POST' && new URL(request.url()).pathname === `/api/v1/families/${familyId}/uploads`) uploads += 1 })
+  await page.route(`**${path}`, async (route) => {
+    if (route.request().method() === 'GET' && mode === null) {
+      reconciliations += 1
+      if (failAcknowledgementRead) {
+        failAcknowledgementRead = false
+        return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'Synthetic acknowledgement read failure', requestId: randomUUID() } }) })
+      }
+    }
+    if (route.request().method() !== 'PATCH' || !mode) return route.continue()
+    const activeMode = mode
+    const saved = await route.fetch()
+    expect(saved.status()).toBe(200)
+    if (activeMode === 'different') {
+      const savedEntry = (await saved.json()).entry as { aggregateVersion: number }
+      const concurrent = await page.request.patch(path, { headers, data: { expectedVersion: savedEntry.aggregateVersion, caption: 'Другая правка' } })
+      expect(concurrent.status()).toBe(200)
+    } else failAcknowledgementRead = true
+    mode = null
+    await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'Synthetic lost metadata response', requestId: randomUUID() } }) })
+  })
+  await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await page.getByRole('button', { name: /Ответ об истории/ }).click()
+  await page.getByRole('button', { name: /История в очереди/ }).click()
+  await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+  await page.getByLabel('История').fill('Сохранено перед фотографиями')
+  await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+  await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(['one', 'two'].map((name) => ({ name: `${name}.png`, mimeType: 'image/png', buffer: solidPng(40, 120, 80) })))
+  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 2 · добавлено: 1 · с ошибкой: 1' })).toBeVisible()
+  await page.getByRole('button', { name: 'Повторить неуспешные', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 2 · добавлено: 2' })).toBeVisible({ timeout: 20_000 })
+  expect(reconciliations).toBeGreaterThan(0)
+  expect(uploads).toBe(2)
+  await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
+  await page.getByRole('button', { name: /История в очереди/ }).click()
+  await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+  await page.getByLabel('История').fill('Новая правка очереди')
+  mode = 'different'
+  await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+  await page.getByLabel('Выбрать фотографии с устройства').setInputFiles({ name: 'three.png', mimeType: 'image/png', buffer: solidPng(80, 120, 40) })
+  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 1 · добавлено: 0 · с ошибкой: 1' })).toBeVisible()
+  await page.getByRole('button', { name: 'Повторить неуспешные', exact: true }).click()
+  await expect(page.getByRole('alert').filter({ hasText: 'Альбом или доступ изменился' })).toBeVisible()
+  const final = (await (await page.request.get(path, { headers })).json()).entry as { caption: string; sourceCount: number }
+  expect(final.caption).toBe('Другая правка')
+  expect(final.sourceCount).toBe(2)
+  expect(uploads).toBe(3)
+})
+
 test('album new upload opens photos directly and central Add keeps its chooser', async ({ page }) => {
   await openSynthetic(page, 'albums=24&delayedPublish')
   await page.getByRole('button', { name: /У бабушки/ }).click()
   await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
   await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Добавить фото в альбом', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Добавить фотографии', exact: true })).toBeVisible()
   await expect(page.getByText('Выберите материал для альбома.')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Добавить фото', exact: true })).toHaveCount(0)
-  await page.getByRole('button', { name: 'Назад', exact: true }).click()
+  await page.getByRole('button', { name: '‹ Назад', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Загрузить новое', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Добавить фото в альбом', exact: true })).toBeVisible()
-  const photoBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
-  await page.locator('#photo-composer-files').setInputFiles({ name: 'synthetic-draft.png', mimeType: 'image/png', buffer: photoBytes })
-  let photoConfirmation = ''
-  page.once('dialog', async (dialog) => { photoConfirmation = dialog.message(); await dialog.dismiss() })
-  await page.getByRole('button', { name: 'Назад', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Добавить фото в альбом', exact: true })).toBeVisible()
-  expect(photoConfirmation).toContain('Удалить несохранённые изменения?')
-  page.once('dialog', async (dialog) => { await dialog.accept() })
-  await page.getByRole('button', { name: 'Назад', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Загрузить новое', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Добавить фото в альбом', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Назад', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Добавить фотографии', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '‹ Назад', exact: true }).click()
   await page.getByRole('button', { name: 'Отмена', exact: true }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   await page.getByRole('button', { name: 'Семья', exact: true }).click()

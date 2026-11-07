@@ -21,12 +21,12 @@ S3_RECOVERY_BACKEND_IMAGE_ID=sha256:0c20d3089050a00214bb51dac3ac6961622ef5d90f38
 S3_RECOVERY_WEBAPP_IMAGE_ID=sha256:a53f4c8b54e723d518ff70ec7051045e99708804f541c78d163984f9a43b673e
 S3_RECOVERY_RUNTIME_FINGERPRINT=d16c128505122bae2ca7536f7557dc72f45aafee15907e2419f231259272c2d2
 # Measured source, images and installer for the accepted S3 month-photo release.
-MONTH_PHOTO_RECOVERY_SHA=d3eaddada18244c94e0c2790c023fd4e0819f2d9
-MONTH_PHOTO_RECOVERY_BACKEND_IMAGE_ID=sha256:3117a15769222ea1cc2039c1bc1d47e753caea17df39945596979f89aa55005a
-MONTH_PHOTO_RECOVERY_WEBAPP_IMAGE_ID=sha256:7c5480d4c58e42107c40c4f46ffdfc15a45d1910b86ab7b88f57a472c58e7d36
-MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT=18b0a2e49290afd8ac2fda25a05f0df433155d075a6bb24a605687aab48d9878
-MONTH_PHOTO_EXECUTABLE_FINGERPRINT=c9f840d796059546dd1deb901341075e50cbf1b72c78e15f53f6d1626f52ecdb
-MONTH_PHOTO_RELEASE_INSTALLER_BLOB=e58e27a45fe3e95171aef06b9560f1e800b316a3
+MONTH_PHOTO_RECOVERY_SHA=95496ef26b677529ee9b1ac10fc12f6075dd912b
+MONTH_PHOTO_RECOVERY_BACKEND_IMAGE_ID=sha256:1d9779f3549db0a890df68f9ffa83c39cda70c5453339bad4964fc2da60adfe0
+MONTH_PHOTO_RECOVERY_WEBAPP_IMAGE_ID=sha256:518b45471faee399850827f1223058902ce15d35f183fd355f06b4d3c34049f7
+MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT=c813c065f3c08c2ad4bbbba3f6e00e7bda210ecbe607f8c977f7e0c58e7126c4
+MONTH_PHOTO_EXECUTABLE_FINGERPRINT=24e9a6d2112a4c115904513010977c41ec6d2898e8e4f5eda48e7a2c7287ab3f
+MONTH_PHOTO_RELEASE_INSTALLER_BLOB=9e8e7f0cb47d8784447951f2eb28129093e15247
 MAX_VIDEO_COMPATIBILITY_FINGERPRINT=ff5758a7a3adb23b028a96e56c6deda68e83bd2f7cad6b2e54c0bd8b5cfa5ca4
 MAX_INVITE_ENTRY_COMPATIBILITY_FINGERPRINT=cda103e46f3e415d92ddcf1b7dcbe44269ccac991bc6d52534a05e8e242d1179
 MAX_VIDEO_PIN_INSTALLER_BLOB=d34a87ec84df49987dc01339481750320f10f203
@@ -1179,11 +1179,12 @@ const db=new Client({connectionString:process.env.DATABASE_URL});
 try {
  const base=parse(process.env.MEMOLY_S3_MONTH_BASELINE),candidate=parse(process.env.MEMOLY_S3_MONTH_CANDIDATE),phase=process.env.MEMOLY_S3_MONTH_PHASE;
 	 const suffix={name:'20261105110000_album_month_photos',lf:'9d7e49ece81feb98cffd937c8b98475e28ca07dcd58b73e7aa2775711f86c87d',crlf:'64dfcc65f5c88ef1268b22e339e7ef934c077012da29df3fe37e6fdc08bd7340'};
- if(!['pre-sql','complete'].includes(phase)||base.length!==65||candidate.length!==66||base.some((r,i)=>r.name!==candidate[i]?.name||r.lf!==candidate[i]?.lf||r.crlf!==candidate[i]?.crlf)||JSON.stringify(candidate[65])!==JSON.stringify(suffix)) throw Error('unmeasured catalog');
+ const collectionSuffix={name:'20261107100000_all_album_photo_collections',lf:'d0213506ff9bd58684d0f1a5703c4a2b563e3eceaeedb525150da896ac046e5d',crlf:'b39ace95a6500768fe9f7fabea5f9f7d7174bce6c7e25d216e520816c76786e2'};
+ if(!['pre-sql','complete'].includes(phase)||base.length!==65||![66,67].includes(candidate.length)||base.some((r,i)=>r.name!==candidate[i]?.name||r.lf!==candidate[i]?.lf||r.crlf!==candidate[i]?.crlf)||JSON.stringify(candidate[65])!==JSON.stringify(suffix)||(candidate.length===67&&JSON.stringify(candidate[66])!==JSON.stringify(collectionSuffix))) throw Error('unmeasured catalog');
  await db.connect(); await db.query('BEGIN READ ONLY');
  const {rows}=await db.query('SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name');
- const count=phase==='complete'?66:rows.length;
- if(![65,66].includes(count)||rows.length!==count||rows.some((r,i)=>!r.finished_at||r.rolled_back_at||r.migration_name!==candidate[i]?.name||![candidate[i]?.lf,candidate[i]?.crlf].includes(r.checksum))) throw Error('ledger');
+ const count=phase==='complete'?candidate.length:rows.length;
+ if(![65,66,67].includes(count)||count>candidate.length||rows.length!==count||rows.some((r,i)=>!r.finished_at||r.rolled_back_at||r.migration_name!==candidate[i]?.name||![candidate[i]?.lf,candidate[i]?.crlf].includes(r.checksum))) throw Error('ledger');
  const {rows:s}=await db.query(`SELECT
   to_regclass('public.album_entry_comments') IS NOT NULL comments,
   to_regclass('public.album_entry_reactions') IS NOT NULL reactions,
@@ -1209,12 +1210,14 @@ try {
   EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.album_source_operations'::regclass AND tgname='album_source_operations_legacy_month_replace_fence') monthtriggerraw,
   EXISTS(SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid WHERE t.tgrelid='public.album_source_operations'::regclass AND t.tgname='album_source_operations_legacy_month_replace_fence' AND NOT t.tgisinternal AND t.tgenabled='O' AND t.tgtype=7 AND p.oid=to_regprocedure('public.reject_legacy_month_source_replace_after_append()')) monthtriggervalid,
   to_regprocedure('public.reject_legacy_month_source_replace_after_append()') IS NOT NULL monthfunctionraw,
-  EXISTS(SELECT 1 FROM pg_proc WHERE oid=to_regprocedure('public.reject_legacy_month_source_replace_after_append()') AND pronamespace='public'::regnamespace AND prorettype='trigger'::regtype) monthfunctionvalid`);
- const x=s[0],social=rows.length>=65,recovery=rows.length>=65,month=rows.length===66;
+  EXISTS(SELECT 1 FROM pg_proc WHERE oid=to_regprocedure('public.reject_legacy_month_source_replace_after_append()') AND pronamespace='public'::regnamespace AND prorettype='trigger'::regtype) monthfunctionvalid,
+  (SELECT md5(prosrc) FROM pg_proc WHERE oid=to_regprocedure('public.reject_legacy_month_source_replace_after_append()')) sourcefencebody`);
+ const x=s[0],social=rows.length>=65,recovery=rows.length>=65,month=rows.length>=66;
  if(!x||x.comments!==social||x.reactions!==social||x.generation!==social||x.trigger!==recovery||x.function!==recovery||
     x.coverraw!==month||x.nextposraw!==month||x.coverfkraw!==month||x.nextcheckraw!==month||x.coveridxraw!==month||x.pageidxraw!==month||
     x.startposraw!==month||x.opcountraw!==month||x.monthtriggerraw!==month||x.monthfunctionraw!==month||
-    (month&&(!x.covertype||!x.nextpostype||!x.coverfkvalid||!x.nextcheckvalid||!x.coveridxvalid||!x.pageidxvalid||!x.startpostype||!x.opcounttype||!x.monthtriggervalid||!x.monthfunctionvalid))) throw Error('schema');
+    (month&&(!x.covertype||!x.nextpostype||!x.coverfkvalid||!x.nextcheckvalid||!x.coveridxvalid||!x.pageidxvalid||!x.startpostype||!x.opcounttype||!x.monthtriggervalid||!x.monthfunctionvalid))||
+    (rows.length===67&&x.sourcefencebody!=='1c778ba8d5dc21453f750bc41b0de668')) throw Error('schema');
  await db.query('COMMIT');
 } catch { process.exitCode=1; } finally { await db.end().catch(()=>{}); }
 MEMOLY_S3_MONTH_HISTORY_JS

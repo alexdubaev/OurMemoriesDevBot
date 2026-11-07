@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { albumDateSchema, albumEntrySourcePageQuerySchema, albumSourceRefSchema, albumSourceSelectionSchema, createAlbumRequestSchema, listAlbumEntriesQuerySchema } from './albums'
+import { albumDateSchema, albumEntrySourcePageQuerySchema, albumEntryViewQuerySchema, albumSourceChangesSchema, albumSourceRefSchema, albumSourceSelectionSchema, createAlbumRequestSchema, listAlbumEntriesQuerySchema } from './albums'
 
 describe('album contracts', () => {
   test('validates partial calendar dates without inventing a day', () => {
@@ -26,7 +26,16 @@ describe('album contracts', () => {
     expect(albumSourceSelectionSchema.safeParse({ expectedVersion: 1, sources: [{ ...directPhoto, sourceKind: 'memory' }] }).success).toBe(false)
   })
 
-  test('allows the additive all-media page selector', () => {
+  test('bounds collection delta requests and accepts collection summaries and all-source pages', () => {
+    const source = { memoryId: null, sourceKind: 'private_storage' as const, sourceId: randomUUID() }
+    expect(albumSourceChangesSchema.parse({ expectedVersion: 1, add: [source], removeIds: [] })).toMatchObject({ expectedVersion: 1, add: [source], removeIds: [] })
+    expect(albumSourceChangesSchema.safeParse({ expectedVersion: 1, add: [source, source], removeIds: [] }).success).toBe(false)
+    expect(albumSourceChangesSchema.safeParse({ expectedVersion: 1, add: [], removeIds: Array.from({ length: 49 }, () => randomUUID()) }).success).toBe(false)
+    const id = randomUUID()
+    expect(albumSourceChangesSchema.safeParse({ expectedVersion: 1, add: [], removeIds: [id, id] }).success).toBe(false)
+    expect(albumSourceChangesSchema.safeParse({ expectedVersion: 1, add: [], removeIds: [], firstSourceId: id, firstSource: source }).success).toBe(false)
+    expect(albumEntryViewQuerySchema.parse({ view: 'collection-summary' }).view).toBe('collection-summary')
+    expect(listAlbumEntriesQuerySchema.parse({ view: 'collection-summary' }).view).toBe('collection-summary')
     expect(albumEntrySourcePageQuerySchema.parse({ kind: 'all' }).kind).toBe('all')
   })
 })

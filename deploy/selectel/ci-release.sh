@@ -37,7 +37,7 @@ MAX_VIDEO_PRE_SCHEMA59_BACKEND_SHA=0486e79947f6612d0eed05207c1cd30d0c4ace65
 MAX_VIDEO_PRE_SCHEMA59_WEBAPP_SHA=0f2e8a432b5712d17b67d63f99439d16f33e7721
 # Only the exact recovery source SHA is needed here. The executable and
 # immutable artifact pins live in redeploy.sh's full rollback-readiness gate.
-MONTH_PHOTO_RECOVERY_SHA=d3eaddada18244c94e0c2790c023fd4e0819f2d9
+MONTH_PHOTO_RECOVERY_SHA=95496ef26b677529ee9b1ac10fc12f6075dd912b
 MM0_FORWARD_MARKER=${MM0_FORWARD_MARKER:-$SERVER_ROOT/.selectel-mm0-forward-only}
 FORWARD_MARKER=${FORWARD_MARKER:-$SERVER_ROOT/.selectel-b2-forward-only}
 MM0_ACTIVE_MARKER=$MM0_FORWARD_MARKER

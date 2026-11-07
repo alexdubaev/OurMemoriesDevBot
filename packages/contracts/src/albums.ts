@@ -69,9 +69,9 @@ export const listAlbumEntriesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(96).default(48),
   year: z.coerce.number().int().min(1).max(9999).optional(),
   category: albumEntryCategorySchema.optional(),
-  view: z.literal('month-summary').optional(),
+  view: z.enum(['month-summary','collection-summary']).optional(),
 }).strict()
-export const albumEntryViewQuerySchema = z.object({ view: z.literal('month-summary').optional() }).strict()
+export const albumEntryViewQuerySchema = z.object({ view: z.enum(['month-summary','collection-summary']).optional() }).strict()
 export const albumEntrySourcePageQuerySchema = z.object({
   cursor: z.string().min(1).max(2048).optional(),
   kind: z.enum(['photo','other','cover-media','all']).default('photo'),
@@ -119,6 +119,18 @@ export const albumSourceSelectionSchema = z.object({
   sources: z.array(albumSourceRefSchema).max(96)
     .superRefine(validateAlbumSourceRefs),
 }).strict()
+export const albumSourceChangesSchema = z.object({
+  expectedVersion: z.number().int().positive(),
+  add: z.array(albumSourceRefSchema).max(48).default([]).superRefine(validateAlbumSourceRefs),
+  removeIds: z.array(uuid).max(48).default([]).superRefine((ids, ctx) => {
+    if (new Set(ids).size !== ids.length) ctx.addIssue({ code: 'custom', message: 'Duplicate source IDs are not allowed' })
+  }),
+  firstSourceId: uuid.optional(),
+  firstSource: albumSourceRefSchema.optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.firstSourceId && value.firstSource) ctx.addIssue({ code: 'custom', path: ['firstSource'], message: 'Choose one first source selector' })
+  if (!value.add.length && !value.removeIds.length && !value.firstSourceId && !value.firstSource) ctx.addIssue({ code: 'custom', message: 'At least one collection change is required' })
+})
 export const reorderAlbumEntryRequestSchema = z.object({
   expectedVersion: z.number().int().positive(),
   entryId: uuid,
@@ -156,6 +168,7 @@ export const albumMonthSummarySchema = z.object({
   discussionGeneration: z.number().int().positive(),
   membershipEpoch: z.number().int().nonnegative(),
 }).strict()
+export const albumCollectionSummarySchema = albumMonthSummarySchema
 export const albumDtoSchema = z.object({
   id: uuid,
   kind: albumKindSchema,
@@ -184,6 +197,7 @@ export const albumEntryDtoSchema = z.object({
   sourceCount: z.number().int().nonnegative(),
   sources: z.array(albumSourceDtoSchema).max(96),
   month: albumMonthSummarySchema.optional(),
+  collection: albumCollectionSummarySchema.optional(),
   aggregateVersion: z.number().int().positive(),
   capabilities: z.object({ edit: z.boolean(), delete: z.boolean() }).strict(),
 }).strict()
@@ -209,9 +223,11 @@ export type AlbumDto = z.infer<typeof albumDtoSchema>
 export type AlbumEntryDto = z.infer<typeof albumEntryDtoSchema>
 export type CreateAlbumRequest = z.infer<typeof createAlbumRequestSchema>
 export type AlbumSourceSelection = z.infer<typeof albumSourceSelectionSchema>
+export type AlbumSourceChanges = z.infer<typeof albumSourceChangesSchema>
 export type ListAlbumsQuery = z.infer<typeof listAlbumsQuerySchema>
 export type ListAlbumEntriesQuery = z.infer<typeof listAlbumEntriesQuerySchema>
 export type AlbumMonthSummary = z.infer<typeof albumMonthSummarySchema>
+export type AlbumCollectionSummary = z.infer<typeof albumCollectionSummarySchema>
 export type AlbumEntrySourcePageQuery = z.infer<typeof albumEntrySourcePageQuerySchema>
 export type AlbumMonthPhotoBatchRequest = z.infer<typeof albumMonthPhotoBatchRequestSchema>
 export type AlbumMonthPhotoAppendRequest = z.infer<typeof albumMonthPhotoAppendRequestSchema>

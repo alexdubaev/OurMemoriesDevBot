@@ -9,6 +9,7 @@ import {
   albumEntrySourcePageQuerySchema,
   albumMonthPhotoBatchRequestSchema,
   albumMonthPhotoAppendRequestSchema,
+  albumSourceChangesSchema,
   albumMonthCoverRequestSchema,
   clearAlbumEntryRequestSchema,
   createAlbumRequestSchema,
@@ -114,6 +115,11 @@ export function createAlbumRoutes({ requireAuth, service, social }: { requireAut
     const query = albumEntryViewQuerySchema.parse(c.req.query())
     const input = updateAlbumEntryRequestSchema.parse(await c.req.json())
     return c.json({ entry: await service.updateMonthEntry(scope(c.var.user, p.familyId), p.albumId, p.entryId, input, query.view) })
+  }))
+  routes.patch('/families/:familyId/albums/:albumId/entries/:entryId/sources', (c) => run(c, async () => {
+    const p = entryParams.parse(c.req.param())
+    const key = idempotencyKeyHeadersSchema.parse({ 'idempotency-key': c.req.header('idempotency-key') })['idempotency-key']
+    return c.json({ entry: await service.changeSources(scope(c.var.user, p.familyId), p.albumId, p.entryId, albumSourceChangesSchema.parse(await c.req.json()), key) })
   }))
   routes.get('/families/:familyId/albums/:albumId/entries/:entryId/sources', (c) => run(c, async () => {
     const p = entryParams.parse(c.req.param())

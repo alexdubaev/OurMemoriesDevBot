@@ -1,10 +1,36 @@
 import { expect, test } from 'bun:test'
 import { ApiRequestError } from '../src/platform/api'
-import { createMonthPhotoQueue } from '../src/features/albums/month-photo-queue'
+import { createMonthPhotoQueue, InvalidMonthPhoto } from '../src/features/albums/month-photo-queue'
 import type { SourceRef } from '../src/features/albums/model'
 
 const source = (sourceId: string): SourceRef => ({ memoryId: null, sourceKind: 'private_storage', sourceId })
 const limited = (retryAfterMs?: number) => new ApiRequestError(429, 'RATE_LIMITED', 'Rate limited', { retryAfterMs })
+
+test('a new-album queue continues after a bad file and retries attach without uploading confirmed files again', async () => {
+  const queue = createMonthPhotoQueue(Array.from({ length: 105 }, (_, index) => ({ file: new File(['fixture'], `${index}.jpg`) })))
+  const uploaded: string[] = []
+  const attached = new Map<string, string>()
+  const operations = {
+    upload: async (file: File) => {
+      uploaded.push(file.name)
+      if (file.name === '1.jpg') throw new InvalidMonthPhoto('Unsupported image')
+      return file.name
+    },
+    attachPhoto: async (photo: SourceRef, key: string) => {
+      if (attached.has(key)) return
+      attached.set(key, photo.sourceId)
+      if (photo.sourceId === '2.jpg') throw new TypeError('Lost response')
+    },
+  }
+  const signal = new AbortController().signal
+  await queue.run(operations, signal, () => {})
+  expect(queue.snapshot()).toMatchObject({ total: 105, saved: 103, failed: 2 })
+  expect([...attached.values()]).toEqual(Array.from({ length: 105 }, (_, index) => `${index}.jpg`).filter((name) => name !== '1.jpg'))
+  await queue.run(operations, signal, () => {})
+  expect(queue.snapshot()).toMatchObject({ total: 105, saved: 104, failed: 1 })
+  expect(uploaded).toHaveLength(105)
+  expect(attached.size).toBe(104)
+})
 
 test('month queue keeps the reserved slots and replays attach after a lost response without reuploading', async () => {
   const selection = Array.from({ length: 102 }, (_, index) => ({

@@ -1,13 +1,12 @@
 /* eslint-disable typographyPolicy/use-typography-component -- album form controls use the scoped albums stylesheet. */
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 import type { AlbumEntryDto } from '@web-app-demo/contracts'
-import { resolveComposerFile, validateSize, verifyComposerFile } from '@/features/composer'
-import { uploadFamilyPhoto } from '@/features/family'
-import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
+import type { AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/telegram'
 import type { AlbumsApi } from './api'
 import { sourceRefs, type AlbumSource } from './model'
-import { createMonthPhotoQueue, InvalidMonthPhoto } from './month-photo-queue'
+import { createMonthPhotoQueue } from './month-photo-queue'
+import { uploadAlbumPhoto } from './album-photo-upload'
 import { SourcePicker } from './SourcePicker'
 import './month-photo-add.css'
 
@@ -27,12 +26,13 @@ type Props = {
 
 type Queue = ReturnType<typeof createMonthPhotoQueue>
 const errorsPerPage = 10
-const phaseLabel = { reserve: 'Подготавливаем очередь', upload: 'Загружаем фото', attach: 'Добавляем в месяц' }
+const phaseLabel = { reserve: 'Подготавливаем очередь', upload: 'Загружаем фото', attach: 'Добавляем в альбом' }
 
 export function MonthAddPhotos(props: Props) {
   const { active = true, entry, accountId, familyId, scopeKey, albumId } = props
-  if (!active || !entry.month || !entry.capabilities.edit) return null
-  const { discussionGeneration, membershipEpoch } = entry.month
+  const collection = entry.month ?? entry.collection
+  if (!active || !collection || !entry.capabilities.edit) return null
+  const { discussionGeneration, membershipEpoch } = collection
   return <MonthPhotoFlow key={JSON.stringify([accountId, familyId, scopeKey, albumId, entry.id, discussionGeneration, membershipEpoch])} {...props} discussionGeneration={discussionGeneration} membershipEpoch={membershipEpoch} />
 }
 
@@ -75,20 +75,7 @@ function MonthPhotoFlow({ api, albumId, entry, familyId, accountId, scopeKey, tr
     setProgress(next.snapshot())
     void api.withMonthPhotoScope(controller.signal, (signal) => next.run({
       reserve: (count, key, requestSignal) => api.reserveMonthPhotoBatch(albumId, entry.id, { count, discussionGeneration, membershipEpoch }, key, requestSignal),
-      upload: async (file, key, resume, requestSignal, onProgress) => {
-        if (file.type.startsWith('video/') || resolveComposerFile(file)?.kind === 'video') throw new InvalidMonthPhoto('Здесь можно добавлять только фотографии.')
-        const media = await verifyComposerFile(file)
-        requestSignal.throwIfAborted()
-        if (media?.kind !== 'photo') throw new InvalidMonthPhoto('Файл не распознан как фотография. Подойдут JPG, PNG, WebP, HEIC и HEIF.')
-        const size = validateSize(file, media)
-        if (!size.ok) throw new InvalidMonthPhoto(size.code === 'too_large_photo' ? 'Размер фотографии превышает 20 МБ.' : 'Файл слишком маленький или имеет неподдерживаемый формат.')
-        try {
-          return await uploadFamilyPhoto(transport, familyId, file, media.contentType as Parameters<typeof uploadFamilyPhoto>[3], 'memory', requestSignal, undefined, key, onProgress, undefined, resume)
-        } catch (error) {
-          if (error instanceof ApiRequestError && error.status === 410) throw new InvalidMonthPhoto('Срок загрузки истёк. Выберите этот файл заново.')
-          throw error
-        }
-      },
+      upload: (file, key, resume, requestSignal, onProgress) => uploadAlbumPhoto(transport, familyId, file, key, resume, requestSignal, onProgress),
       attach: (item, key, requestSignal) => api.appendMonthPhoto(albumId, entry.id, item, key, requestSignal),
     }, signal, notify)).finally(() => {
       if (request.current === controller) request.current = null
@@ -115,7 +102,7 @@ function MonthPhotoFlow({ api, albumId, entry, familyId, accountId, scopeKey, tr
   const currentErrorPage = Math.min(errorPage, errorLastPage)
   return <section aria-label="Добавление фотографий месяца" className="month-photo-add">
     <header className="albums-toolbar"><button onClick={back} type="button">‹ Назад</button><h1>Добавить фотографии</h1></header>
-    <p className="albums-upload-notice">Фотографии сохранятся в этом месяце альбома</p>
+    <p className="albums-upload-notice">{entry.kind === 'month' ? 'Фотографии сохранятся в этом месяце альбома' : 'Фотографии сохранятся в этом альбоме'}</p>
     <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" aria-label="Выбрать фотографии с устройства" hidden multiple onChange={(event) => {
       const files = Array.from(event.currentTarget.files ?? [])
       event.currentTarget.value = ''
@@ -141,7 +128,7 @@ function MonthPhotoFlow({ api, albumId, entry, familyId, accountId, scopeKey, tr
       <footer className="albums-form-actions">
         {progress.running ? <button className="albums-secondary" onClick={() => request.current?.abort()} type="button">Остановить</button> : <>
           {!progress.stale && (progress.pending || progress.retryable) ? <button className="albums-primary" onClick={() => start(queue)} type="button">{progress.retryable ? 'Повторить неуспешные' : 'Продолжить'}</button> : null}
-          <button className="albums-secondary" onClick={close} type="button">Вернуться к месяцу</button>
+          <button className="albums-secondary" onClick={close} type="button">{entry.kind === 'month' ? 'Вернуться к месяцу' : 'Вернуться к альбому'}</button>
         </>}
       </footer>
     </> : mode === 'device' ? <>

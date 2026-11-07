@@ -10,7 +10,7 @@ const root = resolve(import.meta.dir, '../../../..')
 const baseline = 'a18469ab8a54464d491659d849fcf286973fa9e4'
 const migrationName = '20261105110000_album_month_photos'
 
-test('S3 month-photo guard accepts only the exact 65/66 ledger and matching schema', async () => {
+test('S3 photo guard accepts only the exact 65/66/67 ledger and matching schema', async () => {
   const base = new URL(requireIntegrationDatabaseUrl()!)
   if (base.hostname !== '127.0.0.1' || !base.pathname.endsWith('_test')) throw Error('Isolated loopback test database required')
   const name = `s3_month_guard_${randomUUID().replaceAll('-', '')}_test`, url = new URL(base); url.pathname = `/${name}`
@@ -35,7 +35,7 @@ test('S3 month-photo guard accepts only the exact 65/66 ledger and matching sche
     await db.query('INSERT INTO _prisma_migrations (id,checksum,migration_name,finished_at,applied_steps_count) VALUES ($1,$2,$3,now(),1)', [randomUUID(), createHash('sha256').update(index % 2 ? sql.replaceAll('\n', '\r\n') : sql).digest('hex'), path.split('/').at(-2)])
   }
   try {
-    expect(paths(baseline)).toHaveLength(65); expect(paths(current)).toHaveLength(66)
+    expect(paths(baseline)).toHaveLength(65); expect(paths(current)).toHaveLength(67)
     expect(paths(current)[65]!.split('/').at(-2)).toBe(migrationName)
     await db.query('CREATE TABLE _prisma_migrations (id varchar(36) PRIMARY KEY, checksum varchar(64) NOT NULL, finished_at timestamptz, migration_name varchar(255) NOT NULL, logs text, rolled_back_at timestamptz, started_at timestamptz NOT NULL DEFAULT now(), applied_steps_count integer NOT NULL DEFAULT 0)')
     for (let i = 0; i < 65; i++) await apply(baseline, i)
@@ -46,7 +46,15 @@ test('S3 month-photo guard accepts only the exact 65/66 ledger and matching sche
     const migrationPath = paths(current)[65]!, sql = git('show', `${current}:${migrationPath}`).replaceAll('\r\n', '\n')
     await db.query(sql)
     await db.query('INSERT INTO _prisma_migrations (id,checksum,migration_name,finished_at,applied_steps_count) VALUES ($1,$2,$3,now(),1)', [randomUUID(), createHash('sha256').update(sql).digest('hex'), migrationName])
+    check('pre-sql', newCatalog, true); check('complete', newCatalog, false)
+    check('complete', catalog('bfe8c30a31c61234b5b8a672c58b286bec650fe8'), true)
+    await apply(current, 66)
     check('pre-sql', newCatalog, true); check('complete', newCatalog, true)
+    check('complete', catalog('bfe8c30a31c61234b5b8a672c58b286bec650fe8'), false)
+    const realFence = await db.query("SELECT pg_get_functiondef('reject_legacy_month_source_replace_after_append()'::regprocedure) AS body")
+    await db.query('CREATE OR REPLACE FUNCTION reject_legacy_month_source_replace_after_append() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$')
+    check('complete', newCatalog, false)
+    await db.query(realFence.rows[0].body)
     check('complete', newCatalog.replace(migrationName, '20990101000000_foreign'), false)
     check('unknown', newCatalog, false)
     await db.query('ALTER TABLE album_entries DROP CONSTRAINT album_entries_month_cover_source_id_fkey')
@@ -71,6 +79,6 @@ test('S3 month-photo guard accepts only the exact 65/66 ledger and matching sche
     check('complete', newCatalog, false)
     await db.query('CREATE INDEX album_entry_sources_month_page_idx ON album_entry_sources(entry_id, kind, position, id)')
     check('complete', oldCatalog, false)
-    console.log(`S3 month-photo release guard: ${cases} real PostgreSQL assertions across exact 65/66 states`)
+    console.log(`S3 photo release guard: ${cases} real PostgreSQL assertions across exact 65/66/67 states`)
   } finally { await db.end(); await admin.query(`DROP DATABASE "${name}" WITH (FORCE)`); await admin.end() }
 }, 300_000)
