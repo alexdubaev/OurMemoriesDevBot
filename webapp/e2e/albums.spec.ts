@@ -888,6 +888,68 @@ test('all album kinds accept an eleven-photo device selection and preserve it af
   expect(creates).toBe(4)
 })
 
+test('album upload reconciles a lost metadata reply and preserves a different concurrent edit', async ({ page }) => {
+  await page.addInitScript((data) => { Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1', platform: 'web', ready() {} } }) }, signedInitData())
+  const exchange = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.request().method() === 'POST')
+  await page.goto('/')
+  const { accessToken } = await (await exchange).json() as { accessToken: string }
+  const headers = { Authorization: `Bearer ${accessToken}` }
+  await page.getByRole('button', { name: 'Продолжить', exact: true }).click()
+  await page.getByRole('button', { name: /Создать свою семью/ }).click()
+  await expect(page.getByRole('heading', { name: 'Расскажите о ребёнке' })).toBeVisible()
+  const { ownFamilyId: familyId } = await (await page.request.get('/api/v1/me/families', { headers })).json() as { ownFamilyId: string }
+  const created = await page.request.post(`/api/v1/families/${familyId}/albums`, { headers: { ...headers, 'Idempotency-Key': randomUUID() }, data: { kind: 'free', title: 'Ответ об истории', childId: null } })
+  expect(created.status()).toBe(201)
+  const { album } = await created.json() as { album: { id: string; version: number } }
+  const root = `/api/v1/families/${familyId}/albums/${album.id}`
+  const createdStory = await page.request.post(`${root}/entries`, { headers: { ...headers, 'Idempotency-Key': randomUUID() }, data: { expectedVersion: album.version, kind: 'work', title: 'История в очереди', caption: 'До обновления', sources: [] } })
+  expect(createdStory.status()).toBe(201)
+  const { entry } = await createdStory.json() as { entry: { id: string } }
+  const path = `${root}/entries/${entry.id}?view=collection-summary`
+  let mode: 'matching' | 'different' | null = 'matching'
+  let reconciliations = 0
+  let uploads = 0
+  page.on('request', (request) => { if (request.method() === 'POST' && new URL(request.url()).pathname === `/api/v1/families/${familyId}/uploads`) uploads += 1 })
+  await page.route(`**${path}`, async (route) => {
+    if (route.request().method() === 'GET' && mode === null) reconciliations += 1
+    if (route.request().method() !== 'PATCH' || !mode) return route.continue()
+    const activeMode = mode
+    const saved = await route.fetch()
+    expect(saved.status()).toBe(200)
+    if (activeMode === 'different') {
+      const savedEntry = (await saved.json()).entry as { aggregateVersion: number }
+      const concurrent = await page.request.patch(path, { headers, data: { expectedVersion: savedEntry.aggregateVersion, caption: 'Другая правка' } })
+      expect(concurrent.status()).toBe(200)
+    }
+    mode = null
+    await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'Synthetic lost metadata response', requestId: randomUUID() } }) })
+  })
+  await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await page.getByRole('button', { name: /Ответ об истории/ }).click()
+  await page.getByRole('button', { name: /История в очереди/ }).click()
+  await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+  await page.getByLabel('История').fill('Сохранено перед фотографиями')
+  await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+  await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(['one', 'two'].map((name) => ({ name: `${name}.png`, mimeType: 'image/png', buffer: solidPng(40, 120, 80) })))
+  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 2 · добавлено: 2' })).toBeVisible({ timeout: 20_000 })
+  expect(reconciliations).toBeGreaterThan(0)
+  expect(uploads).toBe(2)
+  await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
+  await page.getByRole('button', { name: /История в очереди/ }).click()
+  await page.getByRole('button', { name: 'Изменить', exact: true }).click()
+  await page.getByLabel('История').fill('Новая правка очереди')
+  mode = 'different'
+  await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+  await page.getByLabel('Выбрать фотографии с устройства').setInputFiles({ name: 'three.png', mimeType: 'image/png', buffer: solidPng(80, 120, 40) })
+  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 1 · добавлено: 0 · с ошибкой: 1' })).toBeVisible()
+  await page.getByRole('button', { name: 'Повторить неуспешные', exact: true }).click()
+  await expect(page.getByRole('alert').filter({ hasText: 'Альбом или доступ изменился' })).toBeVisible()
+  const final = (await (await page.request.get(path, { headers })).json()).entry as { caption: string; sourceCount: number }
+  expect(final.caption).toBe('Другая правка')
+  expect(final.sourceCount).toBe(2)
+  expect(uploads).toBe(3)
+})
+
 test('album new upload opens photos directly and central Add keeps its chooser', async ({ page }) => {
   await openSynthetic(page, 'albums=24&delayedPublish')
   await page.getByRole('button', { name: /У бабушки/ }).click()
