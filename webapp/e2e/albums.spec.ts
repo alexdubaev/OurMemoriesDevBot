@@ -809,10 +809,23 @@ test('all album kinds accept an eleven-photo device selection and preserve it af
     { kind: 'events', title: 'Большое открытие', childId: family.children[0].id },
     { kind: 'workshop', title: 'Большая мастерская', childId: family.children[0].id },
   ]
+  let pickerSources: unknown[] = []
+  let workshopAlbumId = ''
   for (const input of cases) {
     const response = await page.request.post(`/api/v1/families/${familyId}/albums`, { headers: { ...headers, 'Idempotency-Key': randomUUID() }, data: input })
     expect(response.status()).toBe(201)
     const { album } = await response.json() as { album: { id: string } }
+    if (input.kind === 'workshop') workshopAlbumId = album.id
+    let rejectedSource = false
+    let changes = 0
+    const sourceRoute = `**/api/v1/families/${familyId}/albums/${album.id}/entries/*/sources`
+    if (input.kind === 'free') await page.route(sourceRoute, async (route) => {
+      if (route.request().method() === 'PATCH' && ++changes === 1) {
+        rejectedSource = true
+        return route.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ error: { code: 'VALIDATION_ERROR', message: 'Synthetic rejected attachment', requestId: randomUUID() } }) })
+      }
+      return route.continue()
+    })
     await page.reload()
     const hub = page.getByRole('button', { name: /Владелец/ })
     if (await hub.count()) await hub.first().click()
@@ -823,6 +836,11 @@ test('all album kinds accept an eleven-photo device selection and preserve it af
     await page.getByLabel(input.kind === 'events' ? 'Название события' : 'Название (необязательно)').fill('Одна большая история')
     await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
     await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(Array.from({ length: 11 }, (_, index) => ({ name: `photo-${index}.png`, mimeType: 'image/png', buffer: solidPng(index * 20, 90, 100, 100, 120) })))
+    if (input.kind === 'free') {
+      await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 11 · добавлено: 10 · с ошибкой: 1' })).toBeVisible({ timeout: 140_000 })
+      expect(rejectedSource).toBe(true)
+      await page.getByRole('button', { name: 'Повторить неуспешные', exact: true }).click()
+    }
     await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 11 · добавлено: 11' })).toBeVisible({ timeout: 140_000 })
     await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
     await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
@@ -830,6 +848,11 @@ test('all album kinds accept an eleven-photo device selection and preserve it af
     const stored = await (await page.request.get(path, { headers })).json() as { items: Array<{ id: string; sourceCount: number }> }
     expect(stored.items.reduce((total, entry) => total + entry.sourceCount, 0)).toBe(11)
     expect(stored.items.length).toBe(input.kind === 'workshop' ? 11 : 1)
+    if (input.kind === 'free') {
+      await page.unroute(sourceRoute)
+      const photos = await (await page.request.get(`/api/v1/families/${familyId}/albums/${album.id}/entries/${stored.items[0].id}/sources?kind=photo&limit=3`, { headers })).json() as { items: unknown[] }
+      pickerSources = photos.items
+    }
     const opener = input.kind === 'workshop' ? page.locator('[data-album-tile]').first() : page.getByRole('button', { name: /Одна большая история/ }).first()
     await opener.click()
     await page.getByRole('button', { name: 'Изменить', exact: true }).click()
@@ -840,6 +863,25 @@ test('all album kinds accept an eleven-photo device selection and preserve it af
     expect(after.items.reduce((total, entry) => total + entry.sourceCount, 0)).toBe(11)
     await page.screenshot({ path: testInfo.outputPath(`album-${input.kind}-eleven-photos.png`) })
   }
+  // A rejected later create must not recreate earlier confirmed workshop works.
+  await page.route(`**/api/v1/families/${familyId}/media-picker?*`, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [{ memoryId: randomUUID(), kind: 'photo', occurredAt: new Date().toISOString(), sources: pickerSources }], nextCursor: null }) }))
+  let creates = 0
+  await page.route(`**/api/v1/families/${familyId}/albums/${workshopAlbumId}/entries`, async (route) => {
+    if (route.request().method() === 'POST' && ++creates === 3) return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'VERSION_CONFLICT', message: 'Synthetic concurrent edit', requestId: randomUUID() } }) })
+    return route.continue()
+  })
+  await page.getByRole('button', { name: 'Добавить работу', exact: true }).click()
+  await page.getByRole('button', { name: 'Выбрать из воспоминаний', exact: true }).click()
+  for (let photo = 1; photo <= 3; photo += 1) await page.getByRole('button', { name: `Фото ${photo}`, exact: true }).click()
+  await page.getByRole('button', { name: 'Готово · 3', exact: true }).click()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Альбом уже изменили')
+  await page.getByRole('button', { name: 'Обновить данные', exact: true }).click()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+  const afterConflict = await (await page.request.get(`/api/v1/families/${familyId}/albums/${workshopAlbumId}/entries?view=collection-summary`, { headers })).json() as { items: unknown[] }
+  expect(afterConflict.items).toHaveLength(14)
+  expect(creates).toBe(4)
 })
 
 test('album new upload opens photos directly and central Add keeps its chooser', async ({ page }) => {

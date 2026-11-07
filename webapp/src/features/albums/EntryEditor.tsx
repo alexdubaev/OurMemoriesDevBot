@@ -36,6 +36,7 @@ export function EntryEditor(props: Props) {
   const savedTarget = useRef(entry)
   const savedVersion = useRef(album.version)
   const uploadSaved = useRef(false)
+  const createdSourceKeys = useRef(new Set<string>())
   const baseline = useRef(new Map((entry?.collection ? [] : entry?.sources ?? []).map((source) => [sourceKey(source), source.id])))
   const removed = useRef(new Set<string>())
   const promoted = useRef<AlbumSource | null>(null)
@@ -98,8 +99,8 @@ export function EntryEditor(props: Props) {
   }
   async function save(uploaded?: AlbumSource[], propagate = false, keepOpen = false) {
     if (saving.current || conflict || sourceLoading || sourceError) { if (propagate) throw new Error('Загрузите материалы перед добавлением'); return }
-    const chosen = uploaded && workshop && !entry && separate
-      ? uploaded.filter((source) => !baseline.current.has(sourceKey(source)))
+    const chosen = workshop && !entry && separate
+      ? (uploaded ?? sources).filter((source) => !createdSourceKeys.current.has(sourceKey(source)))
       : uploaded ?? sources
     const target = savedTarget.current
     if (uploaded && workshop && !entry && separate && !chosen.length) return
@@ -131,6 +132,10 @@ export function EntryEditor(props: Props) {
           // Freeze each submitted payload across ambiguous network retries; only the next item takes the new version.
           const result = await api.createEntry(album.id, { ...input, sources: input.sources.slice(0, 48) }, operation.keys[index])
           operation.target = result.entry; operation.version = result.entry.aggregateVersion; operation.next += 1; setCompleted((count) => count + 1)
+          savedVersion.current = operation.version
+          if (workshop && !entry && separate) input.sources.forEach((source) => createdSourceKeys.current.add(sourceKey(source)))
+          else savedTarget.current = result.entry
+          if (keepOpen) uploadSaved.current = true
           if (operation.inputs[operation.next]) operation.inputs[operation.next].expectedVersion = operation.version
         }
       } else {
@@ -138,6 +143,7 @@ export function EntryEditor(props: Props) {
         if (!operation.metadataSaved) {
           const result = await api.updateEntry(album.id, operation.target!.id, { expectedVersion: operation.version, title: input.title, caption: input.caption, ...(!month ? { childQuote: input.childQuote, category: input.category } : {}), date: input.date }, month)
           operation.target = result.entry; operation.version = result.entry.aggregateVersion; operation.metadataSaved = true
+          savedTarget.current = result.entry; savedVersion.current = operation.version
           if (month) monthEntry = result.entry
         }
       }
@@ -145,6 +151,9 @@ export function EntryEditor(props: Props) {
         const index = operation.changeNext
         const result = await api.changeSources(album.id, operation.target!.id, { ...operation.changes[index], expectedVersion: operation.version }, operation.changeKeys[index])
         operation.target = result.entry; operation.version = result.entry.aggregateVersion; operation.changeNext += 1
+        savedTarget.current = result.entry; savedVersion.current = operation.version
+        operation.changes[index].removeIds?.forEach((id) => removed.current.delete(id))
+        if (keepOpen) uploadSaved.current = true
       }
       if (keepOpen) {
         uploadSaved.current = true; savedVersion.current = operation.version
@@ -158,7 +167,9 @@ export function EntryEditor(props: Props) {
       const isConflict = reason instanceof ApiRequestError && reason.status === 409
       setConflict(isConflict)
       setError(isConflict ? 'Альбом уже изменили. Обновите данные перед новым сохранением.' : operation.metadataSaved ? 'Текст сохранён. Материалы пока не прикреплены. Повторите только прикрепление.' : operation.next ? `Сохранено работ: ${operation.next}. Остальные ещё не добавлены; повторим только их.` : 'Не удалось подтвердить сохранение. Повторите тот же запрос.')
-      if (reason instanceof ApiRequestError && reason.status === 422 && !operation.metadataSaved && operation.next === 0) { attempt.current = null; setLocked(false); setError('Проверьте поля и дату. Работа должна содержать фото, событие — название и историю или материал.') }
+      // A definitive validation rejection must not poison later per-file operations.
+      // Confirmed writes above stay recorded; ambiguous responses retain their keys.
+      if (reason instanceof ApiRequestError && (reason.status === 422 || reason.status === 400)) { attempt.current = null; setLocked(false); setError('Проверьте поля и дату. Работа должна содержать фото, событие — название и историю или материал.') }
       if (propagate) throw reason
     } finally { saving.current = false; setBusy(false) }
     if (continueUpload) await save(uploaded, propagate, keepOpen)
