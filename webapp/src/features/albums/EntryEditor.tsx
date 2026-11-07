@@ -17,6 +17,7 @@ export function EntryEditor(props: Props) {
   const [precision, setPrecision] = useState<AlbumEntryDto['date']['precision']>(entry?.date.precision ?? 'unknown')
   const [value, setValue] = useState(entry?.date.value ?? '')
   const [sources, setSources] = useState(entry?.collection ? [] : entry?.sources ?? [])
+  const [sourceCount, setSourceCount] = useState(entry?.sourceCount ?? 0)
   const [sourcePage, setSourcePage] = useState(0)
   const [sourceCursor, setSourceCursor] = useState<string | null>(null)
   const [sourceLoading, setSourceLoading] = useState(Boolean(entry?.collection))
@@ -63,6 +64,15 @@ export function EntryEditor(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, entry?.id])
   function choose(next: AlbumSource[]) {
+    const selected = new Set(sources.map(sourceKey))
+    let added = 0
+    for (const source of next) {
+      const key = sourceKey(source)
+      const id = baseline.current.get(key)
+      if (!selected.has(key) && (!id || removed.current.delete(id))) added += 1
+      selected.add(key)
+    }
+    setSourceCount((count) => count + added)
     setSources((old) => [...new Map([...old, ...next].map((source) => [sourceKey(source), source])).values()]); setPicker(false)
     if (precision === 'unknown' && next[0]?.occurredAt && !entry) { const suggested = sourceDate(next[0], timezone); setPrecision(suggested.precision); setValue(suggested.value ?? '') }
   }
@@ -71,6 +81,7 @@ export function EntryEditor(props: Props) {
     if (id) removed.current.add(id)
     if (promoted.current && sourceKey(promoted.current) === sourceKey(source)) promoted.current = null
     setSources((old) => old.filter((item) => sourceKey(item) !== sourceKey(source)))
+    setSourceCount((count) => Math.max(0, count - 1))
   }
   function startUpload() {
     let uploaded = sources
@@ -162,7 +173,7 @@ export function EntryEditor(props: Props) {
         <label className="albums-field">Когда это было<select onChange={(event) => { setPrecision(event.target.value as typeof precision); setValue('') }} value={precision}><option value="unknown">Не помню дату</option><option value="day">Точная дата</option><option value="month">Месяц</option><option value="year">Год</option></select></label>
         {precision !== 'unknown' ? <label className="albums-field">{precision === 'day' ? 'Дата' : precision === 'month' ? 'Месяц и год' : 'Год'}<input max={precision === 'year' ? '9999' : undefined} min={precision === 'year' ? '1' : undefined} onChange={(event) => setValue(event.target.value)} required type={precision === 'day' ? 'date' : precision === 'month' ? 'month' : 'number'} value={value} /></label> : null}
         {workshop ? <><label className="albums-field">Категория<select onChange={(event) => setCategory(event.target.value as typeof category)} value={category ?? 'other'}>{Object.entries(categories).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><label className="albums-field">Слова ребёнка<textarea onChange={(event) => setQuote(event.target.value)} rows={3} value={quote} /><small>{[...quote].length}/8000</small></label></> : null}
-        {!month ? <><h2>Материалы · {entry?.collection ? Math.max(0, entry.sourceCount - removed.current.size) + sources.filter((source) => !baseline.current.has(sourceKey(source))).length : sources.length}</h2>
+        {!month ? <><h2>Материалы · {sourceCount}</h2>
         <div className="albums-selected-sources">{sources.slice(sourcePage * 24, (sourcePage + 1) * 24).map((source, index) => <div key={sourceKey(source)}><SourcePreview accountId={accountId} scopeKey={scopeKey} source={source} transport={transport} /><button aria-label={`Убрать материал ${sourcePage * 24 + index + 1}`} onClick={() => removeSource(source)} type="button">Убрать</button>{sourcePage * 24 + index > 0 ? <button aria-label={`Сделать материал ${sourcePage * 24 + index + 1} главным`} onClick={() => { promoted.current = source; setSources([source, ...sources.filter((item) => sourceKey(item) !== sourceKey(source))]); setSourcePage(0) }} type="button">Главный</button> : <small>Главный</small>}</div>)}</div>
         {sourcePage > 0 ? <button onClick={() => setSourcePage(sourcePage - 1)} type="button">Предыдущие материалы</button> : null}
         {(sourcePage + 1) * 24 < sources.length ? <button onClick={() => setSourcePage(sourcePage + 1)} type="button">Следующие материалы</button> : sourceCursor ? <button disabled={sourceLoading} onClick={() => void loadSources(sourceCursor)} type="button">Ещё материалы</button> : null}
@@ -175,7 +186,7 @@ export function EntryEditor(props: Props) {
       </fieldset>
       {completed ? <p role="status">Сохранено работ: {completed}</p> : null}
       {error ? <p className="albums-error" role="alert">{error}</p> : null}
-      {conflict ? <button className="albums-secondary" disabled={busy} onClick={() => { setBusy(true); void Promise.all([api.album(album.id), entry ? api.entry(album.id, entry.id, month) : Promise.resolve(null)]).then(([fresh, detail]) => { savedVersion.current = fresh.album.version; if (detail) { setTitle(detail.entry.title ?? ''); setCaption(detail.entry.caption ?? ''); setSources([]); baseline.current.clear(); removed.current.clear(); promoted.current = null; savedTarget.current = detail.entry; setSourceCursor(null); void loadSources(); setQuote(detail.entry.childQuote ?? ''); setCategory(detail.entry.category); setPrecision(detail.entry.date.precision); setValue(detail.entry.date.value ?? '') } attempt.current = null; setConflict(false); setLocked(false); setError(null) }).catch(() => setError('Не удалось обновить данные. Повторите загрузку.')).finally(() => setBusy(false)) }} type="button">Обновить данные</button> : <button className="albums-primary" disabled={busy || sourceLoading || sourceError} type="submit">{busy ? 'Сохраняем…' : locked ? 'Повторить сохранение' : 'Сохранить'}</button>}
+      {conflict ? <button className="albums-secondary" disabled={busy} onClick={() => { setBusy(true); void Promise.all([api.album(album.id), entry ? api.entry(album.id, entry.id, month) : Promise.resolve(null)]).then(([fresh, detail]) => { savedVersion.current = fresh.album.version; if (detail) { setTitle(detail.entry.title ?? ''); setCaption(detail.entry.caption ?? ''); setSources([]); setSourceCount(detail.entry.sourceCount); baseline.current.clear(); removed.current.clear(); promoted.current = null; savedTarget.current = detail.entry; setSourceCursor(null); void loadSources(); setQuote(detail.entry.childQuote ?? ''); setCategory(detail.entry.category); setPrecision(detail.entry.date.precision); setValue(detail.entry.date.value ?? '') } attempt.current = null; setConflict(false); setLocked(false); setError(null) }).catch(() => setError('Не удалось обновить данные. Повторите загрузку.')).finally(() => setBusy(false)) }} type="button">Обновить данные</button> : <button className="albums-primary" disabled={busy || sourceLoading || sourceError} type="submit">{busy ? 'Сохраняем…' : locked ? 'Повторить сохранение' : 'Сохранить'}</button>}
       <button disabled={busy} onClick={props.onCancel} type="button">Отмена</button>
     </form>
   </section>
