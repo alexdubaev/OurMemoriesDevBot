@@ -74,7 +74,7 @@ export const listAlbumEntriesQuerySchema = z.object({
 export const albumEntryViewQuerySchema = z.object({ view: z.literal('month-summary').optional() }).strict()
 export const albumEntrySourcePageQuerySchema = z.object({
   cursor: z.string().min(1).max(2048).optional(),
-  kind: z.enum(['photo','other','cover-media']).default('photo'),
+  kind: z.enum(['photo','other','cover-media','all']).default('photo'),
   limit: z.coerce.number().int().min(1).max(48).default(24),
 }).strict()
 export const albumMonthPhotoBatchRequestSchema = z.object({

@@ -119,6 +119,41 @@ describe('album PostgreSQL invariants', () => {
     expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBe(1)
   })
 
+  test('bounds oversized nonyear details while paging every media kind read-only', async () => {
+    const ids = Array.from({ length: 97 }, () => randomUUID())
+    await db.memory.createMany({ data: ids.map((id) => ({ id, familyId, childId, authorId: userId, kind: 'note', body: `Note ${id}`, occurredAt: new Date('2026-01-10T12:00:00.000Z'), firstPublishedAt: new Date() })) })
+    const token = await auth(userId, scope.principal.sessionId)
+    for (const kind of ['free', 'events', 'workshop'] as const) {
+      const album = await createAlbum(kind)
+      const entry = await createEntry(album.id)
+      await db.albumEntrySource.createMany({ data: ids.map((id, position) => ({ familyId, albumId: album.id, entryId: entry.id, memoryId: id, sourceKind: 'memory', sourceId: id, kind: 'note', position })) })
+      const path = `/api/v1/families/${familyId}/albums/${album.id}/entries/${entry.id}`
+      const response = await http(path, 'GET', token)
+      expect(response.status).toBe(200)
+      const dto = (await response.json()).entry
+      expect(dto.sourceCount).toBe(97)
+      expect(dto.sources).toHaveLength(24)
+      expect(dto.capabilities.edit).toBe(false)
+      const listed: string[] = []
+      let cursor: string | null = null
+      do {
+        const pageResponse = await http(`${path}/sources?kind=all&limit=24${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, 'GET', token)
+        expect(pageResponse.status).toBe(200)
+        const page = await pageResponse.json()
+        listed.push(...page.items.map((source: { id: string }) => source.id))
+        cursor = page.nextCursor
+      } while (cursor)
+      expect(listed).toHaveLength(97)
+      expect(new Set(listed).size).toBe(97)
+      expect((await http(`${path}/sources?kind=photo&limit=24`, 'GET', token)).status).toBe(200)
+    }
+    const normalAlbum = await createAlbum('free')
+    const normalEntry = await createEntry(normalAlbum.id)
+    await db.albumEntrySource.create({ data: { familyId, albumId: normalAlbum.id, entryId: normalEntry.id, memoryId: ids[0]!, sourceKind: 'memory', sourceId: ids[0]!, kind: 'note', position: 0 } })
+    const normal = await http(`/api/v1/families/${familyId}/albums/${normalAlbum.id}/entries/${normalEntry.id}`, 'GET', token)
+    expect((await normal.json()).entry).toMatchObject({ sourceCount: 1, capabilities: { edit: true } })
+  })
+
   test('month photo pages and cover selection keep an unbounded collection intact and block legacy replacement', async () => {
     const token = await auth(userId, scope.principal.sessionId)
     const created = await http(`/api/v1/families/${familyId}/albums`, 'POST', token,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import { albumDateSchema, albumSourceRefSchema, albumSourceSelectionSchema, createAlbumRequestSchema, listAlbumEntriesQuerySchema } from './albums'
+import { albumDateSchema, albumEntrySourcePageQuerySchema, albumSourceRefSchema, albumSourceSelectionSchema, createAlbumRequestSchema, listAlbumEntriesQuerySchema } from './albums'
 
 describe('album contracts', () => {
   test('validates partial calendar dates without inventing a day', () => {
@@ -24,5 +24,9 @@ describe('album contracts', () => {
     expect(albumSourceSelectionSchema.parse({ expectedVersion: 1, sources: [directPhoto] }).sources).toEqual([directPhoto])
     expect(albumSourceRefSchema.safeParse({ ...directPhoto, sourceKind: 'max_video' }).success).toBe(false)
     expect(albumSourceSelectionSchema.safeParse({ expectedVersion: 1, sources: [{ ...directPhoto, sourceKind: 'memory' }] }).success).toBe(false)
+  })
+
+  test('allows the additive all-media page selector', () => {
+    expect(albumEntrySourcePageQuerySchema.parse({ kind: 'all' }).kind).toBe('all')
   })
 })

@@ -42,7 +42,7 @@ export function albumsApi(transport: AuthenticatedTransport, familyId: string, s
     updateEntry: (id: string, entryId: string, input: z.input<typeof updateAlbumEntryRequestSchema>, month?: boolean) => request(`${root}/${id}/entries/${entryId}${monthView(month)}`, albumEntryResponseSchema, 'PATCH', updateAlbumEntryRequestSchema.parse(input)),
     sources: (id: string, entryId: string, input: z.input<typeof albumSourceSelectionSchema>, key: string) => request(`${root}/${id}/entries/${entryId}/sources`, albumEntryResponseSchema, 'PUT', albumSourceSelectionSchema.parse(input), key),
     clear: (id: string, entryId: string, expectedVersion: number, month?: boolean) => request(`${root}/${id}/entries/${entryId}/clear${monthView(month)}`, albumEntryResponseSchema, 'POST', { expectedVersion }),
-    monthSources: (id: string, entryId: string, kind: 'photo' | 'other' | 'cover-media', cursor: string | undefined, local: AbortSignal, limit = 24) => withMonthPhotoScope(local, (requestSignal) => scopedRequest(
+    monthSources: (id: string, entryId: string, kind: 'photo' | 'other' | 'cover-media' | 'all', cursor: string | undefined, local: AbortSignal, limit = 24) => withMonthPhotoScope(local, (requestSignal) => scopedRequest(
       () => transport.request(`${root}/${id}/entries/${entryId}/sources?${query({ kind, cursor, limit })}`, albumEntrySourcePageSchema, { signal: requestSignal }), requestSignal,
     )),
     setMonthCover: (id: string, entryId: string, expectedVersion: number, sourceId: string | null) => request(
