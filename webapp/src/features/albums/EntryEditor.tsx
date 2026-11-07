@@ -142,6 +142,7 @@ export function EntryEditor(props: Props) {
         const input = operation.inputs[0]
         if (!operation.metadataSaved) {
           const wantedDate = input.date ?? { precision: 'unknown', value: null }
+          const metadataMatches = (current: AlbumEntryDto) => current.title === input.title && current.caption === input.caption && current.date.precision === wantedDate.precision && current.date.value === wantedDate.value && (month || current.childQuote === input.childQuote && current.category === input.category)
           async function readAcknowledgement(reason: unknown) {
             let fresh: Awaited<ReturnType<AlbumsApi['entry']>>
             try { fresh = await api.entry(album.id, operation.target!.id, month) } catch { throw reason }
@@ -149,28 +150,34 @@ export function EntryEditor(props: Props) {
             // A lost acknowledgement is confirmed only by the same scoped resource
             // already containing every field owned by this PATCH. Later writes still
             // use the returned version; conflicting text and revoked access stay closed.
-            if (current.id === operation.target!.id && current.capabilities.edit && current.title === input.title && current.caption === input.caption && current.date.precision === wantedDate.precision && current.date.value === wantedDate.value && (month || current.childQuote === input.childQuote && current.category === input.category)) return fresh
+            const before = operation.target!.month ?? operation.target!.collection
+            const after = current.month ?? current.collection
+            const sameContext = before && after && before.discussionGeneration === after.discussionGeneration && before.membershipEpoch === after.membershipEpoch
+            if (sameContext && current.id === operation.target!.id && current.capabilities.edit && metadataMatches(current)) return fresh
             operation.metadataFailure = undefined
-            if (current.id === operation.target!.id && current.capabilities.edit && current.aggregateVersion === operation.version) return null
+            if (sameContext && current.id === operation.target!.id && current.capabilities.edit && current.aggregateVersion === operation.version) return null
             throw reason
           }
           // If an acknowledgement read also failed, retry that read before issuing
           // another unkeyed PATCH with a potentially obsolete version.
-          let result = operation.metadataFailure ? await readAcknowledgement(operation.metadataFailure) : null
-          if (!result) {
-            try { result = await api.updateEntry(album.id, operation.target!.id, { expectedVersion: operation.version, title: input.title, caption: input.caption, ...(!month ? { childQuote: input.childQuote, category: input.category } : {}), date: wantedDate }, month) }
-            catch (reason) {
-              const ambiguous = reason instanceof TypeError || reason instanceof ApiRequestError && reason.status >= 500 && reason.status < 600
-              if (!ambiguous) throw reason
-              operation.metadataFailure = reason
-              result = await readAcknowledgement(reason)
-              if (!result) throw reason
+          if (!metadataMatches(operation.target!)) {
+            let result = operation.metadataFailure ? await readAcknowledgement(operation.metadataFailure) : null
+            if (!result) {
+              try { result = await api.updateEntry(album.id, operation.target!.id, { expectedVersion: operation.version, title: input.title, caption: input.caption, ...(!month ? { childQuote: input.childQuote, category: input.category } : {}), date: wantedDate }, month) }
+              catch (reason) {
+                const ambiguous = reason instanceof TypeError || reason instanceof ApiRequestError && reason.status >= 500 && reason.status < 600
+                if (!ambiguous) throw reason
+                operation.metadataFailure = reason
+                result = await readAcknowledgement(reason)
+                if (!result) throw reason
+              }
             }
+            operation.target = result.entry; operation.version = result.entry.aggregateVersion
           }
           operation.metadataFailure = undefined
-          operation.target = result.entry; operation.version = result.entry.aggregateVersion; operation.metadataSaved = true
-          savedTarget.current = result.entry; savedVersion.current = operation.version
-          if (month) monthEntry = result.entry
+          operation.metadataSaved = true
+          savedTarget.current = operation.target; savedVersion.current = operation.version
+          if (month) monthEntry = operation.target ?? undefined
         }
       }
       while (!month && operation.changeNext < operation.changes.length) {
