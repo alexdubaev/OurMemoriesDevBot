@@ -63,7 +63,7 @@ describe('album PostgreSQL invariants', () => {
     await httpDb.$disconnect()
   })
 
-  async function createAlbum(kind: 'free' | 'events' | 'workshop' = 'free') {
+  async function createAlbum(kind: 'year' | 'free' | 'events' | 'workshop' = 'free') {
     const album = await db.album.create({ data: {
       familyId, childId: kind === 'free' ? null : childId, kind, title: 'Тестовый альбом',
       createActorId: userId, createOperation: 'test:create', createRequestId: randomUUID(), initialPayloadHash: 'a'.repeat(64),
@@ -71,9 +71,9 @@ describe('album PostgreSQL invariants', () => {
     return album
   }
 
-  async function createEntry(albumId: string, values: { title?: string | null; caption?: string | null; dateValue?: string | null; precision?: 'day' | 'month' | 'year' | 'unknown'; orderKey?: number } = {}) {
+  async function createEntry(albumId: string, values: { kind?: 'month' | 'event' | 'work'; monthNumber?: number | null; title?: string | null; caption?: string | null; dateValue?: string | null; precision?: 'day' | 'month' | 'year' | 'unknown'; orderKey?: number } = {}) {
     return db.albumEntry.create({ data: {
-      familyId, albumId, kind: 'event', orderKey: values.orderKey ?? 1,
+      familyId, albumId, kind: values.kind ?? 'event', monthNumber: values.monthNumber ?? null, orderKey: values.orderKey ?? 1,
       title: values.title ?? null, caption: values.caption ?? null,
       dateValue: values.dateValue ?? null, datePrecision: values.precision ?? 'unknown',
     } })
@@ -118,6 +118,136 @@ describe('album PostgreSQL invariants', () => {
     await repository.setSources(scope, album.id, entry.id, { expectedVersion: 1, sources: [{ memoryId: memory.id, sourceKind: 'memory', sourceId: memory.id }] }, randomUUID(), 'd'.repeat(64))
     expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBe(1)
   })
+
+  test('does not remove the last available workshop photo or event material', async () => {
+    async function addPhoto(albumId: string, entryId: string) {
+      const asset = await db.mediaAsset.create({ data: {
+        familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+        originalKey: `synthetic/last-album-photo/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg',
+        sha256: `${randomUUID().replaceAll('-', '')}${'e'.repeat(32)}`, byteSize: 3, width: 600, height: 400,
+        originalStatus: 'stored', renditionStatus: 'ready',
+      } })
+      await db.albumPhoto.create({ data: { familyId, mediaId: asset.id } })
+      return db.albumEntrySource.create({ data: { familyId, albumId, entryId, memoryId: null,
+        albumPhotoMediaId: asset.id, sourceKind: 'private_storage', sourceId: asset.id, kind: 'photo', position: 0 } })
+    }
+
+    const workshop = await createAlbum('workshop')
+    const work = await createEntry(workshop.id, { kind: 'work' })
+    const onlyWorkPhoto = await addPhoto(workshop.id, work.id)
+    await expect(repository.removeMonthPhoto(scope, workshop.id, work.id, onlyWorkPhoto.id, work.version)).rejects.toThrow(/Для работы добавьте хотя бы одно фото/)
+    expect(await db.albumEntrySource.findUnique({ where: { id: onlyWorkPhoto.id } })).not.toBeNull()
+
+    const events = await createAlbum('events')
+    const event = await createEntry(events.id, { kind: 'event', title: 'Встреча', caption: null })
+    const onlyEventSource = await addPhoto(events.id, event.id)
+    await expect(repository.removeMonthPhoto(scope, events.id, event.id, onlyEventSource.id, event.version)).rejects.toThrow(/Событию нужны название и описание либо хотя бы один источник/)
+    expect(await db.albumEntrySource.findUnique({ where: { id: onlyEventSource.id } })).not.toBeNull()
+  })
+
+  test('pages and changes large photo collections in every album kind while preserving other sources', async () => {
+    const token = await auth(userId, scope.principal.sessionId)
+    const cases = [
+      { kind: 'year' as const, entryKind: 'month' as const, monthNumber: 1 },
+      { kind: 'events' as const, entryKind: 'event' as const },
+      { kind: 'workshop' as const, entryKind: 'work' as const },
+      { kind: 'free' as const, entryKind: 'work' as const },
+    ]
+    for (const { kind, entryKind, monthNumber } of cases) {
+      const album = await createAlbum(kind)
+      const entry = await createEntry(album.id, { kind: entryKind, monthNumber, title: kind === 'events' ? 'Событие' : null, caption: kind === 'events' ? 'История события' : null })
+      const assets = await db.mediaAsset.createManyAndReturn({ data: Array.from({ length: 100 }, (_, index) => ({
+        familyId, uploaderId: userId, sourceKind: 'upload' as const, purpose: 'memory' as const, mediaKind: 'photo' as const,
+        originalKey: `synthetic/all-album-photos/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg',
+        sha256: `${randomUUID().replaceAll('-', '')}${'b'.repeat(32)}`, byteSize: 3, width: 600, height: 400,
+        originalStatus: 'stored' as const, renditionStatus: 'ready' as const,
+      })) })
+      await db.albumPhoto.createMany({ data: assets.map((asset) => ({ familyId, mediaId: asset.id })) })
+      await db.albumEntrySource.createMany({ data: assets.map((asset, position) => ({
+        familyId, albumId: album.id, entryId: entry.id, memoryId: null, albumPhotoMediaId: asset.id,
+        sourceKind: 'private_storage' as const, sourceId: asset.id, kind: 'photo' as const, position,
+      })) })
+
+      const path = `/api/v1/families/${familyId}/albums/${album.id}/entries/${entry.id}`
+      const firstPage = await http(`${path}/sources?kind=all&limit=48`, 'GET', token)
+      expect(firstPage.status).toBe(200)
+      const firstPageBody = await firstPage.json()
+      expect(firstPageBody.items).toHaveLength(48)
+      const secondPage = await http(`${path}/sources?kind=all&limit=48&cursor=${encodeURIComponent(firstPageBody.nextCursor)}`, 'GET', token)
+      expect(secondPage.status).toBe(200)
+      const secondPageBody = await secondPage.json()
+      expect(secondPageBody.items).toHaveLength(48)
+      const thirdPage = await http(`${path}/sources?kind=all&limit=48&cursor=${encodeURIComponent(secondPageBody.nextCursor)}`, 'GET', token)
+      const thirdPageBody = await thirdPage.json()
+      expect(thirdPageBody.items).toHaveLength(4)
+      expect(new Set([...firstPageBody.items, ...secondPageBody.items, ...thirdPageBody.items].map(({ id }: { id: string }) => id)).size).toBe(100)
+      const summary = await http(`${path}?view=collection-summary`, 'GET', token)
+      expect(summary.status).toBe(200)
+      const summaryEntry = (await summary.json()).entry
+      expect(summaryEntry.collection.photoCount).toBe(100)
+      expect(summaryEntry.sourceCount).toBe(100)
+      expect(summaryEntry.sources.length).toBe(kind === 'year' ? 0 : 1)
+
+      let otherSourceRef: { memoryId: string; sourceKind: 'memory'; sourceId: string } | undefined
+      if (kind === 'events' || kind === 'free') {
+        const note = await createNote()
+        otherSourceRef = { memoryId: note.id, sourceKind: 'memory', sourceId: note.id }
+      }
+      const addedAsset = await db.mediaAsset.create({ data: {
+        familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+        originalKey: `synthetic/all-album-delta/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg',
+        sha256: `${randomUUID().replaceAll('-', '')}${'c'.repeat(32)}`, byteSize: 3, width: 600, height: 400, originalStatus: 'stored', renditionStatus: 'ready',
+      } })
+      await db.albumPhoto.create({ data: { familyId, mediaId: addedAsset.id } })
+      const firstRef = { memoryId: null, sourceKind: 'private_storage' as const, sourceId: addedAsset.id }
+      const adds = [firstRef, ...(otherSourceRef ? [otherSourceRef] : [])]
+      const deltaKey = randomUUID()
+      const removedAssociation = await db.albumEntrySource.findFirstOrThrow({ where: { albumId: album.id, entryId: entry.id, sourceId: assets[1]!.id } })
+      const deltaBody = { expectedVersion: summaryEntry.aggregateVersion, add: adds, removeIds: [removedAssociation.id], firstSource: firstRef }
+      const delta = await http(`${path}/sources`, 'PATCH', token, deltaBody, deltaKey)
+      expect(delta.status).toBe(200)
+      const changedEntry = (await delta.json()).entry
+      expect((await http(`${path}/sources?kind=all&limit=48&cursor=${encodeURIComponent(firstPageBody.nextCursor)}`, 'GET', token)).status).toBe(409)
+      expect(changedEntry.collection.photoCount).toBe(100)
+      expect(changedEntry.collection.otherCount).toBe(otherSourceRef ? 1 : 0)
+      expect(changedEntry.sourceCount).toBe(100 + (otherSourceRef ? 1 : 0))
+      expect(changedEntry.sources.length).toBe(kind === 'year' ? 0 : 1)
+      const firstAssociation = await db.albumEntrySource.findFirstOrThrow({ where: { albumId: album.id, entryId: entry.id, sourceId: addedAsset.id } })
+      if (kind !== 'year') expect(changedEntry.sources[0].id).toBe(firstAssociation.id)
+      expect(await db.albumEntrySource.findUnique({ where: { id: removedAssociation.id } })).toBeNull()
+      expect(await db.albumEntrySource.findFirst({ where: { albumId: album.id, entryId: entry.id, sourceId: assets[0]!.id } })).not.toBeNull()
+      expect((await http(`${path}/sources`, 'PATCH', token, deltaBody, deltaKey)).status).toBe(200)
+
+      const batch = await http(`${path}/photo-batches`, 'POST', token, { discussionGeneration: entry.discussionGeneration, membershipEpoch: 1, count: 1 }, randomUUID())
+      expect(batch.status).toBe(200)
+      const appendAsset = await db.mediaAsset.create({ data: {
+        familyId, uploaderId: userId, sourceKind: 'upload', purpose: 'memory', mediaKind: 'photo',
+        originalKey: `synthetic/all-album-batch/${randomUUID()}`, declaredMime: 'image/jpeg', verifiedMime: 'image/jpeg',
+        sha256: `${randomUUID().replaceAll('-', '')}${'d'.repeat(32)}`, byteSize: 3, width: 600, height: 400, originalStatus: 'stored', renditionStatus: 'ready',
+      } })
+      await db.albumPhoto.create({ data: { familyId, mediaId: appendAsset.id } })
+      const appended = await http(`${path}/photos`, 'POST', token, {
+        grant: (await batch.json()).grant, offset: 0,
+        source: { memoryId: null, sourceKind: 'private_storage', sourceId: appendAsset.id },
+      }, randomUUID())
+      expect(appended.status).toBe(204)
+      const appendedAssociation = await db.albumEntrySource.findFirstOrThrow({ where: { albumId: album.id, entryId: entry.id, sourceId: appendAsset.id } })
+      const versionBeforeRemove = (await db.albumEntry.findUniqueOrThrow({ where: { id: entry.id } })).version
+      expect((await http(`${path}/photos/${appendedAssociation.id}`, 'DELETE', token, undefined, undefined, { 'if-match': String(versionBeforeRemove) })).status).toBe(204)
+      expect(await db.albumEntrySource.findUnique({ where: { id: firstAssociation.id } })).not.toBeNull()
+      if (otherSourceRef) expect(await db.albumEntrySource.findFirst({ where: { albumId: album.id, entryId: entry.id, sourceId: otherSourceRef.sourceId } })).not.toBeNull()
+
+      const currentAlbumVersion = (await db.album.findUniqueOrThrow({ where: { id: album.id } })).version
+      const legacy = await http(`${path}/sources`, 'PUT', token, { expectedVersion: currentAlbumVersion, sources: [] }, randomUUID())
+      expect(legacy.status).toBe(409)
+      await expect(db.$transaction(async (tx) => {
+        await tx.albumEntrySource.deleteMany({ where: { albumId: album.id, entryId: entry.id } })
+        await tx.albumSourceOperation.create({ data: { familyId, albumId: album.id, entryId: entry.id, actorUserId: userId,
+          operation: 'set_sources', requestId: randomUUID(), payloadHash: 'e'.repeat(64) } })
+      })).rejects.toThrow(/paged source updates/i)
+      expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBeGreaterThan(96)
+    }
+  }, { timeout: 60_000 })
 
   test('month photo pages and cover selection keep an unbounded collection intact and block legacy replacement', async () => {
     const token = await auth(userId, scope.principal.sessionId)
@@ -217,7 +347,7 @@ describe('album PostgreSQL invariants', () => {
         familyId, albumId: album.id, entryId: entry.id, actorUserId: userId, operation: 'set_sources',
         requestId: randomUUID(), payloadHash: 'f'.repeat(64),
       } })
-    })).rejects.toThrow(/paged photo updates/i)
+    })).rejects.toThrow(/paged source updates/i)
     expect(await db.albumEntrySource.count({ where: { albumId: album.id, entryId: entry.id } })).toBe(2_000)
     expect((await db.albumEntry.findUniqueOrThrow({ where: { id: entry.id } })).version).toBe(beforeLegacyReplayVersion)
     const staleBatch = await http(`${path}/photo-batches`, 'POST', token, { discussionGeneration: 1, membershipEpoch: 1, count: 1 }, randomUUID())

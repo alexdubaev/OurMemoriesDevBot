@@ -12,6 +12,7 @@ import type {
   AlbumDto,
   AlbumEntryDto,
   AlbumSourceSelection,
+  AlbumSourceChanges,
   CreateAlbumEntryRequest,
   CreateAlbumRequest,
   UpdateAlbumEntryRequest,
@@ -150,7 +151,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
     })
   }
 
-  async listEntries(scope: FamilyScope, albumId: string, input: { limit: number; year?: number; category?: string; view?: 'month-summary'; before?: EntryCursor }) {
+  async listEntries(scope: FamilyScope, albumId: string, input: { limit: number; year?: number; category?: string; view?: 'month-summary' | 'collection-summary'; before?: EntryCursor }) {
     return this.db.$transaction(async (tx) => {
       const access = await lockScope(tx, scope, false)
       const album = await tx.album.findFirst({ where: { id: albumId, familyId: scope.familyId, deletedAt: null } })
@@ -177,9 +178,9 @@ export class PrismaAlbumRepository implements AlbumRepository {
       const orderBy: Prisma.AlbumEntryOrderByWithRelationInput[] = dated
         ? [{ dateValue: { sort: direction, nulls: 'last' } }, { id: 'asc' }]
         : [{ orderKey: 'asc' }, { id: 'asc' }]
-      const rows = await tx.albumEntry.findMany({ where, orderBy, take: input.limit + 1, include: { sources: { orderBy: { position: 'asc' }, ...(input.view === 'month-summary' ? { take: 0 } : album.kind === 'year' ? { take: 97 } : {}) } } })
+      const rows = await tx.albumEntry.findMany({ where, orderBy, take: input.limit + 1, include: { sources: { orderBy: [{ position: 'asc' }, { id: 'asc' }], take: input.view === 'month-summary' || (album.kind === 'year' && input.view === 'collection-summary') ? 0 : input.view === 'collection-summary' ? 1 : 97 } } })
       const page = rows.slice(0, input.limit)
-      if (album.kind === 'year' && !input.view) {
+      if (!input.view) {
         const oversized = await tx.albumEntrySource.groupBy({
           by: ['entryId'], where: { albumId, familyId: scope.familyId, entryId: { in: page.map(({ id }) => id) } },
           _count: { _all: true }, having: { entryId: { _count: { gt: 96 } } },
@@ -236,30 +237,30 @@ export class PrismaAlbumRepository implements AlbumRepository {
     return { entry, replayed: result.replayed || result.response.reused }
   }
 
-  async getEntry(scope: FamilyScope, albumId: string, entryId: string, view?: 'month-summary'): Promise<AlbumEntryDto> {
+  async getEntry(scope: FamilyScope, albumId: string, entryId: string, view?: 'month-summary' | 'collection-summary'): Promise<AlbumEntryDto> {
     return this.db.$transaction(async (tx) => {
       const access = await lockScope(tx, scope, false)
       const album = await tx.album.findFirst({ where: { id: albumId, familyId: scope.familyId, deletedAt: null } })
       if (!album) throw albumMissing()
-      const row = await tx.albumEntry.findFirst({ where: { id: entryId, albumId, familyId: scope.familyId, deletedAt: null }, include: { sources: { orderBy: { position: 'asc' }, ...(view === 'month-summary' ? { take: 0 } : album.kind === 'year' ? { take: 97 } : {}) } } })
+      const row = await tx.albumEntry.findFirst({ where: { id: entryId, albumId, familyId: scope.familyId, deletedAt: null }, include: { sources: { orderBy: [{ position: 'asc' }, { id: 'asc' }], take: view === 'month-summary' || (album.kind === 'year' && view === 'collection-summary') ? 0 : view === 'collection-summary' ? 1 : 97 } } })
       if (!row) throw albumMissing()
-      if (album.kind === 'year' && !view && row.sources.length > 96) throw legacyMonthTooLarge()
+      if (!view && row.sources.length > 96) throw legacyCollectionPaged()
       return (await projectEntries(tx, this.sourceCatalog, scope, access.role, album, [row], view, access.membershipEpoch))[0]!
     })
   }
 
-  async updateEntry(scope: FamilyScope, albumId: string, entryId: string, input: UpdateAlbumEntryRequest, view?: 'month-summary') {
+  async updateEntry(scope: FamilyScope, albumId: string, entryId: string, input: UpdateAlbumEntryRequest, view?: 'month-summary' | 'collection-summary') {
     await this.db.$transaction(async (tx) => {
       const access = await lockScope(tx, scope, true)
       const album = await lockAlbum(tx, scope.familyId, albumId)
       assertVersion(album.version, input.expectedVersion)
       const entry = await lockEntry(tx, scope.familyId, albumId, entryId)
       if (album.kind === 'year' && entry.kind !== 'month') throw albumMissing()
-      if (album.kind === 'year' && !view && await hasLegacyOversizedSources(tx, scope.familyId, albumId, entryId)) throw legacyMonthTooLarge()
+      if (!view && await hasLegacyOversizedSources(tx, scope.familyId, albumId, entryId)) throw legacyCollectionPaged()
       const values = {
         title: input.title !== undefined ? input.title : entry.title,
         caption: input.caption !== undefined ? input.caption : entry.caption,
-        sourceCount: album.kind === 'events' ? await countAvailableSources(tx, this.sourceCatalog, scope, entryId) : 0,
+        sourceCount: album.kind === 'events' ? await countAvailableSources(tx, scope, entryId) : 0,
       }
       if (album.kind === 'events' && !(values.title?.trim() && (values.caption?.trim() || values.sourceCount > 0))) throw new AlbumFailure('invalid_input', 'Событию нужны название и описание либо хотя бы один источник')
       // Distinguish an ordinary edit (including an intentionally empty month)
@@ -279,7 +280,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
     return this.getEntry(scope, albumId, entryId, view)
   }
 
-  async clearEntry(scope: FamilyScope, albumId: string, entryId: string, expectedVersion: number, view?: 'month-summary') {
+  async clearEntry(scope: FamilyScope, albumId: string, entryId: string, expectedVersion: number, view?: 'month-summary' | 'collection-summary') {
     await this.db.$transaction(async (tx) => {
       await lockScope(tx, scope, true)
       const album = await lockAlbum(tx, scope.familyId, albumId)
@@ -316,15 +317,15 @@ export class PrismaAlbumRepository implements AlbumRepository {
     return this.db.$transaction(async (tx) => {
       const access = await lockScope(tx, scope, false)
       const album = await tx.album.findFirst({ where: { id: albumId, familyId: scope.familyId, deletedAt: null } })
-      if (!album || album.kind !== 'year') throw albumMissing()
-      const entry = await tx.albumEntry.findFirst({ where: { id: entryId, albumId, familyId: scope.familyId, deletedAt: null, kind: 'month' } })
+      if (!album) throw albumMissing()
+      const entry = await tx.albumEntry.findFirst({ where: { id: entryId, albumId, familyId: scope.familyId, deletedAt: null }, select: { id: true, albumId: true, version: true, monthCoverSourceId: true } })
       if (!entry) throw albumMissing()
       const cover = query.kind === 'photo' ? await projectEffectiveMonthCover(tx, this.sourceCatalog, scope, entry) : null
       const where: Prisma.AlbumEntrySourceWhereInput = {
         familyId: scope.familyId, albumId, entryId,
-        ...(query.kind === 'photo' ? { kind: 'photo', ...(cover?.source ? { id: { not: cover.source.id } } : {}) }
+        ...(query.kind === 'photo' ? { kind: 'photo', ...(album.kind === 'year' && cover?.source ? { id: { not: cover.source.id } } : {}) }
           : query.kind === 'other' ? { kind: { in: ['video','voice','note'] } }
-            : { kind: { in: ['photo','video'] } }),
+            : query.kind === 'cover-media' ? { kind: { in: ['photo','video'] } } : {}),
         ...(before ? { OR: [{ position: { gt: before.position } }, { position: before.position, id: { gt: before.id } }] } : {}),
       }
       const rows = await tx.albumEntrySource.findMany({
@@ -336,7 +337,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
       const last = page.at(-1)
       return { items, hasNext: rows.length > query.limit, last: last ? { position: last.position, id: last.id } : null,
         coverSourceId: query.kind === 'photo' ? cover?.selectedId ?? null : null,
-        coverId: query.kind === 'photo' ? cover?.source?.id ?? null : null }
+        coverId: query.kind === 'photo' ? cover?.source?.id ?? null : null, entryVersion: entry.version }
     })
   }
 
@@ -363,10 +364,9 @@ export class PrismaAlbumRepository implements AlbumRepository {
     return this.db.$transaction(async (tx) => {
       const access = await lockScope(tx, scope, true)
       const album = await lockAlbum(tx, scope.familyId, albumId)
-      if (album.kind !== 'year') throw albumMissing()
       const entry = await lockEntry(tx, scope.familyId, albumId, entryId)
-      if (entry.kind !== 'month') throw albumMissing()
-      if (entry.discussionGeneration !== input.discussionGeneration || access.membershipEpoch !== input.membershipEpoch) throw new AlbumFailure('version_conflict', 'Месяц или доступ изменился. Обновите месяц и повторите добавление')
+      if (album.kind === 'year' && entry.kind !== 'month') throw albumMissing()
+      if (entry.discussionGeneration !== input.discussionGeneration || access.membershipEpoch !== input.membershipEpoch) throw new AlbumFailure('version_conflict', 'Коллекция или доступ изменились. Обновите список и повторите добавление')
       const previous = await tx.albumSourceOperation.findFirst({ where: { familyId: scope.familyId, actorUserId: scope.principal.userId, albumId, entryId, operation: 'month_photo_batch', requestId } })
       if (previous) {
         if (previous.payloadHash !== payloadHash || previous.startPosition === null || previous.count === null) throw idempotencyConflict()
@@ -386,13 +386,13 @@ export class PrismaAlbumRepository implements AlbumRepository {
   }
 
   async appendMonthPhoto(scope: FamilyScope, albumId: string, entryId: string, input: { source: AlbumMonthPhotoAppendRequest['source']; position: number; discussionGeneration: number; membershipEpoch: number }, requestId: string, payloadHash: string, actorUserId: string) {
+    const notificationPilot = this.notificationPilot
     await this.db.$transaction(async (tx) => {
       const access = await lockScope(tx, scope, true)
       const album = await lockAlbum(tx, scope.familyId, albumId)
-      if (album.kind !== 'year') throw albumMissing()
       const entry = await lockEntry(tx, scope.familyId, albumId, entryId)
-      if (entry.kind !== 'month') throw albumMissing()
-      if (access.membershipEpoch !== input.membershipEpoch || entry.discussionGeneration !== input.discussionGeneration) throw new AlbumFailure('version_conflict', 'Месяц или доступ изменился. Обновите месяц и повторите добавление')
+      if (album.kind === 'year' && entry.kind !== 'month') throw albumMissing()
+      if (access.membershipEpoch !== input.membershipEpoch || entry.discussionGeneration !== input.discussionGeneration) throw new AlbumFailure('version_conflict', 'Коллекция или доступ изменились. Обновите список и повторите добавление')
       if (actorUserId !== scope.principal.userId) throw albumMissing()
       const existingOperation = await tx.albumSourceOperation.findFirst({ where: { familyId: scope.familyId, actorUserId, albumId, entryId, operation: 'month_photo_append', requestId } })
       if (existingOperation) {
@@ -402,7 +402,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
       const positionOwner = await tx.albumEntrySource.findFirst({ where: { familyId: scope.familyId, albumId, entryId, position: input.position }, select: { id: true } })
       if (positionOwner) throw new AlbumFailure('conflict', 'Эта позиция уже занята. Обновите месяц и повторите добавление')
       const [source] = await this.sourceCatalog.resolve(tx, scope, [input.source], 'update')
-      if (!source?.available || source.kind !== 'photo') throw new AlbumFailure('invalid_input', 'В первый год можно добавлять только доступные фотографии')
+      if (!source?.available || source.kind !== 'photo') throw new AlbumFailure('invalid_input', 'Можно добавлять только доступные фотографии')
       const existingSource = await tx.albumEntrySource.findFirst({ where: {
         entryId, memoryId: source.memoryId, sourceKind: source.sourceKind as AlbumEntrySourceKind, sourceId: source.sourceId,
       } })
@@ -420,10 +420,13 @@ export class PrismaAlbumRepository implements AlbumRepository {
         kind: 'photo', position: input.position,
       } })
       await tx.albumEntry.update({ where: { id: entryId }, data: { version: { increment: 1 } } })
-      await tx.albumSourceOperation.create({ data: {
+      if (album.kind !== 'year') await tx.album.update({ where: { id: albumId }, data: { version: { increment: 1 } } })
+      const operation = await tx.albumSourceOperation.create({ data: {
         familyId: scope.familyId, actorUserId, albumId, entryId, operation: 'month_photo_append',
         requestId, payloadHash, startPosition: created.position, count: 1,
       } })
+      if (album.kind !== 'year') await enqueuePilotNotification(tx, notificationPilot, { kind: 'album', familyId: scope.familyId, albumId, entryId,
+        eventId: `sources:${operation.id}`, photoCount: 1 })
     })
   }
 
@@ -431,15 +434,140 @@ export class PrismaAlbumRepository implements AlbumRepository {
     await this.db.$transaction(async (tx) => {
       await lockScope(tx, scope, true)
       const album = await lockAlbum(tx, scope.familyId, albumId)
-      if (album.kind !== 'year') throw albumMissing()
       const entry = await lockEntry(tx, scope.familyId, albumId, entryId)
-      if (entry.kind !== 'month') throw albumMissing()
+      if (album.kind === 'year' && entry.kind !== 'month') throw albumMissing()
       assertVersion(entry.version, expectedVersion)
       const source = await tx.albumEntrySource.findFirst({ where: { id: sourceId, familyId: scope.familyId, albumId, entryId, kind: 'photo' }, select: { id: true } })
       if (!source) throw albumMissing()
       await tx.albumEntrySource.delete({ where: { id: source.id } })
+      if (album.kind === 'workshop' && await countAvailableSources(tx, scope, entryId, 'photo') < 1) {
+        throw new AlbumFailure('invalid_input', 'Для работы добавьте хотя бы одно фото')
+      }
+      if (album.kind === 'events' && !(entry.title?.trim() && (entry.caption?.trim() || await countAvailableSources(tx, scope, entryId) > 0))) {
+        throw new AlbumFailure('invalid_input', 'Событию нужны название и описание либо хотя бы один источник')
+      }
       await tx.albumEntry.update({ where: { id: entryId }, data: { version: { increment: 1 } } })
+      if (album.kind !== 'year') await tx.album.update({ where: { id: albumId }, data: { version: { increment: 1 } } })
     })
+  }
+
+  async changeSources(scope: FamilyScope, albumId: string, entryId: string, input: AlbumSourceChanges, key: string, payloadHash: string) {
+    const sourceCatalog = this.sourceCatalog
+    const notificationPilot = this.notificationPilot
+    const result = await this.idempotency.run<{ entryId: string }>({
+      actorUserId: scope.principal.userId, operation: `albums:${albumId}:entries:${entryId}:source-changes`, key, payloadHash, now: new Date(),
+      payloadConflict: () => idempotencyConflict(),
+      restore: (snapshot) => ({ entryId: snapshotId(snapshot, 'entryId') }),
+      async execute(tx) {
+        await lockScope(tx, scope, true)
+        const album = await lockAlbum(tx, scope.familyId, albumId)
+        const receipt = await tx.albumSourceOperation.findUnique({ where: {
+          familyId_actorUserId_albumId_entryId_operation_requestId: {
+            familyId: scope.familyId, actorUserId: scope.principal.userId, albumId, entryId,
+            operation: 'source_changes', requestId: key,
+          },
+        } })
+        if (receipt) {
+          if (receipt.payloadHash !== payloadHash) throw idempotencyConflict()
+          return { resourceId: entryId, response: { entryId }, responseSnapshot: { entryId } }
+        }
+        const entry = await lockEntry(tx, scope.familyId, albumId, entryId)
+        assertVersion(album.version, input.expectedVersion)
+        if (album.kind === 'year' && entry.kind !== 'month') throw albumMissing()
+        const resolved = await sourceCatalog.resolve(tx, scope, input.add as AlbumSourceRef[], 'update')
+        if (album.kind === 'workshop' && resolved.some((source) => source.kind !== 'photo')) throw new AlbumFailure('invalid_input', 'В мастерской можно размещать только фото работ')
+        if (album.kind === 'year' && resolved.some((source) => source.kind !== 'photo' && source.kind !== 'video')) throw new AlbumFailure('invalid_input', 'В первом годе доступны только фото и видео')
+
+        const matchRefs = [...input.add, ...(input.firstSource ? [input.firstSource] : [])]
+        const matchConditions: Prisma.AlbumEntrySourceWhereInput[] = [
+          ...(input.removeIds.length ? [{ id: { in: input.removeIds } }] : []),
+          ...(input.firstSourceId ? [{ id: input.firstSourceId }] : []),
+          ...matchRefs.map(({ memoryId, sourceKind, sourceId }) => ({ memoryId, sourceKind: sourceKind as AlbumEntrySourceKind, sourceId })),
+        ]
+        const existing = await tx.albumEntrySource.findMany({ where: { familyId: scope.familyId, albumId, entryId, OR: matchConditions }, select: { id: true, memoryId: true, sourceKind: true, sourceId: true, kind: true } })
+        const sourceKey = (ref: { memoryId: string | null; sourceKind: string; sourceId: string }) => `${ref.memoryId ?? 'private'}:${ref.sourceKind}:${ref.sourceId}`
+        const removing = new Set(input.removeIds)
+        if (resolved.some((source) => {
+          const attached = existing.find((row) => sourceKey(sourceRef(row)) === sourceKey(source))
+          return attached !== undefined && removing.has(attached.id)
+        })) throw new AlbumFailure('invalid_input', 'Нельзя удалить и добавить один источник в одном изменении')
+        if (input.removeIds.length) {
+          const removed = await tx.albumEntrySource.deleteMany({ where: { familyId: scope.familyId, albumId, entryId, id: { in: input.removeIds } } })
+          if (removed.count !== input.removeIds.length) throw albumMissing()
+        }
+        const byKey = new Map(existing.map((row) => [sourceKey(sourceRef(row)), row]))
+        for (const removedId of input.removeIds) {
+          const removedRow = existing.find(({ id }) => id === removedId)
+          if (removedRow) byKey.delete(sourceKey(sourceRef(removedRow)))
+        }
+        const duplicateAdds = new Set<string>()
+        let photoCount = 0
+        for (const source of resolved) {
+          const normalizedKey = sourceKey(source)
+          if (duplicateAdds.has(normalizedKey)) continue
+          duplicateAdds.add(normalizedKey)
+          if (byKey.has(normalizedKey)) continue
+          const max = await tx.albumEntrySource.aggregate({ where: { familyId: scope.familyId, albumId, entryId }, _max: { position: true } })
+          const position = Math.max(entry.nextPhotoPosition ?? 0, (max._max.position ?? -1) + 1)
+          if (position >= 2_147_483_647) throw new AlbumFailure('conflict', 'Для этой главы невозможно зарезервировать новые позиции')
+          const created = await tx.albumEntrySource.create({ data: {
+            familyId: scope.familyId, albumId, entryId, memoryId: source.memoryId,
+            albumPhotoMediaId: source.memoryId === null ? source.sourceId : null,
+            sourceKind: source.sourceKind as AlbumEntrySourceKind, sourceId: source.sourceId,
+            kind: source.kind as AlbumSourceMediaKind, position,
+          } })
+          byKey.set(normalizedKey, created)
+          entry.nextPhotoPosition = position + 1
+          if (source.kind === 'photo') photoCount += 1
+        }
+
+        const firstRef = input.firstSource
+        const firstId = input.firstSourceId ?? (firstRef ? byKey.get(sourceKey(firstRef))?.id : undefined)
+        if (firstRef && !firstId) throw new AlbumFailure('invalid_input', 'Выбранный источник не прикреплён к этой главе')
+        if (firstId) {
+          const target = await tx.albumEntrySource.findFirst({ where: { id: firstId, familyId: scope.familyId, albumId, entryId }, select: { id: true } })
+          if (!target) throw new AlbumFailure('invalid_input', 'Выбранный источник не прикреплён к этой главе')
+          const max = await tx.albumEntrySource.aggregate({ where: { familyId: scope.familyId, albumId, entryId }, _max: { position: true }, _count: { _all: true } })
+          const start = Math.max(entry.nextPhotoPosition ?? 0, (max._max.position ?? -1) + 1)
+          const end = start + max._count._all
+          if (end > 2_147_483_647) throw new AlbumFailure('conflict', 'Для этой главы невозможно изменить порядок материалов')
+          await tx.$executeRaw(PrismaSql.sql`
+            WITH ranked AS (
+              SELECT id, row_number() OVER (ORDER BY CASE WHEN id = ${firstId}::uuid THEN 0 ELSE 1 END, position, id) - 1 AS ordinal
+                FROM album_entry_sources
+               WHERE family_id = ${scope.familyId}::uuid AND album_id = ${albumId}::uuid AND entry_id = ${entryId}::uuid
+            )
+            UPDATE album_entry_sources AS source
+               SET position = ${start} + ranked.ordinal::int
+              FROM ranked WHERE source.id = ranked.id
+          `)
+          entry.nextPhotoPosition = end
+        }
+
+        if (entry.nextPhotoPosition === null) {
+          const max = await tx.albumEntrySource.aggregate({ where: { familyId: scope.familyId, albumId, entryId }, _max: { position: true } })
+          const nextPosition = (max._max.position ?? -1) + 1
+          if (nextPosition > 2_147_483_647) throw new AlbumFailure('conflict', 'Для этой главы невозможно зарезервировать новые позиции')
+          entry.nextPhotoPosition = nextPosition
+        }
+
+        const availableRemaining = await countAvailableSources(tx, scope, entryId)
+        const availablePhotos = album.kind === 'workshop' ? await countAvailableSources(tx, scope, entryId, 'photo') : 0
+        if (album.kind === 'workshop' && availablePhotos < 1) throw new AlbumFailure('invalid_input', 'Для работы добавьте хотя бы одно фото')
+        if (album.kind === 'events' && !(entry.title?.trim() && (entry.caption?.trim() || availableRemaining > 0))) throw new AlbumFailure('invalid_input', 'Событию нужны название и описание либо хотя бы один источник')
+
+        await tx.albumEntry.update({ where: { id: entryId }, data: { version: { increment: 1 }, nextPhotoPosition: entry.nextPhotoPosition } })
+        await tx.album.update({ where: { id: albumId }, data: { version: { increment: 1 } } })
+        const operation = await tx.albumSourceOperation.create({ data: {
+          familyId: scope.familyId, albumId, entryId, actorUserId: scope.principal.userId,
+          operation: 'source_changes', requestId: key, payloadHash,
+        } })
+        await enqueuePilotNotification(tx, notificationPilot, { kind: 'album', familyId: scope.familyId, albumId, entryId,
+          eventId: `sources:${operation.id}`, photoCount })
+        return { resourceId: entryId, response: { entryId }, responseSnapshot: { entryId } }
+      },
+    })
+    return this.getEntry(scope, albumId, result.response.entryId, 'collection-summary')
   }
 
   async setSources(scope: FamilyScope, albumId: string, entryId: string, input: AlbumSourceSelection, key: string, payloadHash: string) {
@@ -464,10 +592,8 @@ export class PrismaAlbumRepository implements AlbumRepository {
       }
       assertVersion(album.version, input.expectedVersion)
       const entry = await lockEntry(tx, scope.familyId, albumId, entryId)
-      if (album.kind === 'year') {
-        if (entry.kind !== 'month') throw albumMissing()
-        if (entry.nextPhotoPosition !== null || await hasLegacyOversizedSources(tx, scope.familyId, albumId, entryId)) throw legacyMonthTooLarge()
-      }
+      if (album.kind === 'year' && entry.kind !== 'month') throw albumMissing()
+      if (entry.nextPhotoPosition !== null || await hasLegacyOversizedSources(tx, scope.familyId, albumId, entryId)) throw legacyCollectionPaged()
       const refs = input.sources as AlbumSourceRef[]
       const resolved = await sourceCatalog.resolve(tx, scope, refs, 'update')
       if (album.kind === 'workshop' && resolved.some((source) => source.kind !== 'photo')) throw new AlbumFailure('invalid_input', 'В мастерской можно размещать только фото работ')
@@ -627,8 +753,8 @@ async function projectAlbums(tx: PrismaTransactionClient, catalog: AlbumSourceCa
   })
 }
 
-async function projectEntries(tx: PrismaTransactionClient, catalog: AlbumSourceCatalog, scope: FamilyScope, role: Role, album: AlbumRow, entries: EntryRow[], view?: 'month-summary', membershipEpoch = 0): Promise<AlbumEntryDto[]> {
-  if (album.kind === 'year' && view === 'month-summary') {
+async function projectEntries(tx: PrismaTransactionClient, catalog: AlbumSourceCatalog, scope: FamilyScope, role: Role, album: AlbumRow, entries: EntryRow[], view?: 'month-summary' | 'collection-summary', membershipEpoch = 0): Promise<AlbumEntryDto[]> {
+  if (album.kind === 'year' && (view === 'month-summary' || view === 'collection-summary')) {
     return Promise.all(entries.map(async (entry) => {
       const month = await projectMonthSummary(tx, catalog, scope, entry, membershipEpoch)
       return {
@@ -636,6 +762,7 @@ async function projectEntries(tx: PrismaTransactionClient, catalog: AlbumSourceC
         childQuote: entry.childQuote, category: entry.category as AlbumEntryDto['category'],
         date: albumDateSchema.parse({ value: entry.dateValue, precision: entry.datePrecision }),
         version: entry.version, order: entry.orderKey, sourceCount: month.photoCount + month.otherCount, sources: [], month,
+        ...(view === 'collection-summary' ? { collection: month } : {}),
         aggregateVersion: album.version,
         capabilities: { edit: role === 'full', delete: false },
       }
@@ -644,7 +771,7 @@ async function projectEntries(tx: PrismaTransactionClient, catalog: AlbumSourceC
   const rows = entries.flatMap((entry) => entry.sources)
   const projected = await catalog.project(tx, scope, rows.map((row) => ({ ...sourceRef(row), id: row.id, kind: row.kind })))
   const byId = new Map(projected.map((source) => [source.id, source]))
-  return entries.map((entry) => ({
+  const result = entries.map((entry) => ({
     id: entry.id,
     kind: entry.kind,
     monthNumber: entry.monthNumber,
@@ -660,6 +787,9 @@ async function projectEntries(tx: PrismaTransactionClient, catalog: AlbumSourceC
     aggregateVersion: album.version,
     capabilities: { edit: role === 'full', delete: role === 'full' && album.kind !== 'year' },
   }))
+  if (view !== 'collection-summary') return result
+  const summaries = await Promise.all(entries.map((entry) => projectMonthSummary(tx, catalog, scope, entry, membershipEpoch)))
+  return result.map((item, index) => ({ ...item, sourceCount: summaries[index]!.photoCount + summaries[index]!.otherCount, collection: summaries[index]! }))
 }
 
 async function projectMonthSummary(tx: PrismaTransactionClient, catalog: AlbumSourceCatalog, scope: FamilyScope, entry: EntryRow, membershipEpoch: number) {
@@ -779,7 +909,7 @@ async function lockLiveChild(tx: PrismaTransactionClient, familyId: string, chil
 }
 function assertVersion(actual: number, expected: number) { if (actual !== expected) throw albumVersionConflict() }
 function idempotencyConflict() { return new AlbumFailure('idempotency_conflict', 'Этот Idempotency-Key уже использован с другими данными') }
-function legacyMonthTooLarge() { return new AlbumFailure('conflict', 'В этом месяце уже используется постраничное добавление фотографий. Обновите приложение, чтобы изменять список материалов') }
+function legacyCollectionPaged() { return new AlbumFailure('conflict', 'Для этой коллекции уже используется постраничное управление. Обновите приложение, чтобы изменять список материалов') }
 async function hasLegacyOversizedSources(tx: PrismaTransactionClient, familyId: string, albumId: string, entryId: string) {
   const overflow = await tx.albumEntrySource.findFirst({
     where: { familyId, albumId, entryId }, orderBy: [{ position: 'asc' }, { id: 'asc' }],
@@ -799,8 +929,12 @@ function validateEntryCreate(kind: AlbumKind, input: CreateAlbumEntryRequest, so
   if (kind === 'year') throw new AlbumFailure('invalid_input', 'В первом годе нельзя создавать дополнительные главы')
 }
 
-async function countAvailableSources(tx: PrismaTransactionClient, catalog: AlbumSourceCatalog, scope: FamilyScope, entryId: string) {
-  const rows = await tx.albumEntrySource.findMany({ where: { entryId, familyId: scope.familyId }, orderBy: { position: 'asc' } })
-  const projected = await catalog.project(tx, scope, rows.map((row) => ({ ...sourceRef(row), id: row.id, kind: row.kind })))
-  return projected.filter(({ available }) => available).length
+async function countAvailableSources(tx: PrismaTransactionClient, scope: FamilyScope, entryId: string, kind?: AlbumSourceMediaKind) {
+  const rows = await tx.$queryRaw<Array<{ count: bigint }>>(PrismaSql.sql`
+    SELECT count(*) AS count FROM album_entry_sources s
+     WHERE s.entry_id=${entryId}::uuid AND s.family_id=${scope.familyId}::uuid
+       AND (${kind === undefined} OR s.kind=${kind ?? 'photo'}::album_source_media_kind)
+       AND ${availableSourceCondition()}
+  `)
+  return Number(rows[0]?.count ?? 0n)
 }

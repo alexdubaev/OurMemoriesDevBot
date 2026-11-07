@@ -18,10 +18,13 @@ type Job = {
   failure?: { message: string; retryable: boolean }
 }
 type Operations = {
-  reserve(count: number, key: string, signal: AbortSignal): Promise<{ grant: string }>
   upload(file: File, key: string, resume: FamilyPhotoUploadResume, signal: AbortSignal, progress: (loaded: number, total: number) => void): Promise<string>
+} & ({
+  reserve(count: number, key: string, signal: AbortSignal): Promise<{ grant: string }>
   attach(input: AlbumMonthPhotoAppendRequest, key: string, signal: AbortSignal): Promise<unknown>
-}
+} | {
+  attachPhoto(source: SourceRef, key: string, signal: AbortSignal): Promise<unknown>
+})
 
 export class InvalidMonthPhoto extends Error {}
 
@@ -116,7 +119,7 @@ export function createMonthPhotoQueue(selection: readonly Selection[]) {
         if (signal.aborted) return
         if (job.saved || job.failure?.retryable === false) continue
         const batch = batches[Math.floor(index / batchSize)]!
-        if (!batch.grant) {
+        if ('reserve' in ops && !batch.grant) {
           current = { name: job.name, phase: 'reserve', fraction: 0 }
           notify()
           try {
@@ -149,8 +152,11 @@ export function createMonthPhotoQueue(selection: readonly Selection[]) {
           current = { name: job.name, phase: 'attach', fraction: 0 }
           notify()
           attachmentAttempted = true
-          const input = { grant: batch.grant, offset: index % batchSize, source: job.source! }
-          await retryRateLimited(() => ops.attach(input, job.key, signal))
+          if ('attachPhoto' in ops) await retryRateLimited(() => ops.attachPhoto(job.source!, job.key, signal))
+          else {
+            const input = { grant: batch.grant!, offset: index % batchSize, source: job.source! }
+            await retryRateLimited(() => ops.attach(input, job.key, signal))
+          }
           job.saved = true
         } catch (error) {
           if (signal.aborted) return

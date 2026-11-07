@@ -1179,11 +1179,12 @@ const db=new Client({connectionString:process.env.DATABASE_URL});
 try {
  const base=parse(process.env.MEMOLY_S3_MONTH_BASELINE),candidate=parse(process.env.MEMOLY_S3_MONTH_CANDIDATE),phase=process.env.MEMOLY_S3_MONTH_PHASE;
 	 const suffix={name:'20261105110000_album_month_photos',lf:'9d7e49ece81feb98cffd937c8b98475e28ca07dcd58b73e7aa2775711f86c87d',crlf:'64dfcc65f5c88ef1268b22e339e7ef934c077012da29df3fe37e6fdc08bd7340'};
- if(!['pre-sql','complete'].includes(phase)||base.length!==65||candidate.length!==66||base.some((r,i)=>r.name!==candidate[i]?.name||r.lf!==candidate[i]?.lf||r.crlf!==candidate[i]?.crlf)||JSON.stringify(candidate[65])!==JSON.stringify(suffix)) throw Error('unmeasured catalog');
+ const collectionSuffix={name:'20261107100000_all_album_photo_collections',lf:'d0213506ff9bd58684d0f1a5703c4a2b563e3eceaeedb525150da896ac046e5d',crlf:'b39ace95a6500768fe9f7fabea5f9f7d7174bce6c7e25d216e520816c76786e2'};
+ if(!['pre-sql','complete'].includes(phase)||base.length!==65||![66,67].includes(candidate.length)||base.some((r,i)=>r.name!==candidate[i]?.name||r.lf!==candidate[i]?.lf||r.crlf!==candidate[i]?.crlf)||JSON.stringify(candidate[65])!==JSON.stringify(suffix)||(candidate.length===67&&JSON.stringify(candidate[66])!==JSON.stringify(collectionSuffix))) throw Error('unmeasured catalog');
  await db.connect(); await db.query('BEGIN READ ONLY');
  const {rows}=await db.query('SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations ORDER BY migration_name');
- const count=phase==='complete'?66:rows.length;
- if(![65,66].includes(count)||rows.length!==count||rows.some((r,i)=>!r.finished_at||r.rolled_back_at||r.migration_name!==candidate[i]?.name||![candidate[i]?.lf,candidate[i]?.crlf].includes(r.checksum))) throw Error('ledger');
+ const count=phase==='complete'?candidate.length:rows.length;
+ if(![65,66,67].includes(count)||count>candidate.length||rows.length!==count||rows.some((r,i)=>!r.finished_at||r.rolled_back_at||r.migration_name!==candidate[i]?.name||![candidate[i]?.lf,candidate[i]?.crlf].includes(r.checksum))) throw Error('ledger');
  const {rows:s}=await db.query(`SELECT
   to_regclass('public.album_entry_comments') IS NOT NULL comments,
   to_regclass('public.album_entry_reactions') IS NOT NULL reactions,
@@ -1209,12 +1210,14 @@ try {
   EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.album_source_operations'::regclass AND tgname='album_source_operations_legacy_month_replace_fence') monthtriggerraw,
   EXISTS(SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid WHERE t.tgrelid='public.album_source_operations'::regclass AND t.tgname='album_source_operations_legacy_month_replace_fence' AND NOT t.tgisinternal AND t.tgenabled='O' AND t.tgtype=7 AND p.oid=to_regprocedure('public.reject_legacy_month_source_replace_after_append()')) monthtriggervalid,
   to_regprocedure('public.reject_legacy_month_source_replace_after_append()') IS NOT NULL monthfunctionraw,
-  EXISTS(SELECT 1 FROM pg_proc WHERE oid=to_regprocedure('public.reject_legacy_month_source_replace_after_append()') AND pronamespace='public'::regnamespace AND prorettype='trigger'::regtype) monthfunctionvalid`);
- const x=s[0],social=rows.length>=65,recovery=rows.length>=65,month=rows.length===66;
+  EXISTS(SELECT 1 FROM pg_proc WHERE oid=to_regprocedure('public.reject_legacy_month_source_replace_after_append()') AND pronamespace='public'::regnamespace AND prorettype='trigger'::regtype) monthfunctionvalid,
+  (SELECT md5(prosrc) FROM pg_proc WHERE oid=to_regprocedure('public.reject_legacy_month_source_replace_after_append()')) sourcefencebody`);
+ const x=s[0],social=rows.length>=65,recovery=rows.length>=65,month=rows.length>=66;
  if(!x||x.comments!==social||x.reactions!==social||x.generation!==social||x.trigger!==recovery||x.function!==recovery||
     x.coverraw!==month||x.nextposraw!==month||x.coverfkraw!==month||x.nextcheckraw!==month||x.coveridxraw!==month||x.pageidxraw!==month||
     x.startposraw!==month||x.opcountraw!==month||x.monthtriggerraw!==month||x.monthfunctionraw!==month||
-    (month&&(!x.covertype||!x.nextpostype||!x.coverfkvalid||!x.nextcheckvalid||!x.coveridxvalid||!x.pageidxvalid||!x.startpostype||!x.opcounttype||!x.monthtriggervalid||!x.monthfunctionvalid))) throw Error('schema');
+    (month&&(!x.covertype||!x.nextpostype||!x.coverfkvalid||!x.nextcheckvalid||!x.coveridxvalid||!x.pageidxvalid||!x.startpostype||!x.opcounttype||!x.monthtriggervalid||!x.monthfunctionvalid))||
+    (rows.length===67&&x.sourcefencebody!=='1c778ba8d5dc21453f750bc41b0de668')) throw Error('schema');
  await db.query('COMMIT');
 } catch { process.exitCode=1; } finally { await db.end().catch(()=>{}); }
 MEMOLY_S3_MONTH_HISTORY_JS

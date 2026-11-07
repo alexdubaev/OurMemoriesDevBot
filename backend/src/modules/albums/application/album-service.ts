@@ -5,11 +5,13 @@ import {
   updateAlbumEntryRequestSchema,
   updateAlbumRequestSchema,
   albumSourceSelectionSchema,
+  albumSourceChangesSchema,
   type CreateAlbumEntryRequest,
   type CreateAlbumRequest,
   type ListAlbumsQuery,
   type ListAlbumEntriesQuery,
   type AlbumSourceSelection,
+  type AlbumSourceChanges,
   type UpdateAlbumEntryRequest,
   type UpdateAlbumRequest,
   albumEntrySourcePageQuerySchema,
@@ -77,20 +79,20 @@ export class AlbumService {
   async updateEntry(scope: FamilyScope, albumId: string, entryId: string, input: UpdateAlbumEntryRequest) {
     return this.repository.updateEntry(scope, albumId, entryId, updateAlbumEntryRequestSchema.parse(input))
   }
-  getEntry(scope: FamilyScope, albumId: string, entryId: string, view?: 'month-summary') { return this.repository.getEntry(scope, albumId, entryId, view) }
+  getEntry(scope: FamilyScope, albumId: string, entryId: string, view?: 'month-summary' | 'collection-summary') { return this.repository.getEntry(scope, albumId, entryId, view) }
 
   async entrySources(scope: FamilyScope, albumId: string, entryId: string, query: AlbumEntrySourcePageQuery) {
     query = albumEntrySourcePageQuerySchema.parse(query)
     const filters = { kind: query.kind, entryId }
     const cursor = query.cursor ? this.readCursor(query.cursor, { familyId: scope.familyId, albumId, kind: 'month-sources', filters }) : undefined
-    const last = cursor?.last as { position: number; id: string; coverSourceId: string | null; coverId: string | null } | undefined
+    const last = cursor?.last as { position: number; id: string; coverSourceId: string | null; coverId: string | null; entryVersion?: number } | undefined
     const page = await this.repository.listEntrySources(scope, albumId, entryId, query, last)
-    if (last && (last.coverSourceId !== page.coverSourceId || last.coverId !== page.coverId)) throw new AlbumFailure('version_conflict', 'Обложка месяца изменилась. Загрузите страницу фотографий заново')
+    if (last && (last.coverSourceId !== page.coverSourceId || last.coverId !== page.coverId || (last.entryVersion !== undefined && last.entryVersion !== page.entryVersion))) throw new AlbumFailure('version_conflict', 'Коллекция изменилась. Загрузите страницу материалов заново')
     return {
       items: page.items,
       nextCursor: page.hasNext && page.last
         ? this.writeCursor({ version: 1, familyId: scope.familyId, albumId, kind: 'month-sources', filters,
-          last: { ...page.last, coverSourceId: page.coverSourceId, coverId: page.coverId } })
+          last: { ...page.last, coverSourceId: page.coverSourceId, coverId: page.coverId, entryVersion: page.entryVersion } })
         : null,
     }
   }
@@ -99,7 +101,7 @@ export class AlbumService {
     return this.repository.setMonthCover(scope, albumId, entryId, albumMonthCoverRequestSchema.parse(input))
   }
 
-  async updateMonthEntry(scope: FamilyScope, albumId: string, entryId: string, input: UpdateAlbumEntryRequest, view?: 'month-summary') {
+  async updateMonthEntry(scope: FamilyScope, albumId: string, entryId: string, input: UpdateAlbumEntryRequest, view?: 'month-summary' | 'collection-summary') {
     return this.repository.updateEntry(scope, albumId, entryId, updateAlbumEntryRequestSchema.parse(input), view)
   }
 
@@ -136,8 +138,12 @@ export class AlbumService {
     const normalized = albumSourceSelectionSchema.parse(input)
     return this.repository.setSources(scope, albumId, entryId, normalized, key.toLowerCase(), digest({ albumId, entryId, ...normalized }))
   }
+  async changeSources(scope: FamilyScope, albumId: string, entryId: string, input: AlbumSourceChanges, key: string) {
+    const normalized = albumSourceChangesSchema.parse(input)
+    return this.repository.changeSources(scope, albumId, entryId, normalized, key.toLowerCase(), digest({ albumId, entryId, ...normalized }))
+  }
 
-  clearEntry(scope: FamilyScope, albumId: string, entryId: string, version: number, view?: 'month-summary') { return this.repository.clearEntry(scope, albumId, entryId, version, view) }
+  clearEntry(scope: FamilyScope, albumId: string, entryId: string, version: number, view?: 'month-summary' | 'collection-summary') { return this.repository.clearEntry(scope, albumId, entryId, version, view) }
   removeMonthPhoto(scope: FamilyScope, albumId: string, entryId: string, sourceId: string, expectedVersion: number) {
     return this.repository.removeMonthPhoto(scope, albumId, entryId, sourceId, expectedVersion)
   }

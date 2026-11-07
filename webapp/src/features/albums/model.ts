@@ -44,7 +44,7 @@ export function previewPath(source?: AlbumSource | null) {
   return attachment.thumbnailPath
 }
 export function coverSource(sources: AlbumSource[]) { return sources.find((s) => s.available && (s.kind === 'photo' || s.kind === 'video')) ?? null }
-export function entryCover(entry: AlbumEntryDto) { return entry.month ? entry.month.cover : coverSource(entry.sources) }
+export function entryCover(entry: AlbumEntryDto) { return entry.month ? entry.month.cover : coverSource(entry.sources) ?? entry.collection?.cover ?? null }
 
 export const zoomLevels = [{ columns: 8, label: 'Обзор' }, { columns: 5, label: 'Коллаж' }, { columns: 3, label: 'Крупно' }] as const
 export function zoomLevel(level: number, delta: number) { return Math.max(0, Math.min(2, level + Math.sign(delta))) }
@@ -71,7 +71,7 @@ export function workshopLayout(entries: AlbumEntryDto[], columns: number, width:
       flush(); group = nextGroup
       headings.push({ y, title: group }); y += 48
     }
-    const photo = coverSource(entry.sources)?.attachment
+    const photo = entryCover(entry)?.attachment
     const ratio = photo?.width && photo.height ? photo.width / photo.height : 1
     const accent = hash(entry.id) % 13 === 0
     const wide = columns > 3 && (ratio > 1.4 || accent) ? 2 : 1

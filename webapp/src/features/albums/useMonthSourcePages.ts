@@ -6,7 +6,7 @@ import type { AlbumSource } from './model'
 type Pages = { pages: AlbumSource[][]; nextCursor: string | null; loading: boolean; error: 'network' | 'stale' | null }
 
 /** The caller keys the owning screen by month and version. */
-export function useMonthSourcePages(api: AlbumsApi, albumId: string, entryId: string, kind: 'photo' | 'other', enabled: boolean) {
+export function useMonthSourcePages(api: AlbumsApi, albumId: string, entryId: string, kind: 'photo' | 'other' | 'all', enabled: boolean) {
   const [state, setState] = useState<Pages>({ pages: [], nextCursor: null, loading: enabled, error: null })
   const request = useRef<AbortController | null>(null)
   const load = useCallback(async (cursor?: string) => {

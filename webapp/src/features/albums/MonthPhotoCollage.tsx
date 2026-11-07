@@ -13,9 +13,10 @@ type Props = {
   scopeKey: string
   transport: AuthenticatedTransport
   onOpen: (index: number, element: HTMLElement) => void
+  showCoverIcon?: boolean
 }
 
-export function MonthPhotoCollage({ pages, cover, accountId, scopeKey, transport, onOpen }: Props) {
+export function MonthPhotoCollage({ pages, cover, accountId, scopeKey, transport, onOpen, showCoverIcon = true }: Props) {
   const root = useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = useState({ width: 0, top: 0, height: 0 })
   const layout = useMemo(() => monthCollageLayout(pages, viewport.width, Boolean(cover)), [pages, viewport.width, cover])
@@ -53,9 +54,9 @@ export function MonthPhotoCollage({ pages, cover, accountId, scopeKey, transport
   return <div aria-label="Фотографии месяца" className="month-collage" role="group">
     {cover ? <div className="month-collage-cover" data-month-cover={cover.id}>
       <button aria-label="Открыть фото 1" className="month-collage-tile" data-month-photo={cover.id} onClick={(event) => onOpen(0, event.currentTarget)} type="button">{preview(cover)}</button>
-      <span aria-label="Обложка месяца" className="month-collage-cover-icon" role="img">
+      {showCoverIcon ? <span aria-label="Обложка месяца" className="month-collage-cover-icon" role="img">
         <WebpIcon decorative monochrome name="star" size={14} />
-      </span>
+      </span> : null}
     </div> : null}
     <div className="month-collage-wall" data-populated={layout.height > 0 || undefined} ref={root} style={{ height: layout.height }}>
       {visible.map(({ source, index, x, y, width, height }) => (

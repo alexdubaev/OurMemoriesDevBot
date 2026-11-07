@@ -14,12 +14,13 @@ export function MonthCoverPicker({ api, albumId, entry, busy, conflict, onCancel
   api: AlbumsApi; albumId: string; entry: AlbumEntryDto; busy: boolean; conflict: boolean; remove: boolean
   onCancel: () => void; onSave: (sourceId: string | null) => void; onRefresh: () => void
 }) {
-  const cover = entry.month?.cover ?? null
+  const collection = entry.month ?? entry.collection
+  const cover = collection?.cover ?? null
   const [selected, setSelected] = useState<AlbumSource | null>(remove ? null : cover)
-  const [automatic, setAutomatic] = useState(!entry.month?.coverSourceId)
+  const [automatic, setAutomatic] = useState(!collection?.coverSourceId)
   const [confirm, setConfirm] = useState(false)
   const [pageIndex, setPageIndex] = useState(0)
-  const page = useMonthSourcePages(api, albumId, entry.id, 'photo', Boolean(entry.month && entry.month.photoCount > Number(Boolean(cover))))
+  const page = useMonthSourcePages(api, albumId, entry.id, 'photo', Boolean(collection && collection.photoCount > Number(Boolean(cover))))
   const sources = (page.pages[pageIndex] ?? []).filter(({ id }) => id !== cover?.id)
   const priorCount = page.pages.slice(0, pageIndex).reduce((count, items) => count + items.filter(({ id }) => id !== cover?.id).length, pageIndex > 0 && cover ? 1 : 0)
   const next = () => {
@@ -53,11 +54,11 @@ export function MonthCoverPicker({ api, albumId, entry, busy, conflict, onCancel
       {pageIndex + 1 < page.pages.length || page.nextCursor && pageIndex < page.pages.length ? <button disabled={page.loading || Boolean(page.error)} onClick={next} type="button">Следующие фото</button> : null}
     </div>
     <footer className="albums-form-actions">
-      <button className="albums-primary" disabled={disabled || (remove ? !selected : !automatic && !selected)} onClick={() => remove ? setConfirm(true) : onSave(automatic ? null : selected!.id)} type="button">{remove ? 'Убрать из месяца' : 'Сохранить'}</button>
+      <button className="albums-primary" disabled={disabled || (remove ? !selected : !automatic && !selected)} onClick={() => remove ? setConfirm(true) : onSave(automatic ? null : selected!.id)} type="button">{remove ? entry.kind === 'month' ? 'Убрать из месяца' : 'Убрать из альбома' : 'Сохранить'}</button>
       <button disabled={busy} onClick={onCancel} type="button">Отмена</button>
     </footer>
     {remove ? <AlertDialog onOpenChange={setConfirm} open={confirm}><AlertDialogContent>
-      <AlertDialogHeader><AlertDialogTitle>Убрать фотографию из месяца?</AlertDialogTitle><AlertDialogDescription>Оригинал фотографии сохранится.</AlertDialogDescription></AlertDialogHeader>
+      <AlertDialogHeader><AlertDialogTitle>Убрать фотографию из альбома?</AlertDialogTitle><AlertDialogDescription>Оригинал фотографии сохранится.</AlertDialogDescription></AlertDialogHeader>
       <AlertDialogFooter><AlertDialogCancel>Отмена</AlertDialogCancel><AlertDialogAction onClick={() => { if (selected) onSave(selected.id) }} variant="destructive">Убрать фотографию</AlertDialogAction></AlertDialogFooter>
     </AlertDialogContent></AlertDialog> : null}
   </section>
@@ -66,7 +67,7 @@ export function MonthCoverPicker({ api, albumId, entry, busy, conflict, onCancel
 type YearPosition = { entryIndex: number; cursor?: string }
 type YearPage = { items: AlbumSource[]; next: YearPosition | null }
 
-export function YearAlbumCoverCandidates({ api, albumId, entries, disabled, onSelect, ...preview }: PreviewProps & {
+export function AlbumCoverCandidates({ api, albumId, entries, disabled, onSelect, ...preview }: PreviewProps & {
   api: AlbumsApi; albumId: string; entries: AlbumEntryDto[]; disabled: boolean; onSelect: (sourceId: string) => void
 }) {
   const [pages, setPages] = useState<YearPage[]>([])
