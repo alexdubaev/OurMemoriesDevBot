@@ -1,5 +1,5 @@
 /* eslint-disable typographyPolicy/use-typography-component -- native album upload progress uses its scoped stylesheet. */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { uploadAlbumPhoto } from './album-photo-upload'
 import { createMonthPhotoQueue } from './month-photo-queue'
@@ -26,12 +26,9 @@ export function AlbumDevicePhotos({ active, familyId, transport, attach, onClose
     if (running.current) void running.current.finally(onClose)
     else onClose()
   }
-  useEffect(() => {
-    onCancelRequestChange(close)
-    return () => { request.current?.abort(); request.current = null }
-    // The parent owns the scoped close callback and cancels on family changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onCancelRequestChange])
+  const cancel = useEffectEvent(close)
+  useEffect(() => { onCancelRequestChange(() => cancel()) }, [onCancelRequestChange])
+  useLayoutEffect(() => () => { request.current?.abort(); request.current = null }, [])
   useEffect(() => { if (!active) request.current?.abort() }, [active])
   function start(next: Queue) {
     if (request.current || !active) return
