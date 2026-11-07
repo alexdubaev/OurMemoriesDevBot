@@ -724,13 +724,14 @@ month-photo release. Its bridge source SHA is duplicated as a non-overridable
 constant in `ci-release.sh` and `redeploy.sh`; backend and webapp immutable
 image IDs, complete runtime fingerprint, exact product executable fingerprint,
 and the distinct exact `ci-release.sh` blob pin are non-overridable constants in
-`redeploy.sh`. The accepted bridge is `d3eaddada18244c94e0c2790c023fd4e0819f2d9`
-from PR #276. Its clean source tree was verified on PostgreSQL before and after
-the photo migration, with a 2,000-source month and a private S3 round trip.
-Build and retain these exact recovery artifacts before the month-photo release.
+`redeploy.sh`. The accepted bridge is `95496ef26b677529ee9b1ac10fc12f6075dd912b`
+from PR #280. It extends the previous month bridge with bounded viewing for all
+album kinds. Its clean source tree passed FULL on isolated PostgreSQL; the actual
+server-built image was also checked against migration 67 with 2,000 photos in each
+of workshop, event and free entries. Retain these exact recovery artifacts.
 
-- Backend image `sha256:3117a15769222ea1cc2039c1bc1d47e753caea17df39945596979f89aa55005a`.
-- Webapp image `sha256:7c5480d4c58e42107c40c4f46ffdfc15a45d1910b86ab7b88f57a472c58e7d36`.
+- Backend image `sha256:1d9779f3549db0a890df68f9ffa83c39cda70c5453339bad4964fc2da60adfe0`.
+- Webapp image `sha256:518b45471faee399850827f1223058902ce15d35f183fd355f06b4d3c34049f7`.
 
 The normal guarded release prepares rollback to that single
 bridge pair only after the full rollback-readiness verifier accepts the exact
@@ -755,22 +756,24 @@ The migration checksum pair is fixed to LF
 `9d7e49ece81feb98cffd937c8b98475e28ca07dcd58b73e7aa2775711f86c87d` and CRLF
 `64dfcc65f5c88ef1268b22e339e7ef934c077012da29df3fe37e6fdc08bd7340`.
 
-The all-album photo collection extension requires a compatible recovery bridge
-before its candidate can receive an executable attestation. It uses the exact 67-migration
+The all-album photo collection extension uses the same pinned bridge and an exact
+candidate executable attestation. It uses the exact 67-migration
 catalog, adding only `20261107100000_all_album_photo_collections` after migration
 66. Pre-SQL readiness accepts the completed 65/66/67 prefix appropriate to that
 candidate; complete readiness requires the whole candidate catalog. The new
 function body is checked explicitly as well as its enabled trigger. Migration 67
 has LF checksum `d0213506ff9bd58684d0f1a5703c4a2b563e3eceaeedb525150da896ac046e5d`
 and CRLF checksum `b39ace95a6500768fe9f7fabea5f9f7d7174bce6c7e25d216e520816c76786e2`.
-An isolated PostgreSQL probe using the actual frozen backend image verified
-2,000-source workshop, event and free entries: legacy replacement was rejected,
-all source IDs survived, and metadata remained writable. A separate read probe
+An isolated PostgreSQL probe using the actual server-built frozen backend image
+verified 2,000-source workshop, event and free entries: legacy replacement was
+rejected, all source IDs survived, and metadata remained writable. Legacy detail
+and list DTOs contain at most 24 sources, all 84 cursor pages preserve exact counts
+and order, and Viewer access remains read-only. A separate negative read probe
 confirmed that the old `d3eaddada` image returns 2,000 nonyear sources in a legacy
 DTO and rejects their page API, so it is not an acceptable read-compatible recovery
-target for this extension. No candidate attestation is granted until bounded
-nonyear viewing is independently verified in an accepted bridge. Existing backup,
-access, storage and host safeguards remain mandatory.
+target for this extension. The accepted PR #280 bridge supplies bounded nonyear
+viewing without an intermediate production deploy. Existing backup, access,
+storage and host safeguards remain mandatory.
 
 The guarded rollback supports these exact measured backend + webapp target pairs and source profiles:
 
