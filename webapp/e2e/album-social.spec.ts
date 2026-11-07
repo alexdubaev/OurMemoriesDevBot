@@ -44,8 +44,9 @@ test('MAX album-only three-photo story shares durable comments, exact retries an
   page.on('request', (r) => { if (r.method() === 'POST' && new URL(r.url()).pathname === `/api/v1/families/${familyId}/memories`) memoryPosts += 1 })
   await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
   await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
-  await page.locator('#photo-composer-files').setInputFiles(['front', 'side', 'back'].map((name) => ({ name: `${name}.png`, mimeType: 'image/png', buffer: photoBytes })))
-  await page.getByRole('button', { name: 'Добавить в альбом (3)', exact: true }).click()
+  await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(['front', 'side', 'back'].map((name) => ({ name: `${name}.png`, mimeType: 'image/png', buffer: photoBytes })))
+  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 3 · добавлено: 3' })).toBeVisible()
+  await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   const root = `/api/v1/families/${familyId}/albums/${albumId}`
   const entries = albumEntryPageSchema.parse(await (await page.request.get(`${root}/entries`, { headers })).json())

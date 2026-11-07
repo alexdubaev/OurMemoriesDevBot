@@ -144,7 +144,9 @@ test('MAX authenticated album cover choices save and complete the picker', async
     await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
     await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
     await page.getByLabel('Выбрать фотографии с устройства').setInputFiles({ name: photo.name, mimeType: 'image/png', buffer: photo.bytes })
-      await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
+    await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 1 · добавлено: 1' })).toBeVisible()
+    await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
+    await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
   }
 
   const catalogPath = `/api/v1/families/${familyId}/albums`
