@@ -13,7 +13,7 @@ export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, acco
   const [viewer, setViewer] = useState<{ memory: MemoryDto; index: number; sourceMemories: Record<string, MemoryDto>; sourcePresentation: Record<string, { authorLabel: string; dateLabel: string }> } | null>(null)
   const [sourcePages, setSourcePages] = useState<Array<{ items: AlbumSource[]; nextCursor: string | null }>>([{ items: entry.sources, nextCursor: null }])
   const [sourcePageIndex, setSourcePageIndex] = useState(0)
-  const [sourcePageLoading, setSourcePageLoading] = useState(false)
+  const [sourcePageLoading, setSourcePageLoading] = useState(!entry.capabilities.edit)
   const [sourcePageError, setSourcePageError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -49,9 +49,18 @@ export function AlbumEntryDetail({ albumId, onDiscussionInvalidated, entry, acco
   }, [entry.id])
   useEffect(() => {
     if (entry.capabilities.edit) return
-    void retryFirstSourcePage()
-    return () => sourcesController.current?.abort()
-  }, [entry.capabilities.edit, entry.version, entry.sourceCount, retryFirstSourcePage])
+    const request = new AbortController()
+    sourcesController.current = request
+    void loadSourcesRef.current(entry.id, undefined, request.signal).then((page) => {
+      if (!request.signal.aborted) { setSourcePages([page]); setSourcePageIndex(0); setSourcePageError(null) }
+    }).catch(() => {
+      if (!request.signal.aborted) setSourcePageError('Не удалось загрузить материалы. Повторите попытку.')
+    }).finally(() => {
+      if (!request.signal.aborted) setSourcePageLoading(false)
+      if (sourcesController.current === request) sourcesController.current = null
+    })
+    return () => request.abort()
+  }, [entry.id, entry.capabilities.edit, entry.version, entry.sourceCount])
   async function open(source: AlbumSource, element: HTMLElement) {
     if (!source.available) return
     controller.current?.abort(); const request = new AbortController(); controller.current = request
