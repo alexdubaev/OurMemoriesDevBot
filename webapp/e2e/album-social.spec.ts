@@ -129,10 +129,10 @@ test('MAX album-only three-photo story shares durable comments, exact retries an
   await page.getByRole('button', { name: 'Сердце', exact: true }).click()
   await expect.poll(async () => albumEntryDiscussionSummarySchema.parse(await (await page.request.get(`${path}/discussion`, { headers })).json()).reactionCounts).toEqual({ heart: 1 })
 
-  await page.getByRole('button', { name: 'Открыть материал 2', exact: true }).click()
+  await page.getByRole('button', { name: 'Открыть фото 2', exact: true }).click()
   await expect(page.locator('[data-mixed-viewer]')).toBeVisible()
   await page.getByRole('button', { name: 'Закрыть просмотр', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Открыть материал 2', exact: true })).toBeFocused()
+  await expect(page.getByRole('button', { name: 'Открыть фото 2', exact: true })).toBeFocused()
   await expect(page.getByRole('button', { name: 'Комментарии · 2', exact: true })).toBeVisible()
   const album = albumResponseSchema.parse(await (await page.request.get(root, { headers })).json()).album
   const second = await page.request.post(`${root}/entries`, { headers: { ...headers, 'Idempotency-Key': randomUUID() }, data: { expectedVersion: album.version, kind: 'work', title: 'Другая история', caption: 'То же фото, другой смысл', sources: story.sources.slice(0, 1).map(({ memoryId, sourceKind, sourceId }) => ({ memoryId, sourceKind, sourceId })) } })

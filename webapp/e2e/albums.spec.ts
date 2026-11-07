@@ -169,7 +169,9 @@ test('MAX authenticated album cover choices save and complete the picker', async
   await page.getByRole('button', { name: 'Настройки альбома', exact: true }).click()
   await page.getByRole('button', { name: 'Выбрать обложку', exact: true }).click()
   await expect(page.locator('[data-albums-route="cover"]')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true })).toHaveCount(2)
+  await expect(page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true })).toHaveCount(1)
+  await page.getByRole('button', { name: 'Ещё кадры', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true })).toHaveCount(1)
   await capture('picker-before-selection')
   let failNextCoverPatch = true
   await page.route(`**/api/v1/families/${familyId}/albums/${album.id}`, async (route) => {
@@ -178,14 +180,14 @@ test('MAX authenticated album cover choices save and complete the picker', async
     await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'Synthetic temporary failure', requestId: randomUUID() } }) })
   })
   const failedResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/v1/families/${familyId}/albums/${album.id}`) && response.request().method() === 'PATCH')
-  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true }).nth(1).click()
+  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true }).click()
   const failedResponse = await failedResponsePromise
   const routeAfterFailedPatch = await page.locator('[data-albums-route]').getAttribute('data-albums-route')
   await expect(page.getByRole('alert')).toContainText('Не удалось загрузить альбомы.')
   await expect(page.locator('[data-albums-route="cover"]')).toBeVisible()
   await capture('picker-after-failed-patch')
   const manualResponsePromise = page.waitForResponse((response) => response.url().endsWith(`/api/v1/families/${familyId}/albums/${album.id}`) && response.request().method() === 'PATCH')
-  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true }).nth(1).click()
+  await page.getByRole('button', { name: 'Выбрать этот кадр обложкой', exact: true }).click()
   const manualResponse = await manualResponsePromise
   const manualPayload = await manualResponse.json() as { album?: { id: string; version: number; cover: { id: string } | null } }
   await expect(page.locator('[data-albums-route="album"]')).toBeVisible()
