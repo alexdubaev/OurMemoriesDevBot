@@ -1287,6 +1287,7 @@ test('album scope 404 revokes and clears private detail before a late read can s
   await openSynthetic(page, 'albums=24')
   await page.getByRole('button', { name: /У бабушки/ }).click()
   await expect(page.getByRole('heading', { name: 'У бабушки', exact: true })).toBeVisible()
+  await showAlbumStories(page)
   await page.getByRole('button', { name: 'В саду', exact: true }).click()
   await expect(page.locator('.albums-entry-detail')).toContainText('Тёплый день у бабушки')
   await page.getByRole('button', { name: 'Открыть материал 1', exact: true }).click()
@@ -1312,6 +1313,7 @@ test('album scope 404 revokes and clears private detail before a late read can s
 test('saved entry refresh scope loss returns home, while an ordinary source 404 stays recoverable', async ({ page }) => {
   await openSynthetic(page, 'albums=24')
   await page.getByRole('button', { name: /У бабушки/ }).click()
+  await showAlbumStories(page)
   await page.getByRole('button', { name: 'В саду', exact: true }).click()
   await page.getByRole('button', { name: 'Изменить', exact: true }).click()
   await page.getByLabel('История').fill('Обновлённая запись перед потерей семейного доступа')
@@ -1324,6 +1326,7 @@ test('saved entry refresh scope loss returns home, while an ordinary source 404 
 
   await openSynthetic(page, 'albums=24')
   await page.getByRole('button', { name: /У бабушки/ }).click()
+  await showAlbumStories(page)
   await page.getByRole('button', { name: 'В саду', exact: true }).click()
   await page.getByRole('button', { name: 'Изменить', exact: true }).click()
   await page.getByLabel('История').fill('Черновик должен сохраниться после ошибки каталога')
