@@ -22,7 +22,14 @@ from an earlier pilot ineligible after OFF/ON. Work committed while OFF is never
 Album `createEntry` and `setSources` count only new photo sources in their real write transaction.
 The existing permanent create/source-operation receipts protect replay after HTTP idempotency TTL;
 album locks protect races. One committed operation writes one deduped TaskOutbox intent. Cover,
-title, reorder, removal and upload alone do not notify. The actual stored album title is read at
+title, reorder, removal and upload alone do not notify. Photo selections carrying
+`notificationBatchId` defer notification until `/albums/:albumId/photo-uploads/complete`.
+The server aggregates actor/family/album-scoped source-operation receipts across files,
+technical chunks and workshop entries. Completion is idempotent and rejects revoked,
+cleared or deleted contexts; completed batches reject new photo additions; the client never supplies the count.
+Notification policy generations are recorded with the photo receipts, so OFF-period
+or earlier-activation work is never backfilled at completion. Legacy clients without
+the optional batch ID retain their previous operation semantics. The actual stored album title is read at
 delivery, normalized and limited to 100 Unicode code points.
 
 HTTP memory creation and the trusted source publisher enqueue only the first successful published

@@ -37,7 +37,8 @@ export interface AlbumRepository {
   listEntrySources(scope: FamilyScope, albumId: string, entryId: string, query: AlbumEntrySourcePageQuery, before?: { position: number; id: string }): Promise<{ items: AlbumEntryDto['sources']; hasNext: boolean; last: { position: number; id: string } | null; coverSourceId: string | null; coverId: string | null; entryVersion: number }>
   setMonthCover(scope: FamilyScope, albumId: string, entryId: string, input: AlbumMonthCoverRequest): Promise<AlbumEntryDto>
   reserveMonthPhotos(scope: FamilyScope, albumId: string, entryId: string, input: AlbumMonthPhotoBatchRequest, requestId: string, payloadHash: string): Promise<{ startPosition: number; nextPhotoPosition: number; discussionGeneration: number; membershipEpoch: number }>
-  appendMonthPhoto(scope: FamilyScope, albumId: string, entryId: string, input: { source: AlbumMonthPhotoAppendRequest['source']; position: number; discussionGeneration: number; membershipEpoch: number }, requestId: string, payloadHash: string, actorUserId: string): Promise<void>
+  appendMonthPhoto(scope: FamilyScope, albumId: string, entryId: string, input: { source: AlbumMonthPhotoAppendRequest['source']; notificationBatchId?: string; position: number; discussionGeneration: number; membershipEpoch: number }, requestId: string, payloadHash: string, actorUserId: string): Promise<void>
+  completePhotoUpload(scope: FamilyScope, albumId: string, batchId: string): Promise<{ photoCount: number }>
   removeMonthPhoto(scope: FamilyScope, albumId: string, entryId: string, sourceId: string, expectedVersion: number): Promise<void>
   reorderEntry(scope: FamilyScope, albumId: string, input: { expectedVersion: number; entryId: string; beforeEntryId: string | null }): Promise<AlbumDto>
   workshopGroups(scope: FamilyScope, albumId: string): Promise<{ groups: Array<{ year: number | null; month: number | null; count: number }> }>

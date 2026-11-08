@@ -99,7 +99,7 @@ export function pilotSubjectHash(subject: string) {
 
 export function albumNotificationText(title: string, count: number) {
   const safeTitle = [...title.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').replace(/[«»„“”]/g, '').replace(/\s+/g, ' ').trim()].slice(0, 100).join('') || 'Семейный альбом'
-  if (count === 1) return `Новое фото в альбоме «${safeTitle}» 📸`
-  const one = count % 10 === 1 && count % 100 !== 11
-  return `В альбоме «${safeTitle}» — ${count} ${one ? 'новое' : 'новых'} фото 📸`
+  const ending = count % 100 >= 11 && count % 100 <= 14 ? 'фотографий' : count % 10 === 1 ? 'фотография' : count % 10 >= 2 && count % 10 <= 4 ? 'фотографии' : 'фотографий'
+  const verb = ending === 'фотография' ? 'добавлена' : ending === 'фотографии' ? 'добавлены' : 'добавлено'
+  return `В альбом «${safeTitle}» ${verb} ${count} ${ending} 📸`
 }

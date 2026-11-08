@@ -771,7 +771,14 @@ and list DTOs contain at most 24 sources, all 84 cursor pages preserve exact cou
 and order, and Viewer access remains read-only. A separate negative read probe
 confirmed that the old `d3eaddada` image returns 2,000 nonyear sources in a legacy
 DTO and rejects their page API, so it is not an acceptable read-compatible recovery
-target for this extension. The accepted PR #280 bridge supplies bounded nonyear
+target for this extension. The exact notification-batch executable tree
+`3dd11b4d2626337a2a9405d51043662ba84aae476f1b479cbe29f84ef11dfc8d`
+retains this same schema-67 recovery profile and pinned pair. It adds only scoped
+source-operation receipts and backward-compatible optional request fields; no migration
+or storage format changes. Its source roundtrip probe checks candidate writes, frozen
+95496 reads/metadata writes, and candidate reads with the same source IDs. The
+release still requires FULL, exact-source review and unchanged host/image/data guards.
+The accepted PR #280 bridge supplies bounded nonyear
 viewing without an intermediate production deploy. Existing backup, access,
 storage and host safeguards remain mandatory.
 

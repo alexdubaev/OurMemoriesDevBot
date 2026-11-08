@@ -1,3 +1,4 @@
+import { albumPhotoUploadCompleteRequestSchema, albumPhotoUploadCompleteResponseSchema } from '@web-app-demo/contracts'
 import { albumEntryMutationSchema, albumEntryPageSchema, albumEntryResponseSchema, albumMutationSchema, albumPageSchema, albumResponseSchema, createAlbumEntryRequestSchema, createAlbumRequestSchema, mediaPickerPageSchema, updateAlbumEntryRequestSchema, updateAlbumRequestSchema, albumSourceSelectionSchema, workshopGroupsSchema, type AlbumKind } from '@web-app-demo/contracts'
 import { albumEntrySourcePageSchema, albumMonthCoverRequestSchema, albumMonthPhotoAppendRequestSchema, albumMonthPhotoBatchGrantSchema, albumMonthPhotoBatchRequestSchema, type AlbumMonthPhotoAppendRequest, type AlbumMonthPhotoBatchRequest } from '@web-app-demo/contracts'
 import type { z } from 'zod'
@@ -55,6 +56,11 @@ export function albumsApi(transport: AuthenticatedTransport, familyId: string, s
     reorder: (id: string, entryId: string, beforeEntryId: string | null, expectedVersion: number) => request(`${root}/${id}/entries:reorder`, albumResponseSchema, 'POST', { entryId, beforeEntryId, expectedVersion }),
     groups: (id: string) => request(`${root}/${id}/workshop-groups`, workshopGroupsSchema),
     picker: (kind?: 'photo' | 'video' | 'voice' | 'note', cursor?: string, from?: string, to?: string) => request(`/api/v1/families/${encodeURIComponent(familyId)}/media-picker?${query({ limit: 20, kind, cursor, from, to })}`, mediaPickerPageSchema),
+    completePhotoUpload: (id: string, batchId: string, local: AbortSignal = new AbortController().signal) => withMonthPhotoScope(local, (requestSignal) => scopedRequest(
+      () => transport.request(`${root}/${id}/photo-uploads/complete`, albumPhotoUploadCompleteResponseSchema, {
+        method: 'POST', body: albumPhotoUploadCompleteRequestSchema.parse({ batchId }), signal: requestSignal,
+      }), requestSignal,
+    )),
     withMonthPhotoScope,
     reserveMonthPhotoBatch: (id: string, entryId: string, input: AlbumMonthPhotoBatchRequest, key: string, requestSignal: AbortSignal) => scopedRequest(
       () => transport.request(`${root}/${id}/entries/${entryId}/photo-batches`, albumMonthPhotoBatchGrantSchema, {

@@ -22,6 +22,22 @@ test('free albums open a unified collage and add photos directly', async ({ page
   await page.goto('/')
   const { accessToken } = await (await exchange).json() as { accessToken: string }
   const headers = { Authorization: `Bearer ${accessToken}` }
+  const completionIds: string[] = []
+  let reservations = 0
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname
+    if (request.method() === 'POST' && path.endsWith('/photo-uploads/complete')) completionIds.push((request.postDataJSON() as { batchId: string }).batchId)
+    if (request.method() === 'POST' && /\/families\/[^/]+\/uploads$/.test(path)) reservations += 1
+  })
+  let loseCompletionReply = true
+  await page.route('**/photo-uploads/complete', async (route) => {
+    if (!loseCompletionReply) return route.continue()
+    loseCompletionReply = false
+    const stored = await route.fetch()
+    expect(stored.status()).toBe(200)
+    return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'Synthetic lost completion acknowledgement', requestId: randomUUID() } }) })
+  })
+
   await page.getByRole('button', { name: 'Продолжить', exact: true }).click()
   await page.getByRole('button', { name: /Создать свою семью/ }).click()
   await expect(page.getByTestId('bottom-navigation')).toBeVisible()
@@ -48,6 +64,10 @@ test('free albums open a unified collage and add photos directly', async ({ page
   const files = (count: number) => Array.from({ length: count }, (_, index) => ({ name: `synthetic-${index}.png`, mimeType: 'image/png', buffer: solidPng(index * 18, 90, 140, index % 2 ? 120 : 180, index % 2 ? 180 : 120) }))
   await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(files(25))
   await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 25 · добавлено: 25' })).toBeVisible({ timeout: 120_000 })
+  await page.getByRole('button', { name: 'Повторить завершение', exact: true }).click()
+  expect(reservations).toBe(25)
+  expect(completionIds).toHaveLength(2)
+  expect(completionIds[0]).toBe(completionIds[1])
   await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
   const gallery = page.getByRole('group', { name: 'Фотографии альбома', exact: true })
   await expect(gallery).toBeVisible()
@@ -102,6 +122,9 @@ test('free albums open a unified collage and add photos directly', async ({ page
   const { items: entries } = await (await page.request.get(`/api/v1/families/${familyId}/albums/${albums[0].id}/entries?view=collection-summary`, { headers })).json() as { items: { sourceCount: number }[] }
   expect(entries).toHaveLength(2)
   expect(entries.reduce((count, entry) => count + entry.sourceCount, 0)).toBe(29)
+  expect(completionIds).toHaveLength(4)
+  expect(new Set(completionIds).size).toBe(3)
+  expect(reservations).toBe(29)
 })
 
 test('large existing stories page their sources and retain the unseen tail after editing', async ({ page }) => {

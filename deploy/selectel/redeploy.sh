@@ -840,7 +840,9 @@ rollback_source_compatibility_profile() {
 			[ -n "$MONTH_PHOTO_RECOVERY_SHA" ] &&
 			[ -n "$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT" ] &&
 			[ -n "$MONTH_PHOTO_EXECUTABLE_FINGERPRINT" ] || return 1
-			exact_compatibility_attestations=("$MONTH_PHOTO_RECOVERY_SHA:$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT:$MONTH_PHOTO_EXECUTABLE_FINGERPRINT:s3-album-month-photos") ;;
+			# Exact notification-batch source, same schema67 and pinned recovery pair.
+			exact_compatibility_attestations=("$MONTH_PHOTO_RECOVERY_SHA:$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT:$MONTH_PHOTO_EXECUTABLE_FINGERPRINT:s3-album-month-photos"
+				"$MONTH_PHOTO_RECOVERY_SHA:$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT:3dd11b4d2626337a2a9405d51043662ba84aae476f1b479cbe29f84ef11dfc8d:s3-album-month-photos") ;;
 		e383d79269a3595f4c6cabedf167335aea042cf3)
 			attestations=("3fce2739205da927b95eb3379b1d066b61282965:3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857:candidate") ;;
 		3fce2739205da927b95eb3379b1d066b61282965)

@@ -4,6 +4,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { z } from 'zod'
 import {
   albumParamsSchema,
+  albumPhotoUploadCompleteRequestSchema,
   albumEntryParamsSchema,
   albumEntryViewQuerySchema,
   albumEntrySourcePageQuerySchema,
@@ -120,6 +121,10 @@ export function createAlbumRoutes({ requireAuth, service, social }: { requireAut
     const p = entryParams.parse(c.req.param())
     const key = idempotencyKeyHeadersSchema.parse({ 'idempotency-key': c.req.header('idempotency-key') })['idempotency-key']
     return c.json({ entry: await service.changeSources(scope(c.var.user, p.familyId), p.albumId, p.entryId, albumSourceChangesSchema.parse(await c.req.json()), key) })
+  }))
+  routes.post('/families/:familyId/albums/:albumId/photo-uploads/complete', (c) => run(c, async () => {
+    const p = albumParamsSchema.parse(c.req.param())
+    return c.json(await service.completePhotoUpload(scope(c.var.user, p.familyId), p.albumId, albumPhotoUploadCompleteRequestSchema.parse(await c.req.json())))
   }))
   routes.get('/families/:familyId/albums/:albumId/entries/:entryId/sources', (c) => run(c, async () => {
     const p = entryParams.parse(c.req.param())

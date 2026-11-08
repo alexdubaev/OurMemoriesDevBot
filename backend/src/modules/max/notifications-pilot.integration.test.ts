@@ -295,6 +295,131 @@ describe('MAX notification pilot PostgreSQL integration', () => {
     expect(await outboxForFamily()).toHaveLength(1)
   })
 
+  test('photo upload batches notify once after 20 photos and once after a later 5, with idempotent completion', async () => {
+    await engage()
+    const { album, entry } = await createAlbumRows('Крестины')
+    const token = await authToken()
+    const headers = { authorization: token, 'content-type': 'application/json' }
+    const root = `/api/v1/families/${familyId}/albums/${album.id}`
+    let version = 1
+    const add = async (batchId: string, sourceId: string) => {
+      const response = await app.request(`${root}/entries/${entry.id}/sources`, { method: 'PATCH', headers: { ...headers, 'idempotency-key': randomUUID() }, body: JSON.stringify({ expectedVersion: version, notificationBatchId: batchId, add: [{ memoryId: null, sourceKind: 'private_storage', sourceId }] }) })
+      if (response.status !== 200) throw new Error(`Append ${response.status}: ${await response.text()}`)
+      version = (await response.json() as { entry: { aggregateVersion: number } }).entry.aggregateVersion
+    }
+    const complete = (batchId: string) => app.request(`${root}/photo-uploads/complete`, { method: 'POST', headers, body: JSON.stringify({ batchId }) })
+    const firstBatch = randomUUID()
+    let duplicateId = ''
+    for (let index = 0; index < 20; index += 1) { const asset = await photo(); duplicateId = asset.id; await add(firstBatch, asset.id) }
+    expect(await outboxForFamily()).toHaveLength(0)
+    const otherSession = await prisma.authSession.create({ data: { userId: familyOwnerId, refreshTokenHash: randomUUID(), refreshTokenFamilyHash: randomUUID(), expiresAt: new Date(Date.now() + 60_000) } })
+    await expect((await createAlbumRepo()).completePhotoUpload({ familyId, principal: { userId: familyOwnerId, sessionId: otherSession.id } }, album.id, firstBatch)).rejects.toMatchObject({ kind: 'invalid_input' })
+    const replies = await Promise.all([complete(firstBatch), complete(firstBatch)])
+    for (const reply of replies) { expect(reply.status).toBe(200); expect(await reply.json()).toEqual({ photoCount: 20 }) }
+    expect(await outboxForFamily()).toHaveLength(1)
+    expect((await outboxForFamily())[0]!.payload).toMatchObject({ kind: 'album', photoCount: 20, albumId: album.id })
+    const secondBatch = randomUUID()
+    for (let index = 0; index < 5; index += 1) await add(secondBatch, (await photo()).id)
+    await add(secondBatch, duplicateId)
+    expect(await outboxForFamily()).toHaveLength(1)
+    expect((await complete(secondBatch)).status).toBe(200)
+    const intents = await outboxForFamily()
+    expect(intents).toHaveLength(2)
+    expect(intents.map((intent) => (intent.payload as { photoCount: number }).photoCount).sort((a, b) => a - b)).toEqual([5, 20])
+    expect(await prisma.albumEntrySource.count({ where: { entryId: entry.id } })).toBe(25)
+    let sentText = ''
+    const api = fakeApi({ onSend: async (request) => { sentText = String(request.body.text) } })
+    const deliver = createPilotNotificationDelivery({ prisma, config: pilotConfig(), api })
+    expect(await deliver(intents.find((intent) => (intent.payload as { photoCount: number }).photoCount === 20)!.payload)).toBe('done')
+    expect(sentText).toBe('В альбом «Крестины» добавлено 20 фотографий 📸')
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId, userId: ownerId } }, data: { role: 'viewer' } })
+    expect((await complete(secondBatch)).status).toBe(403)
+    expect(await outboxForFamily()).toHaveLength(2)
+  })
+
+  test('photo upload batches span technical reservations and separate workshop works', async () => {
+    await engage()
+    const { album, entry } = await createAlbumRows('Большая загрузка')
+    const membershipEpoch = (await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId, userId: ownerId } } })).membershipEpoch
+    const token = await authToken()
+    const headers = { authorization: token, 'content-type': 'application/json' }
+    const root = `/api/v1/families/${familyId}/albums/${album.id}`
+    const batchId = randomUUID()
+    for (const count of [48, 2]) {
+      const reserved = await app.request(`${root}/entries/${entry.id}/photo-batches`, { method: 'POST', headers: { ...headers, 'idempotency-key': randomUUID() }, body: JSON.stringify({ count, discussionGeneration: 1, membershipEpoch }) })
+      expect(reserved.status).toBe(200)
+      const { grant } = await reserved.json() as { grant: string }
+      for (let offset = 0; offset < count; offset += 1) {
+        const sourceId = (await photo()).id
+        const body = JSON.stringify({ grant, offset, notificationBatchId: batchId, source: { memoryId: null, sourceKind: 'private_storage', sourceId } })
+        const requestHeaders = { ...headers, 'idempotency-key': randomUUID() }
+        for (let retry = 0; retry < (offset === 0 ? 2 : 1); retry += 1) expect((await app.request(`${root}/entries/${entry.id}/photos`, { method: 'POST', headers: requestHeaders, body })).status).toBe(204)
+      }
+    }
+    expect(await outboxForFamily()).toHaveLength(0)
+    expect(await (await app.request(`${root}/photo-uploads/complete`, { method: 'POST', headers, body: JSON.stringify({ batchId }) })).json()).toEqual({ photoCount: 50 })
+    expect(await outboxForFamily()).toHaveLength(1)
+    const repository = await createAlbumRepo()
+    const scope = { familyId, principal: { userId: ownerId, sessionId } }
+    const { album: workshop } = await repository.createAlbum(scope, { kind: 'workshop', title: 'Одна подборка работ', childId }, randomUUID(), 'b'.repeat(64))
+    const workshopBatch = randomUUID()
+    let version = workshop.version
+    for (let index = 0; index < 3; index += 1) {
+      const sourceId = (await photo()).id
+      const created = await repository.createEntry(scope, workshop.id, { expectedVersion: version, kind: 'work', category: 'drawing', notificationBatchId: workshopBatch, sources: [{ memoryId: null, sourceKind: 'private_storage', sourceId }] }, randomUUID(), String(index).repeat(64))
+      version = created.entry.aggregateVersion
+    }
+    expect(await outboxForFamily()).toHaveLength(1)
+    expect(await repository.completePhotoUpload(scope, workshop.id, workshopBatch)).toEqual({ photoCount: 3 })
+    expect(await outboxForFamily()).toHaveLength(2)
+    const reservation = await app.request(`${root}/entries/${entry.id}/photo-batches`, { method: 'POST', headers: { ...headers, 'idempotency-key': randomUUID() }, body: JSON.stringify({ count: 1, discussionGeneration: 1, membershipEpoch }) })
+    const { grant } = await reservation.json() as { grant: string }
+    const late = await app.request(`${root}/entries/${entry.id}/photos`, { method: 'POST', headers: { ...headers, 'idempotency-key': randomUUID() }, body: JSON.stringify({ grant, offset: 0, notificationBatchId: batchId, source: { memoryId: null, sourceKind: 'private_storage', sourceId: (await photo()).id } }) })
+    expect(late.status).toBe(409)
+    expect(await prisma.albumEntrySource.count({ where: { entryId: entry.id } })).toBe(50)
+  })
+
+  test('photo upload batches reject cleared, deleted and revoked contexts without sending', async () => {
+    await engage()
+    const repository = await createAlbumRepo()
+    const scope = { familyId, principal: { userId: ownerId, sessionId } }
+    const membershipEpoch = (await prisma.familyMember.findUniqueOrThrow({ where: { familyId_userId: { familyId, userId: ownerId } } })).membershipEpoch
+    const { album: year } = await repository.createAlbum(scope, { kind: 'year', title: 'Первый год', childId }, randomUUID(), 'b'.repeat(64))
+    const month = await prisma.albumEntry.findFirstOrThrow({ where: { albumId: year.id, monthNumber: 1 } })
+    const clearedBatch = randomUUID()
+    await repository.appendMonthPhoto(scope, year.id, month.id, { source: { memoryId: null, sourceKind: 'private_storage', sourceId: (await photo()).id }, position: 0, discussionGeneration: 1, membershipEpoch, notificationBatchId: clearedBatch }, randomUUID(), 'c'.repeat(64), ownerId)
+    await repository.clearEntry(scope, year.id, month.id, year.version)
+    await expect(repository.completePhotoUpload(scope, year.id, clearedBatch)).rejects.toMatchObject({ kind: 'version_conflict' })
+    const { album, entry } = await createAlbumRows('Удалённая история')
+    const deletedBatch = randomUUID()
+    await repository.changeSources(scope, album.id, entry.id, { expectedVersion: 1, notificationBatchId: deletedBatch, add: [{ memoryId: null, sourceKind: 'private_storage', sourceId: (await photo()).id }], removeIds: [] }, randomUUID(), 'd'.repeat(64))
+    await repository.deleteEntry(scope, album.id, entry.id, 2)
+    await expect(repository.completePhotoUpload(scope, album.id, deletedBatch)).rejects.toMatchObject({ kind: 'version_conflict' })
+    const next = await createAlbumRows('Отозванный доступ')
+    const revokedBatch = randomUUID()
+    await repository.changeSources(scope, next.album.id, next.entry.id, { expectedVersion: 1, notificationBatchId: revokedBatch, add: [{ memoryId: null, sourceKind: 'private_storage', sourceId: (await photo()).id }], removeIds: [] }, randomUUID(), 'e'.repeat(64))
+    await prisma.familyMember.update({ where: { familyId_userId: { familyId, userId: ownerId } }, data: { membershipEpoch: { increment: 1 } } })
+    await expect(repository.completePhotoUpload(scope, next.album.id, revokedBatch)).rejects.toMatchObject({ kind: 'version_conflict' })
+    expect(await outboxForFamily()).toHaveLength(0)
+  })
+
+  test('photo upload batches never backfill photos saved while notifications were off', async () => {
+    await engage()
+    const { album, entry } = await createAlbumRows('Без задних оповещений')
+    const scope = { familyId, principal: { userId: ownerId, sessionId } }
+    const disabled = new PrismaAlbumRepository(prisma, createPrismaIdempotencyExecutor(prisma), createComposedAlbumSourceCatalog(createAlbumMemorySourceCatalog(), createPrismaAlbumPhotoSourceCatalog()), { ...pilotConfig(), MAX_NOTIFICATIONS_PILOT_ENABLED: false })
+    const enabled = await createAlbumRepo()
+    const batchId = randomUUID()
+    await disabled.changeSources(scope, album.id, entry.id, { expectedVersion: 1, notificationBatchId: batchId, add: [{ memoryId: null, sourceKind: 'private_storage', sourceId: (await photo()).id }], removeIds: [] }, randomUUID(), 'b'.repeat(64))
+    await enabled.changeSources(scope, album.id, entry.id, { expectedVersion: 2, notificationBatchId: batchId, add: [{ memoryId: null, sourceKind: 'private_storage', sourceId: (await photo()).id }], removeIds: [] }, randomUUID(), 'c'.repeat(64))
+    expect(await enabled.completePhotoUpload(scope, album.id, batchId)).toEqual({ photoCount: 2 })
+    const intents = await outboxForFamily()
+    expect(intents).toHaveLength(1)
+    expect(intents[0]!.payload).toMatchObject({ kind: 'album', photoCount: 1 })
+    await enabled.completePhotoUpload(scope, album.id, batchId)
+    expect(await outboxForFamily()).toHaveLength(1)
+  })
+
   test('HTTP album setSources counts a photo set once and delivery uses the current renamed title and open-app button', async () => {
     await engage()
     const albumRepo = await createAlbumRepo()
@@ -349,7 +474,7 @@ describe('MAX notification pilot PostgreSQL integration', () => {
     const deliver = createPilotNotificationDelivery({ prisma, config: pilotConfig(), api })
     expect(await deliver(intent!.payload)).toBe('done')
     expect(sent?.url.searchParams.get('user_id')).toBe(subject)
-    expect(sent?.body).toMatchObject({ text: 'В альбоме «Renamed family album» — 2 новых фото 📸',
+    expect(sent?.body).toMatchObject({ text: 'В альбом «Renamed family album» добавлены 2 фотографии 📸',
       attachments: [{ type: 'inline_keyboard', payload: { buttons: [[{
         type: 'open_app', text: 'Открыть memoLy', web_app: 'OurMemoriesMaxBot',
       }]] } }] })
@@ -494,7 +619,7 @@ describe('MAX notification pilot PostgreSQL integration', () => {
     expect(metrics.skipped).toBe(1)
     expect(sent).toHaveLength(1)
     expect(sent[0]).toMatchObject({ destination: subject })
-    expect(sent[0]!.body.text).toBe('В альбоме «Family album» — 2 новых фото 📸')
+    expect(sent[0]!.body.text).toBe('В альбом «Family album» добавлены 2 фотографии 📸')
     expect((sent[0]!.body.attachments as Array<{ payload?: { buttons?: Array<Array<{ type?: string }>> } }>)[0]?.payload?.buttons?.[0]?.[0]?.type).toBe('open_app')
     const finalized = await prisma.taskOutbox.findMany({ where: { id: { in: intents.map(({ id }) => id) } } })
     expect(finalized.map(({ status }) => status).sort()).toEqual(['done', 'skipped'])
@@ -678,7 +803,7 @@ describe('MAX notification pilot PostgreSQL integration', () => {
     for (const [index, fixture] of fixtures.entries()) {
       expect(await deliver(intents[index]!.payload)).toBe('done')
     }
-    expect(texts).toEqual(fixtures.map(({ kind }) => `Новое фото в альбоме «Renamed ${kind}» 📸`))
+    expect(texts).toEqual(fixtures.map(({ kind }) => `В альбом «Renamed ${kind}» добавлена 1 фотография 📸`))
   })
 
   test('no engagement or disabled pilot creates work; a failed publication rolls back both memory and intent', async () => {

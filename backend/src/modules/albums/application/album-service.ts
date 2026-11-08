@@ -17,6 +17,7 @@ import {
   albumEntrySourcePageQuerySchema,
   albumMonthPhotoBatchRequestSchema,
   albumMonthPhotoAppendRequestSchema,
+  albumPhotoUploadCompleteRequestSchema,
   albumMonthCoverRequestSchema,
   type AlbumEntrySourcePageQuery,
   type AlbumMonthPhotoBatchRequest,
@@ -129,9 +130,13 @@ export class AlbumService {
     }
     const { offset, source } = normalized
     await this.repository.appendMonthPhoto(scope, albumId, entryId, {
-      source, position: grant.startPosition + offset,
+      source, notificationBatchId: normalized.notificationBatchId, position: grant.startPosition + offset,
       discussionGeneration: grant.discussionGeneration, membershipEpoch: grant.membershipEpoch,
-    }, requestId.toLowerCase(), digest({ grant: normalized.grant, offset, source }), scope.principal.userId)
+    }, requestId.toLowerCase(), digest({ grant: normalized.grant, offset, source, ...(normalized.notificationBatchId ? { notificationBatchId: normalized.notificationBatchId } : {}) }), scope.principal.userId)
+  }
+
+  completePhotoUpload(scope: FamilyScope, albumId: string, input: { batchId: string }) {
+    return this.repository.completePhotoUpload(scope, albumId, albumPhotoUploadCompleteRequestSchema.parse(input).batchId)
   }
 
   async setSources(scope: FamilyScope, albumId: string, entryId: string, input: AlbumSourceSelection, key: string) {

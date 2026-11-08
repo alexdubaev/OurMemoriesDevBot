@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { enqueuePilotNotification, type MaxNotificationPilot } from '../../../max-notifications-pilot'
+import { enqueuePilotNotification, pilotEnabled, type MaxNotificationPilot } from '../../../max-notifications-pilot'
 import type {
   AlbumDatePrecision,
   AlbumEntryKind,
@@ -206,7 +206,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
       payloadConflict: () => idempotencyConflict(),
       restore: (snapshot) => ({ entryId: snapshotId(snapshot, 'entryId'), reused: true }),
       async execute(tx) {
-        await lockScope(tx, scope, true)
+        const access = await lockScope(tx, scope, true)
         const album = await lockAlbum(tx, scope.familyId, albumId)
         const existing = await tx.albumEntry.findFirst({ where: { familyId: scope.familyId, albumId, createActorId: scope.principal.userId,
           createOperation: `albums:${albumId}:entries:create`, createRequestId: key } })
@@ -226,15 +226,18 @@ export class PrismaAlbumRepository implements AlbumRepository {
           title: input.title ?? null, caption: input.caption ?? null, childQuote: input.childQuote ?? null,
           category: input.category ?? null, dateValue: input.date?.value ?? null, datePrecision: (input.date?.precision ?? 'unknown') as AlbumDatePrecision,
           createActorId: scope.principal.userId, createOperation: `albums:${albumId}:entries:create`, createRequestId: key, initialPayloadHash: payloadHash,
-        }, select: { id: true } })
+        }, select: { id: true, discussionGeneration: true } })
         if (resolved.length) await tx.albumEntrySource.createMany({ data: resolved.map((source, position) => ({
           familyId: scope.familyId, albumId, entryId: entry.id, memoryId: source.memoryId,
           albumPhotoMediaId: source.memoryId === null ? source.sourceId : null,
           sourceKind: source.sourceKind as AlbumEntrySourceKind, sourceId: source.sourceId, kind: source.kind as AlbumSourceMediaKind, position,
         })) })
         await tx.album.update({ where: { id: albumId }, data: { version: { increment: 1 } } })
-        await enqueuePilotNotification(tx, notificationPilot, { kind: 'album', familyId: scope.familyId, albumId,
-          entryId: entry.id, eventId: `create:${entry.id}`, photoCount: resolved.filter(({ kind }) => kind === 'photo').length })
+        const photoCount = resolved.filter(({ kind }) => kind === 'photo').length
+        if (input.notificationBatchId) await recordPhotoUpload(tx, scope, { albumId, entryId: entry.id, generation: entry.discussionGeneration,
+          epoch: access.membershipEpoch, batchId: input.notificationBatchId, requestId: key, photoCount }, notificationPilot)
+        else await enqueuePilotNotification(tx, notificationPilot, { kind: 'album', familyId: scope.familyId, albumId,
+          entryId: entry.id, eventId: `create:${entry.id}`, photoCount })
         return { resourceId: entry.id, response: { entryId: entry.id, reused: false }, responseSnapshot: { entryId: entry.id } }
       },
     })
@@ -394,7 +397,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
     })
   }
 
-  async appendMonthPhoto(scope: FamilyScope, albumId: string, entryId: string, input: { source: AlbumMonthPhotoAppendRequest['source']; position: number; discussionGeneration: number; membershipEpoch: number }, requestId: string, payloadHash: string, actorUserId: string) {
+  async appendMonthPhoto(scope: FamilyScope, albumId: string, entryId: string, input: { source: AlbumMonthPhotoAppendRequest['source']; notificationBatchId?: string; position: number; discussionGeneration: number; membershipEpoch: number }, requestId: string, payloadHash: string, actorUserId: string) {
     const notificationPilot = this.notificationPilot
     await this.db.$transaction(async (tx) => {
       const access = await lockScope(tx, scope, true)
@@ -420,6 +423,8 @@ export class PrismaAlbumRepository implements AlbumRepository {
           familyId: scope.familyId, actorUserId, albumId, entryId, operation: 'month_photo_append',
           requestId, payloadHash, startPosition: existingSource.position, count: 1,
         } })
+        if (input.notificationBatchId) await recordPhotoUpload(tx, scope, { albumId, entryId, generation: entry.discussionGeneration,
+          epoch: access.membershipEpoch, batchId: input.notificationBatchId, requestId, photoCount: 0 }, notificationPilot)
         return
       }
       const created = await tx.albumEntrySource.create({ data: {
@@ -434,8 +439,46 @@ export class PrismaAlbumRepository implements AlbumRepository {
         familyId: scope.familyId, actorUserId, albumId, entryId, operation: 'month_photo_append',
         requestId, payloadHash, startPosition: created.position, count: 1,
       } })
-      if (album.kind !== 'year') await enqueuePilotNotification(tx, notificationPilot, { kind: 'album', familyId: scope.familyId, albumId, entryId,
+      if (input.notificationBatchId) await recordPhotoUpload(tx, scope, { albumId, entryId, generation: entry.discussionGeneration,
+        epoch: access.membershipEpoch, batchId: input.notificationBatchId, requestId, photoCount: 1 }, notificationPilot)
+      else if (album.kind !== 'year') await enqueuePilotNotification(tx, notificationPilot, { kind: 'album', familyId: scope.familyId, albumId, entryId,
         eventId: `sources:${operation.id}`, photoCount: 1 })
+    })
+  }
+
+  async completePhotoUpload(scope: FamilyScope, albumId: string, batchId: string) {
+    return this.db.$transaction(async (tx) => {
+      const access = await lockScope(tx, scope, true)
+      const album = await lockAlbum(tx, scope.familyId, albumId)
+      const where = { familyId: scope.familyId, albumId, actorUserId: scope.principal.userId }
+      const completed = await tx.albumSourceOperation.findFirst({ where: { ...where, operation: 'photo_upload_complete', requestId: batchId } })
+      if (completed) {
+        if (completed.startPosition !== access.membershipEpoch) throw albumVersionConflict()
+        return { photoCount: completed.count ?? 0 }
+      }
+      const prefix = `photo_upload:${batchId}:`
+      const first = await tx.albumSourceOperation.findFirst({ where: { ...where, operation: { startsWith: prefix } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
+      if (!first) throw new AlbumFailure('invalid_input', 'Сохранённые фотографии этой загрузки не найдены')
+      // One aggregate covers technical chunks and separate workshop works without
+      // accepting a client-supplied count or returning an unbounded source list.
+      const [summary] = await tx.$queryRaw<Array<{ photoCount: bigint; notificationCount: bigint; valid: boolean }>>(PrismaSql.sql`
+        SELECT coalesce(sum(o.count), 0)::bigint AS "photoCount",
+               coalesce(sum(o.count) FILTER (WHERE o.payload_hash = ${photoNotificationGeneration(this.notificationPilot)}), 0)::bigint AS "notificationCount",
+               bool_and(e.deleted_at IS NULL AND e.discussion_generation = o.start_position
+                        AND o.operation = ${prefix + access.membershipEpoch}) AS valid
+          FROM album_source_operations o
+          JOIN album_entries e ON e.id = o.entry_id AND e.album_id = o.album_id AND e.family_id = o.family_id
+         WHERE o.family_id = ${scope.familyId}::uuid AND o.album_id = ${albumId}::uuid
+           AND o.actor_user_id = ${scope.principal.userId}::uuid AND o.operation LIKE ${prefix + '%'}
+      `)
+      if (!summary?.valid) throw albumVersionConflict()
+      const photoCount = Number(summary.photoCount)
+      if (!Number.isSafeInteger(photoCount) || photoCount > 2_147_483_647) throw new AlbumFailure('conflict', 'Невозможно завершить эту загрузку')
+      await tx.albumSourceOperation.create({ data: { ...where, entryId: first.entryId, operation: 'photo_upload_complete', requestId: batchId,
+        payloadHash: hash({ batchId, epoch: access.membershipEpoch }), startPosition: access.membershipEpoch, count: photoCount } })
+      if (album.kind !== 'year') await enqueuePilotNotification(tx, this.notificationPilot, { kind: 'album', familyId: scope.familyId, albumId, entryId: first.entryId,
+        eventId: `upload:${scope.principal.userId}:${batchId}`, photoCount: Number(summary.notificationCount) })
+      return { photoCount }
     })
   }
 
@@ -468,7 +511,7 @@ export class PrismaAlbumRepository implements AlbumRepository {
       payloadConflict: () => idempotencyConflict(),
       restore: (snapshot) => ({ entryId: snapshotId(snapshot, 'entryId') }),
       async execute(tx) {
-        await lockScope(tx, scope, true)
+        const access = await lockScope(tx, scope, true)
         const album = await lockAlbum(tx, scope.familyId, albumId)
         const receipt = await tx.albumSourceOperation.findUnique({ where: {
           familyId_actorUserId_albumId_entryId_operation_requestId: {
@@ -571,7 +614,9 @@ export class PrismaAlbumRepository implements AlbumRepository {
           familyId: scope.familyId, albumId, entryId, actorUserId: scope.principal.userId,
           operation: 'source_changes', requestId: key, payloadHash,
         } })
-        await enqueuePilotNotification(tx, notificationPilot, { kind: 'album', familyId: scope.familyId, albumId, entryId,
+        if (input.notificationBatchId) await recordPhotoUpload(tx, scope, { albumId, entryId, generation: entry.discussionGeneration,
+          epoch: access.membershipEpoch, batchId: input.notificationBatchId, requestId: key, photoCount }, notificationPilot)
+        else await enqueuePilotNotification(tx, notificationPilot, { kind: 'album', familyId: scope.familyId, albumId, entryId,
           eventId: `sources:${operation.id}`, photoCount })
         return { resourceId: entryId, response: { entryId }, responseSnapshot: { entryId } }
       },
@@ -916,6 +961,25 @@ async function lockLiveChild(tx: PrismaTransactionClient, familyId: string, chil
   const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM children WHERE id=${childId}::uuid AND family_id=${familyId}::uuid AND deleted_at IS NULL FOR UPDATE`
   return rows.length > 0
 }
+type PhotoUploadReceipt = { albumId: string; entryId: string; generation: number; epoch: number; batchId: string; requestId: string; photoCount: number }
+function photoNotificationGeneration(config: MaxNotificationPilot | undefined) {
+  return hash(pilotEnabled(config) ? { enabled: true, since: config.MAX_NOTIFICATIONS_PILOT_SINCE,
+    audience: config.MAX_NOTIFICATIONS_AUDIENCE ?? 'owner', owners: config.CONTROL_OWNER_USER_IDS,
+    subject: config.MAX_NOTIFICATIONS_PILOT_SUBJECT, bot: config.MAX_BOT_EXPECTED_USERNAME } : { enabled: false })
+}
+async function recordPhotoUpload(tx: PrismaTransactionClient, scope: FamilyScope, input: PhotoUploadReceipt, config: MaxNotificationPilot | undefined) {
+  // Callers hold the album lock: completion cannot race a later item into the
+  // closed batch. Old mutation receipts still handle lost acknowledgement replay.
+  const where = { familyId: scope.familyId, albumId: input.albumId, actorUserId: scope.principal.userId }
+  const prefix = `photo_upload:${input.batchId}:`
+  const completed = await tx.albumSourceOperation.findFirst({ where: { ...where, operation: 'photo_upload_complete', requestId: input.batchId } })
+  const previous = await tx.albumSourceOperation.findFirst({ where: { ...where, operation: { startsWith: prefix } } })
+  const staleEntry = await tx.albumSourceOperation.findFirst({ where: { ...where, entryId: input.entryId, operation: { startsWith: prefix }, startPosition: { not: input.generation } } })
+  if (completed || staleEntry || previous && previous.operation !== prefix + input.epoch) throw albumVersionConflict()
+  await tx.albumSourceOperation.create({ data: { ...where, entryId: input.entryId, operation: prefix + input.epoch,
+    requestId: input.requestId, payloadHash: photoNotificationGeneration(config), startPosition: input.generation, count: input.photoCount } })
+}
+
 function assertVersion(actual: number, expected: number) { if (actual !== expected) throw albumVersionConflict() }
 function idempotencyConflict() { return new AlbumFailure('idempotency_conflict', 'Этот Idempotency-Key уже использован с другими данными') }
 function legacyCollectionPaged() { return new AlbumFailure('conflict', 'Для этой коллекции уже используется постраничное управление. Обновите приложение, чтобы изменять список материалов') }

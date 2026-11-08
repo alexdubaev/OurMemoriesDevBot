@@ -19,11 +19,12 @@ type Job = {
 }
 type Operations = {
   upload(file: File, key: string, resume: FamilyPhotoUploadResume, signal: AbortSignal, progress: (loaded: number, total: number) => void): Promise<string>
+  complete?(batchId: string, signal: AbortSignal): Promise<unknown>
 } & ({
   reserve(count: number, key: string, signal: AbortSignal): Promise<{ grant: string }>
-  attach(input: AlbumMonthPhotoAppendRequest, key: string, signal: AbortSignal): Promise<unknown>
+  attach(input: AlbumMonthPhotoAppendRequest, key: string, signal: AbortSignal, batchId: string): Promise<unknown>
 } | {
-  attachPhoto(source: SourceRef, key: string, signal: AbortSignal): Promise<unknown>
+  attachPhoto(source: SourceRef, key: string, signal: AbortSignal, batchId: string): Promise<unknown>
 })
 
 export class InvalidMonthPhoto extends Error {}
@@ -58,6 +59,7 @@ function waitForRetry(ms: number, signal: AbortSignal) {
 }
 
 export function createMonthPhotoQueue(selection: readonly Selection[]) {
+  const batchId = crypto.randomUUID()
   const jobs: Job[] = selection.map((item, index) => ({
     ...item,
     name: 'file' in item ? item.file.name : `Фото ${index + 1}`,
@@ -77,13 +79,15 @@ export function createMonthPhotoQueue(selection: readonly Selection[]) {
   let stale = false
   let running = false
   let attachmentAttempted = false
+  let completionPending = false
+  let completionDone = false
 
   function snapshot() {
     const errors = jobs.flatMap((job) => job.failure ? [{ ...job.failure, key: job.key, name: job.name }] : [])
     const saved = jobs.filter((job) => job.saved).length
     return {
       total: jobs.length, saved, failed: errors.length, pending: jobs.length - saved - errors.length,
-      errors, retryable: errors.some((error) => error.retryable), current, queueError, retryDelayMs, stale, running, attachmentAttempted,
+      errors, retryable: errors.some((error) => error.retryable), current, queueError, retryDelayMs, stale, running, attachmentAttempted, completionPending,
     }
   }
 
@@ -152,10 +156,10 @@ export function createMonthPhotoQueue(selection: readonly Selection[]) {
           current = { name: job.name, phase: 'attach', fraction: 0 }
           notify()
           attachmentAttempted = true
-          if ('attachPhoto' in ops) await retryRateLimited(() => ops.attachPhoto(job.source!, job.key, signal))
+          if ('attachPhoto' in ops) await retryRateLimited(() => ops.attachPhoto(job.source!, job.key, signal, batchId))
           else {
             const input = { grant: batch.grant!, offset: index % batchSize, source: job.source! }
-            await retryRateLimited(() => ops.attach(input, job.key, signal))
+            await retryRateLimited(() => ops.attach(input, job.key, signal, batchId))
           }
           job.saved = true
         } catch (error) {
@@ -176,6 +180,20 @@ export function createMonthPhotoQueue(selection: readonly Selection[]) {
         current = null
         notify()
       }
+      if (signal.aborted || stale || !ops.complete || completionDone || !jobs.some((job) => job.saved)) return
+      if (jobs.some((job) => !job.saved && job.failure?.retryable !== false)) return
+      try {
+        await retryRateLimited(() => ops.complete!(batchId, signal))
+        completionDone = true
+        completionPending = false
+      } catch (error) {
+        if (signal.aborted) return
+        if (scopeChanged(error)) stale = true
+        else {
+          completionPending = true
+          queueError = 'Фотографии сохранены, но уведомление не подтверждено. Повторите завершение.'
+        }
+      }
     } finally {
       running = false
       current = null
@@ -183,5 +201,5 @@ export function createMonthPhotoQueue(selection: readonly Selection[]) {
     }
   }
 
-  return { run, snapshot, hasAttachmentAttempt: () => attachmentAttempted }
+  return { run, snapshot, batchId, hasAttachmentAttempt: () => attachmentAttempted }
 }

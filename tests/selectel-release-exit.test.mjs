@@ -3940,3 +3940,16 @@ cat "$SERVER_ROOT/events"
   assert.equal(result.status, 0, result.stdout + result.stderr)
   assert.equal(result.stdout.trim(), 'REACHED')
 })
+
+slowTest('notification batch source retains exact month recovery binding and rejects executable drift', () => {
+  const run = (drift = false) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(root)}\nrollback_s3_host_inputs_match() { return 0; }\n${drift ? "rollback_compatibility_fingerprint() { printf '%s\\n' ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff; }" : ''}\nrollback_source_compatibility_profile HEAD 95496ef26b677529ee9b1ac10fc12f6075dd912b\n`,
+    encoding: 'utf8',
+  })
+  const current = run()
+  assert.equal(current.status, 0, current.stdout + current.stderr)
+  assert.equal(current.stdout.trim(), 's3-album-month-photos')
+  const drifted = run(true)
+  assert.notEqual(drifted.status, 0, 'unknown executable fingerprints must stay rejected')
+})
