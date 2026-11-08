@@ -1,5 +1,6 @@
 /* eslint-disable typographyPolicy/use-typography-component -- album form controls use the scoped albums stylesheet. */
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
+import { WebpIcon } from '@/components/WebpIcon'
 import type { AlbumEntryDto } from '@web-app-demo/contracts'
 import type { AuthenticatedTransport } from '@/platform/api'
 import type { HostBridge } from '@/platform/telegram'
@@ -132,8 +133,10 @@ function MonthPhotoFlow({ api, albumId, entry, familyId, accountId, scopeKey, tr
         </>}
       </footer>
     </> : mode === 'device' ? <>
-      <p className="albums-muted">Здесь можно добавлять только фотографии.</p>
-      <button className="albums-primary" onClick={() => input.current?.click()} type="button">Выбрать файлы</button>
+      <button aria-label="Выбрать файлы" className="memoly-add-photo-picker" onClick={() => input.current?.click()} type="button">
+        <span className="memoly-add-picker-icon"><WebpIcon decorative name="photo" size={34} /></span>
+        <strong>Выберите фотографии</strong><span>Нажмите, чтобы выбрать фотографии<br />с устройства</span>
+      </button>
     </> : <>
       <button className="albums-primary" onClick={() => setMode('memories')} type="button">Из воспоминаний</button>
       <button className="albums-secondary" onClick={() => { setMode('device'); input.current?.click() }} type="button">С устройства</button>

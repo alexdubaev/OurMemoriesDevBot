@@ -8,7 +8,7 @@ import { SourcePicker } from './SourcePicker'
 import { SourcePreview } from './SourcePreview'
 
 type Props = { album: AlbumDto; entry: AlbumEntryDto | null; title?: string; api: AlbumsApi; accountId: string; scopeKey: string; transport: AuthenticatedTransport; timezone: string; canUpload: boolean; onUpload: (attachMemory: (memory: MemoryDto) => Promise<void>, attachPhotos: (mediaIds: string[]) => Promise<void>, complete: () => void) => void; onCancel: () => void; onSaved: (version: number, monthEntry?: AlbumEntryDto) => void }
-export function EntryEditor(props: Props) {
+export function EntryEditor(props: Props & { photosOnly?: boolean }) {
   const { album, entry, api, accountId, scopeKey, transport, timezone } = props
   const [title, setTitle] = useState(entry?.title ?? props.title ?? '')
   const [caption, setCaption] = useState(entry?.caption ?? '')
@@ -65,6 +65,7 @@ export function EntryEditor(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, entry?.id])
   function choose(next: AlbumSource[]) {
+    if (props.photosOnly) { setPicker(false); const photos = next.filter((source) => source.available && source.kind === 'photo'); if (photos.length) void save(photos); return }
     const selected = new Set(sources.map(sourceKey))
     let added = 0
     for (const source of next) {
@@ -207,7 +208,18 @@ export function EntryEditor(props: Props) {
     } finally { saving.current = false; setBusy(false) }
     if (continueUpload) await save(uploaded, propagate, keepOpen)
   }
-  if (picker) return <SourcePicker accountId={accountId} api={api} initial={[]} onCancel={() => setPicker(false)} onChoose={choose} photosOnly={workshop} scopeKey={scopeKey} transport={transport} />
+  if (picker) return <SourcePicker accountId={accountId} api={api} initial={[]} monthPhotos={props.photosOnly} onCancel={() => setPicker(false)} onChoose={choose} photosOnly={workshop || props.photosOnly} scopeKey={scopeKey} transport={transport} />
+  if (props.photosOnly) return <section className="month-photo-add">
+    <header className="albums-toolbar"><button disabled={busy} onClick={props.onCancel} type="button">‹ Назад</button><h1>Добавить фотографии</h1></header>
+    <p className="albums-upload-notice">Фотографии сохранятся в этом альбоме</p>
+    {error ? <p className="albums-error" role="alert">{error}</p> : null}
+    {locked ? <button className="albums-primary" disabled={busy || conflict} onClick={() => void save()} type="button">Повторить сохранение</button> : <>
+      <button className="albums-primary" disabled={busy} onClick={() => setPicker(true)} type="button">Из воспоминаний</button>
+      {props.canUpload ? <button className="albums-secondary" disabled={busy} onClick={startUpload} type="button">С устройства</button> : null}
+    </>}
+    {busy ? <p role="status">Сохраняем фотографии…</p> : null}
+    {conflict ? <p role="alert">Вернитесь к альбому и обновите данные перед добавлением.</p> : null}
+  </section>
   return <section className="albums-editor">
     <header className="albums-toolbar"><button disabled={busy} onClick={props.onCancel} type="button">‹ Назад</button><h1>{entry?.kind === 'month' ? monthAgeLabel(entry.monthNumber!) : entry ? 'Изменить историю' : workshop ? 'Добавить работу' : 'Новая история'}</h1></header>
     <form onSubmit={(event) => { event.preventDefault(); void save() }}>

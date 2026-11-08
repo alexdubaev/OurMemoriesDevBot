@@ -6,6 +6,104 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { createPrisma } from '../../backend/src/db'
 import { allocatePublicationOrdinal, lockPublicationFamily } from '../../backend/src/modules/memories/infrastructure/publication-boundary'
 
+
+async function showAlbumStories(page: Page) {
+  if (await page.locator('[data-albums-kind="free"][data-albums-route="album"]').count()) {
+    await page.getByLabel('Меню альбома', { exact: true }).click()
+    await page.getByRole('button', { name: 'Истории и обсуждения', exact: true }).click()
+  }
+}
+
+test('free albums open a unified collage and add photos directly', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.addInitScript((data) => { Object.defineProperty(window, 'WebApp', { configurable: true, value: { initData: data, version: '1', platform: 'web', ready() {} } }) }, signedInitData())
+  const exchange = page.waitForResponse((response) => response.url().endsWith('/api/v1/auth/max') && response.request().method() === 'POST')
+  await page.goto('/')
+  const { accessToken } = await (await exchange).json() as { accessToken: string }
+  const headers = { Authorization: `Bearer ${accessToken}` }
+  await page.getByRole('button', { name: 'Продолжить', exact: true }).click()
+  await page.getByRole('button', { name: /Создать свою семью/ }).click()
+  await expect(page.getByTestId('bottom-navigation')).toBeVisible()
+  const { ownFamilyId: familyId } = await (await page.request.get('/api/v1/me/families', { headers })).json() as { ownFamilyId: string }
+  await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await page.getByRole('button', { name: 'Создать альбом', exact: true }).click()
+  await page.getByRole('button', { name: /Свободный альбом/ }).click()
+  await page.getByLabel('Название альбома').fill('Синтетические крестины')
+  await page.getByRole('button', { name: 'Создать', exact: true }).click()
+  await page.getByRole('button', { name: '+ Добавить фотографии', exact: true }).click()
+  await page.getByRole('button', { name: 'С устройства', exact: true }).click()
+  const picker = page.locator('.memoly-add-photo-picker')
+  await expect(picker).toBeVisible()
+  for (const width of [320, 390, 430]) {
+    await page.setViewportSize({ width, height: 844 })
+    const bounds = await picker.boundingBox()
+    expect(bounds!.width).toBeGreaterThan(250)
+    expect(bounds!.x).toBeGreaterThanOrEqual(16)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width - 15)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await page.screenshot({ path: testInfo.outputPath(`free-photo-picker-${width}.png`) })
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  const files = (count: number) => Array.from({ length: count }, (_, index) => ({ name: `synthetic-${index}.png`, mimeType: 'image/png', buffer: solidPng(index * 18, 90, 140, index % 2 ? 120 : 180, index % 2 ? 180 : 120) }))
+  await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(files(25))
+  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 25 · добавлено: 25' })).toBeVisible({ timeout: 120_000 })
+  await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
+  const gallery = page.getByRole('group', { name: 'Фотографии альбома', exact: true })
+  await expect(gallery).toBeVisible()
+  await expect(page.locator('.albums-entry-card')).toHaveCount(0)
+  const first = page.getByRole('button', { name: 'Открыть фото 1', exact: true })
+  const second = page.getByRole('button', { name: 'Открыть фото 2', exact: true })
+  await expect(second).toBeVisible()
+  const geometry = await gallery.evaluate((node) => {
+    const lead = node.querySelector<HTMLElement>('[data-month-cover]')!
+    const wall = node.querySelector<HTMLElement>('.month-collage-wall')!
+    return { gap: wall.getBoundingClientRect().top - lead.getBoundingClientRect().bottom, radius: getComputedStyle(lead).borderRadius, ratio: lead.clientWidth / lead.clientHeight }
+  })
+  expect(geometry.gap).toBe(2)
+  expect(geometry.radius).toBe('0px')
+  expect(geometry.ratio).toBeCloseTo(1.5, 1)
+  await second.click()
+  await expect(page.locator('[data-mixed-viewer]')).toContainText('2 / 25')
+  await page.getByRole('button', { name: 'Закрыть просмотр', exact: true }).click()
+  await expect(second).toBeFocused()
+  await page.screenshot({ path: testInfo.outputPath('free-album-collage.png') })
+  // A pre-existing second story also contributes its photos to the same album surface.
+  await showAlbumStories(page)
+  await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
+  await page.getByLabel('Название (необязательно)').fill('Ранее сохранённая история')
+  await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
+  await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(files(2))
+  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 2 · добавлено: 2' })).toBeVisible()
+  await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
+  await expect(first).toBeVisible()
+  await expect.poll(async () => {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    return page.getByRole('button', { name: 'Открыть фото 27', exact: true }).isVisible()
+  }).toBe(true)
+  await page.getByRole('button', { name: 'Открыть фото 24', exact: true }).click()
+  const viewer = page.locator('[data-mixed-viewer]')
+  await expect(viewer).toContainText('24 / 27')
+  for (const index of [25, 26, 27]) {
+    await viewer.getByRole('button', { name: 'Далее', exact: true }).click()
+    await expect(viewer).toContainText(`${index} / 27`)
+  }
+  expect(await gallery.locator('[data-month-photo]').count()).toBeLessThanOrEqual(85)
+  await page.getByRole('button', { name: 'Закрыть просмотр', exact: true }).click()
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.getByRole('button', { name: '+ Добавить фотографии', exact: true }).click()
+  await page.getByRole('button', { name: 'С устройства', exact: true }).click()
+  await expect(picker).toBeVisible()
+  await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(files(2))
+  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 2 · добавлено: 2' })).toBeVisible()
+  await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
+  await expect(first).toBeVisible()
+  const { items: albums } = await (await page.request.get(`/api/v1/families/${familyId}/albums`, { headers })).json() as { items: { id: string }[] }
+  const { items: entries } = await (await page.request.get(`/api/v1/families/${familyId}/albums/${albums[0].id}/entries?view=collection-summary`, { headers })).json() as { items: { sourceCount: number }[] }
+  expect(entries).toHaveLength(2)
+  expect(entries.reduce((count, entry) => count + entry.sourceCount, 0)).toBe(29)
+})
+
 test('large existing stories page their sources and retain the unseen tail after editing', async ({ page }) => {
   const databaseUrl = process.env.TEST_DATABASE_URL
   if (!databaseUrl || process.env.DATABASE_URL !== databaseUrl || new URL(databaseUrl).hostname !== '127.0.0.1' || !new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Explicit isolated loopback test database required')
@@ -41,7 +139,8 @@ test('large existing stories page their sources and retain the unseen tail after
     await db.albumEntrySource.createMany({ data: ids.map((id, position) => ({ familyId, albumId: album.id, entryId: entry.id, memoryId: id, sourceKind: 'memory', sourceId: id, kind: 'note', position })) })
     await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
     await page.getByRole('button', { name: /Страховочная большая подборка/ }).click()
-    await page.getByRole('button', { name: /Большая коллекция для восстановления/ }).click()
+    await showAlbumStories(page)
+  await page.getByRole('button', { name: /Большая коллекция для восстановления/ }).click()
     const rows = page.locator('.albums-detail-sources article')
     await expect(rows).toHaveCount(24)
     await expect(rows.first()).toContainText('Synthetic recovery note 0')
@@ -90,7 +189,8 @@ test('album deletion confirmations work without native dialogs', async ({ page }
 
   const photoBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
   for (const names of [['first-a.png', 'first-b.png'], ['second.png']]) {
-    await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
+    await showAlbumStories(page)
+  await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
     await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
     await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(names.map((name) => ({ name, mimeType: 'image/png', buffer: photoBytes })))
     await expect(page.getByRole('status').filter({ hasText: `Выбрано: ${names.length} · добавлено: ${names.length}` })).toBeVisible()
@@ -108,6 +208,7 @@ test('album deletion confirmations work without native dialogs', async ({ page }
   const retainedMediaId = first.sources[1].sourceId
   const secondMediaId = second.sources[0].sourceId
 
+  await showAlbumStories(page)
   await page.getByRole('button', { name: 'Открыть историю', exact: true }).first().click()
   await page.getByRole('button', { name: 'Изменить', exact: true }).click()
   await page.getByRole('button', { name: 'Убрать материал 1', exact: true }).click()
@@ -118,6 +219,7 @@ test('album deletion confirmations work without native dialogs', async ({ page }
   const detachedOriginal = await page.request.get(`/api/v1/families/${familyId}/media/${detachedMediaId}/content?variant=original`, { headers: { ...headers, 'X-Private-Media-Purpose': 'image' } })
   expect(detachedOriginal.status()).toBe(200)
   expect(await detachedOriginal.body()).toEqual(photoBytes)
+  await showAlbumStories(page)
   await page.getByRole('button', { name: 'Открыть историю', exact: true }).first().click()
   await page.getByRole('button', { name: 'Убрать из альбома', exact: true }).click()
   const confirmation = page.getByRole('alertdialog')
@@ -200,7 +302,8 @@ test('MAX authenticated album cover choices save and complete the picker', async
     { name: 'cover-second-blue.png', bytes: solidPng(24, 48, 240) },
   ]
   for (const photo of photos) {
-    await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
+    await showAlbumStories(page)
+  await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
     await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
     await page.getByLabel('Выбрать фотографии с устройства').setInputFiles({ name: photo.name, mimeType: 'image/png', buffer: photo.bytes })
     await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 1 · добавлено: 1' })).toBeVisible()
@@ -365,6 +468,7 @@ test('MAX authenticated albums persist year chapters and a text event through re
     }
     await route.continue()
   })
+  await showAlbumStories(page)
   await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
   await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Добавить фотографии' })).toBeVisible()
@@ -394,6 +498,7 @@ test('MAX authenticated albums persist year chapters and a text event through re
   const attachedEntry = ((await attachedAlbum.json()) as { items: { sources: { memoryId: string | null; sourceKind: string; sourceId: string; kind: string; attachment: { id: string; source: string } | null }[] }[] }).items[0]
   expect(attachedEntry.sources).toHaveLength(1)
   expect(attachedEntry.sources[0]).toEqual(expect.objectContaining({ memoryId: null, sourceKind: 'private_storage', sourceId: expect.any(String), kind: 'photo', available: true, attachment: expect.objectContaining({ id: expect.any(String), source: 'private_storage' }) }))
+  await showAlbumStories(page)
   await page.getByRole('button', { name: 'Открыть историю', exact: true }).click()
   await expect(page.locator('.albums-entry-detail')).toBeVisible()
   if (process.env.MEMOLY_ALBUM_UPLOAD_SCREENSHOT) await page.screenshot({ fullPage: false, path: process.env.MEMOLY_ALBUM_UPLOAD_SCREENSHOT })
@@ -895,6 +1000,7 @@ test('all album kinds accept an eleven-photo device selection and preserve it af
     await expect(page.getByTestId('bottom-navigation')).toBeVisible()
     await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
     await page.getByRole('button', { name: new RegExp(input.title) }).click()
+    if (input.kind === 'free') await showAlbumStories(page)
     await page.getByRole('button', { name: input.kind === 'workshop' ? 'Добавить работу' : 'Добавить историю', exact: true }).click()
     await page.getByLabel(input.kind === 'events' ? 'Название события' : 'Название (необязательно)').fill('Одна большая история')
     await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
@@ -917,6 +1023,7 @@ test('all album kinds accept an eleven-photo device selection and preserve it af
       pickerSources = photos.items
     }
     const opener = input.kind === 'workshop' ? page.locator('[data-album-tile]').first() : page.getByRole('button', { name: /Одна большая история/ }).first()
+    if (input.kind === 'free') await showAlbumStories(page)
     await opener.click()
     await page.getByRole('button', { name: 'Изменить', exact: true }).click()
     await page.getByLabel('История').fill('Подпись после большой загрузки')
@@ -992,6 +1099,7 @@ test('album upload reconciles a lost metadata reply and preserves a different co
   })
   await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
   await page.getByRole('button', { name: /Ответ об истории/ }).click()
+  await showAlbumStories(page)
   await page.getByRole('button', { name: /История в очереди/ }).click()
   await page.getByRole('button', { name: 'Изменить', exact: true }).click()
   await page.getByLabel('История').fill('Сохранено перед фотографиями')
@@ -1003,6 +1111,7 @@ test('album upload reconciles a lost metadata reply and preserves a different co
   expect(reconciliations).toBeGreaterThan(0)
   expect(uploads).toBe(2)
   await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
+  await showAlbumStories(page)
   await page.getByRole('button', { name: /История в очереди/ }).click()
   await page.getByRole('button', { name: 'Изменить', exact: true }).click()
   await page.getByLabel('История').fill('Новая правка очереди')
@@ -1021,6 +1130,7 @@ test('album upload reconciles a lost metadata reply and preserves a different co
 test('album new upload opens photos directly and central Add keeps its chooser', async ({ page }) => {
   await openSynthetic(page, 'albums=24&delayedPublish')
   await page.getByRole('button', { name: /У бабушки/ }).click()
+  await showAlbumStories(page)
   await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
   await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Добавить фотографии', exact: true })).toBeVisible()
@@ -1180,6 +1290,7 @@ test('album scope 404 revokes and clears private detail before a late read can s
   await openSynthetic(page, 'albums=24')
   await page.getByRole('button', { name: /У бабушки/ }).click()
   await expect(page.getByRole('heading', { name: 'У бабушки', exact: true })).toBeVisible()
+  await showAlbumStories(page)
   await page.getByRole('button', { name: 'В саду', exact: true }).click()
   await expect(page.locator('.albums-entry-detail')).toContainText('Тёплый день у бабушки')
   await page.getByRole('button', { name: 'Открыть материал 1', exact: true }).click()
@@ -1205,6 +1316,7 @@ test('album scope 404 revokes and clears private detail before a late read can s
 test('saved entry refresh scope loss returns home, while an ordinary source 404 stays recoverable', async ({ page }) => {
   await openSynthetic(page, 'albums=24')
   await page.getByRole('button', { name: /У бабушки/ }).click()
+  await showAlbumStories(page)
   await page.getByRole('button', { name: 'В саду', exact: true }).click()
   await page.getByRole('button', { name: 'Изменить', exact: true }).click()
   await page.getByLabel('История').fill('Обновлённая запись перед потерей семейного доступа')
@@ -1217,6 +1329,7 @@ test('saved entry refresh scope loss returns home, while an ordinary source 404 
 
   await openSynthetic(page, 'albums=24')
   await page.getByRole('button', { name: /У бабушки/ }).click()
+  await showAlbumStories(page)
   await page.getByRole('button', { name: 'В саду', exact: true }).click()
   await page.getByRole('button', { name: 'Изменить', exact: true }).click()
   await page.getByLabel('История').fill('Черновик должен сохраниться после ошибки каталога')
