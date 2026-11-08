@@ -14,9 +14,10 @@ type Props = {
   transport: AuthenticatedTransport
   onOpen: (index: number, element: HTMLElement) => void
   showCoverIcon?: boolean
+  label?: string
 }
 
-export function MonthPhotoCollage({ pages, cover, accountId, scopeKey, transport, onOpen, showCoverIcon = true }: Props) {
+export function MonthPhotoCollage({ pages, cover, accountId, scopeKey, transport, onOpen, showCoverIcon = true, label = 'Фотографии месяца' }: Props) {
   const root = useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = useState({ width: 0, top: 0, height: 0 })
   const layout = useMemo(() => monthCollageLayout(pages, viewport.width, Boolean(cover)), [pages, viewport.width, cover])
@@ -51,7 +52,7 @@ export function MonthPhotoCollage({ pages, cover, accountId, scopeKey, transport
   const visible = layout.tiles.filter(({ y, height }) => y + height >= viewport.top - margin && y <= viewport.top + viewport.height + margin).slice(0, 84)
   const preview = (source: AlbumSource) => <SourcePreview accountId={accountId} scopeKey={scopeKey} source={source} transport={transport} />
 
-  return <div aria-label="Фотографии месяца" className="month-collage" role="group">
+  return <div aria-label={label} className="month-collage" role="group">
     {cover ? <div className="month-collage-cover" data-month-cover={cover.id}>
       <button aria-label="Открыть фото 1" className="month-collage-tile" data-month-photo={cover.id} onClick={(event) => onOpen(0, event.currentTarget)} type="button">{preview(cover)}</button>
       {showCoverIcon ? <span aria-label="Обложка месяца" className="month-collage-cover-icon" role="img">

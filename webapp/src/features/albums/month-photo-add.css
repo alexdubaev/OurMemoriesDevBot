@@ -2,8 +2,30 @@
   overflow-wrap: anywhere;
 }
 
+.album-device-photos {
+  padding: 16px max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+.album-device-photos .albums-toolbar {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.album-device-photos .albums-toolbar h1 {
+  font-size: 20px;
+}
+
 .month-photo-add button {
   min-height: 44px;
+}
+
+.month-photo-add .memoly-add-photo-picker {
+  width: 100%;
+  min-height: 250px;
+  color: inherit;
+  font: inherit;
 }
 
 .month-photo-add progress {

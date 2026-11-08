@@ -42,6 +42,10 @@ test('MAX album-only three-photo story shares durable comments, exact retries an
   const { familyId, albumId, headers } = await start(page)
   let memoryPosts = 0
   page.on('request', (r) => { if (r.method() === 'POST' && new URL(r.url()).pathname === `/api/v1/families/${familyId}/memories`) memoryPosts += 1 })
+  if (await page.locator('[data-albums-route="album"]').count()) {
+    await page.getByLabel('Меню альбома', { exact: true }).click()
+    await page.getByRole('button', { name: 'Истории и обсуждения', exact: true }).click()
+  }
   await page.getByRole('button', { name: 'Добавить историю', exact: true }).click()
   await page.getByRole('button', { name: 'Загрузить новое', exact: true }).click()
   await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(['front', 'side', 'back'].map((name) => ({ name: `${name}.png`, mimeType: 'image/png', buffer: photoBytes })))
@@ -55,6 +59,10 @@ test('MAX album-only three-photo story shares durable comments, exact retries an
   expect(story.sources.every((source) => source.memoryId === null)).toBe(true)
   expect(memoryPosts).toBe(0)
   const path = `${root}/entries/${story.id}`
+  if (await page.locator('[data-albums-route="album"]').count()) {
+    await page.getByLabel('Меню альбома', { exact: true }).click()
+    await page.getByRole('button', { name: 'Истории и обсуждения', exact: true }).click()
+  }
   await page.getByRole('button', { name: 'Открыть историю', exact: true }).click()
   await expect(page.locator('.albums-entry-social')).toHaveCount(1)
   await page.getByRole('button', { name: 'Комментарии · 0', exact: true }).click()
@@ -143,6 +151,10 @@ test('MAX album-only three-photo story shares durable comments, exact retries an
   await page.reload()
   await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
   await page.getByRole('button', { name: /Социальная история/ }).click()
+  if (await page.locator('[data-albums-route="album"]').count()) {
+    await page.getByLabel('Меню альбома', { exact: true }).click()
+    await page.getByRole('button', { name: 'Истории и обсуждения', exact: true }).click()
+  }
   await page.getByRole('button', { name: 'Открыть историю', exact: true }).click()
   await page.getByRole('button', { name: 'Комментарии · 2', exact: true }).click()
   await expect(page.getByText('Исправлено в обсуждении работы', { exact: true })).toBeVisible()

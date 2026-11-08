@@ -1,5 +1,6 @@
 /* eslint-disable typographyPolicy/use-typography-component -- native album upload progress uses its scoped stylesheet. */
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react'
+import { WebpIcon } from '@/components/WebpIcon'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { uploadAlbumPhoto } from './album-photo-upload'
 import { createMonthPhotoQueue } from './month-photo-queue'
@@ -13,6 +14,7 @@ type Props = {
 }
 
 export function AlbumDevicePhotos({ active, familyId, transport, attach, onClose, onCancelRequestChange }: Props) {
+  const inputId = useId()
   const [queue, setQueue] = useState<Queue | null>(null)
   const [progress, setProgress] = useState<ReturnType<Queue['snapshot']> | null>(null)
   const [errorPage, setErrorPage] = useState(0)
@@ -43,18 +45,22 @@ export function AlbumDevicePhotos({ active, familyId, transport, attach, onClose
   }
   const errorCount = progress?.failed ?? 0
   const page = Math.min(errorPage, Math.max(0, Math.ceil(errorCount / 10) - 1))
-  return <section aria-label="Добавление фотографий альбома" className="month-photo-add">
+  return <section aria-label="Добавление фотографий альбома" className="month-photo-add album-device-photos">
     <header className="albums-toolbar"><button onClick={close} type="button">‹ Назад</button><h1>Добавить фотографии</h1></header>
     <p className="albums-upload-notice">Фотографии сохранятся в этом альбоме</p>
     {!queue ? <>
-      <p>Выберите фотографии с устройства.</p>
-      <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" aria-label="Выбрать фотографии с устройства" multiple onChange={(event) => {
+      <input accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" aria-label="Выбрать фотографии с устройства" className="memoly-add-native-file" id={inputId} multiple onChange={(event) => {
         const files = Array.from(event.currentTarget.files ?? [])
         event.currentTarget.value = ''
         if (!files.length) return
         const next = createMonthPhotoQueue(files.map((file) => ({ file })))
         setQueue(next); start(next)
       }} type="file" />
+      <label className="memoly-add-photo-picker" htmlFor={inputId}>
+        <span className="memoly-add-picker-icon"><WebpIcon decorative name="photo" size={34} /></span>
+        <strong>Выберите фотографии</strong>
+        <span>Нажмите, чтобы выбрать фотографии<br />с устройства</span>
+      </label>
     </> : progress ? <>
       <p aria-live="polite" role="status">Выбрано: {progress.total} · добавлено: {progress.saved}{progress.failed ? ` · с ошибкой: ${progress.failed}` : ''}</p>
       <progress aria-label="Ход добавления фотографий" max={progress.total} value={Math.min(progress.total, progress.saved + progress.failed + (progress.current?.fraction ?? 0))} />
