@@ -34,6 +34,7 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
   albums.forEach((album) => { album.entryCount = album.kind === 'year' ? 1 : entries.get(album.id)!.length })
   const log: { path: string; method: string; key?: string; body?: unknown }[] = []
   const replay = new Map<string, unknown>()
+  const photoUploadCounts = new Map<string, number>()
   const discussions = new Map<string, { generation: number; comments: AlbumEntryCommentDto[]; reaction: MemoryReaction | null }>()
   const monthCovers = new Map<string, string>()
   const socialState = (entryId: string) => {
@@ -110,6 +111,7 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
       if (method === 'PATCH') { Object.assign(album, body); album.version += 1 }
       return done({ album })
     }
+    if (segments[2] === 'photo-uploads' && segments[3] === 'complete' && method === 'POST') return done({ photoCount: photoUploadCounts.get(String(body?.batchId)) ?? 0 })
     const list = entries.get(album.id)!
     if (segments[2] === 'workshop-groups') return done({ groups: [{ year: 2026, month: 10, count: list.length }] })
     if (segments[2] === 'entries:reorder') { const index = list.findIndex((item) => item.id === body!.entryId); const [item] = list.splice(index, 1); const before = body!.beforeEntryId ? list.findIndex((item) => item.id === body!.beforeEntryId) : list.length; list.splice(before, 0, item); bump(album, item); return done({ album }) }
@@ -122,8 +124,9 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
     if (method === 'POST' && segments.length === 3) {
       if (failAttach) { failAttach = false; throw new TypeError('Synthetic lost attach response before commit') }
       const sources = (body!.sources as { memoryId: string; sourceKind: string; sourceId: string }[]).map((ref) => ({ ...memorySources(memories.get(ref.memoryId)!).find((source) => sourceKey(source) === sourceKey(ref as never))!, id: id() }))
-      const input = { ...body }; delete input.expectedVersion
+      const input = { ...body }; delete input.expectedVersion; delete input.notificationBatchId
       const saved = entry(sequence++, { ...input, id: id(), sources, sourceCount: sources.length } as Partial<AlbumEntryDto>); list.push(saved); bump(album, saved)
+      if (typeof body?.notificationBatchId === 'string') photoUploadCounts.set(body.notificationBatchId, (photoUploadCounts.get(body.notificationBatchId) ?? 0) + sources.filter((source) => source.kind === 'photo').length)
       return done({ entry: saved, replayed: false })
     }
     const item = list.find((entry) => entry.id === segments[3])!
@@ -168,7 +171,7 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
     if (method === 'DELETE') { list.splice(list.indexOf(item), 1); bump(album, item); return done(null) }
     if (segments[4] === 'sources') { item.sources = (body!.sources as { memoryId: string; sourceKind: string; sourceId: string }[]).map((ref) => ({ ...memorySources(memories.get(ref.memoryId)!).find((source) => sourceKey(source) === sourceKey(ref as never))!, id: id() })); item.sourceCount = item.sources.length }
     else if (segments[4] === 'clear') { item.sources = []; item.caption = null; item.sourceCount = 0; monthCovers.delete(item.id); const state = socialState(item.id); state.generation += 1; state.comments = []; state.reaction = null }
-    else { const input = { ...body }; delete input.expectedVersion; Object.assign(item, input) }
+    else { const input = { ...body }; delete input.expectedVersion; delete input.notificationBatchId; Object.assign(item, input) }
     bump(album, item); return done({ entry: projectedEntry(item, album, parsed.searchParams.get('view')) })
   }
   async function raw(path: string) {

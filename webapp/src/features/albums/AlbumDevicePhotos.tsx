@@ -9,11 +9,11 @@ import './month-photo-add.css'
 type Queue = ReturnType<typeof createMonthPhotoQueue>
 type Props = {
   active: boolean; familyId: string; transport: AuthenticatedTransport
-  attach: (mediaIds: string[]) => Promise<void>; onClose: () => void
+  attach: (mediaIds: string[], batchId: string) => Promise<void>; complete: (batchId: string, signal: AbortSignal) => Promise<unknown>; onClose: () => void
   onCancelRequestChange: (cancel: () => void) => void
 }
 
-export function AlbumDevicePhotos({ active, familyId, transport, attach, onClose, onCancelRequestChange }: Props) {
+export function AlbumDevicePhotos({ active, familyId, transport, attach, complete, onClose, onCancelRequestChange }: Props) {
   const inputId = useId()
   const [queue, setQueue] = useState<Queue | null>(null)
   const [progress, setProgress] = useState<ReturnType<Queue['snapshot']> | null>(null)
@@ -40,7 +40,8 @@ export function AlbumDevicePhotos({ active, familyId, transport, attach, onClose
     setProgress(next.snapshot())
     running.current = next.run({
       upload: (file, key, resume, signal, onProgress) => uploadAlbumPhoto(transport, familyId, file, key, resume, signal, onProgress),
-      attachPhoto: async (source, _key, signal) => { signal.throwIfAborted(); await attach([source.sourceId]) },
+      attachPhoto: async (source, _key, signal, batchId) => { signal.throwIfAborted(); await attach([source.sourceId], batchId) },
+      complete,
     }, controller.signal, notify).finally(() => { if (request.current === controller) request.current = null })
   }
   const errorCount = progress?.failed ?? 0
@@ -68,6 +69,7 @@ export function AlbumDevicePhotos({ active, familyId, transport, attach, onClose
       {progress.retryDelayMs !== null ? <p role="status">Сервер просит подождать. Очередь продолжится автоматически.</p> : null}
       {progress.stale ? <p role="alert">Альбом или доступ изменился. Вернитесь к альбому и проверьте добавленные фотографии.</p> : null}
       {progress.queueError ? <p role="alert">{progress.queueError}</p> : null}
+      {progress.completionPending && !progress.running ? <button onClick={() => start(queue)} type="button">Повторить завершение</button> : null}
       {progress.failed ? <div className="albums-error"><h2>Фотографии с ошибками</h2><ul>{progress.errors.slice(page * 10, (page + 1) * 10).map((error) => <li key={error.key}><strong>{error.name}</strong><br />{error.message}</li>)}</ul>
         {page > 0 ? <button onClick={() => setErrorPage(page - 1)} type="button">Предыдущие ошибки</button> : null}
         {(page + 1) * 10 < errorCount ? <button onClick={() => setErrorPage(page + 1)} type="button">Следующие ошибки</button> : null}

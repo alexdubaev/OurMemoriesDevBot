@@ -7,7 +7,7 @@ import { albumPhotoSources, categories, dateLabel, memorySources, monthAgeLabel,
 import { SourcePicker } from './SourcePicker'
 import { SourcePreview } from './SourcePreview'
 
-type Props = { album: AlbumDto; entry: AlbumEntryDto | null; title?: string; api: AlbumsApi; accountId: string; scopeKey: string; transport: AuthenticatedTransport; timezone: string; canUpload: boolean; onUpload: (attachMemory: (memory: MemoryDto) => Promise<void>, attachPhotos: (mediaIds: string[]) => Promise<void>, complete: () => void) => void; onCancel: () => void; onSaved: (version: number, monthEntry?: AlbumEntryDto) => void }
+type Props = { album: AlbumDto; entry: AlbumEntryDto | null; title?: string; api: AlbumsApi; accountId: string; scopeKey: string; transport: AuthenticatedTransport; timezone: string; canUpload: boolean; onUpload: (attachMemory: (memory: MemoryDto) => Promise<void>, attachPhotos: (mediaIds: string[], batchId: string) => Promise<void>, complete: () => void, completeBatch: (batchId: string, signal: AbortSignal) => Promise<unknown>) => void; onCancel: () => void; onSaved: (version: number, monthEntry?: AlbumEntryDto) => void }
 export function EntryEditor(props: Props & { photosOnly?: boolean }) {
   const { album, entry, api, accountId, scopeKey, transport, timezone } = props
   const [title, setTitle] = useState(entry?.title ?? props.title ?? '')
@@ -36,6 +36,7 @@ export function EntryEditor(props: Props & { photosOnly?: boolean }) {
   const savedTarget = useRef(entry)
   const savedVersion = useRef(album.version)
   const uploadSaved = useRef(false)
+  const selectionBatchId = useRef<string | null>(null)
   const createdSourceKeys = useRef(new Set<string>())
   const baseline = useRef(new Map((entry?.collection ? [] : entry?.sources ?? []).map((source) => [sourceKey(source), source.id])))
   const removed = useRef(new Set<string>())
@@ -65,7 +66,8 @@ export function EntryEditor(props: Props & { photosOnly?: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, entry?.id])
   function choose(next: AlbumSource[]) {
-    if (props.photosOnly) { setPicker(false); const photos = next.filter((source) => source.available && source.kind === 'photo'); if (photos.length) void save(photos); return }
+    if (props.photosOnly) { setPicker(false); const photos = next.filter((source) => source.available && source.kind === 'photo'); if (photos.length) { selectionBatchId.current = crypto.randomUUID(); void save(photos, false, false, selectionBatchId.current) }; return }
+    if (next.some((source) => source.available && source.kind === 'photo')) selectionBatchId.current ??= crypto.randomUUID()
     const selected = new Set(sources.map(sourceKey))
     let added = 0
     for (const source of next) {
@@ -91,14 +93,15 @@ export function EntryEditor(props: Props & { photosOnly?: boolean }) {
     props.onUpload(async (memory) => {
       uploaded = [...new Map([...uploaded, ...memorySources(memory)].map((source) => [sourceKey(source), source])).values()]
       await save(uploaded, true, true)
-    }, async (mediaIds) => {
+    }, async (mediaIds, batchId) => {
+      selectionBatchId.current = batchId
       const next = workshop && !entry && separate ? [...initialSelection, ...albumPhotoSources(mediaIds)] : [...new Map([...uploaded, ...albumPhotoSources(mediaIds)].map((source) => [sourceKey(source), source])).values()]
-      await save(next, true, true)
+      await save(next, true, true, batchId)
       initialSelection = []
       uploaded = next
-    }, () => { if (uploadSaved.current) props.onSaved(savedVersion.current) })
+    }, () => { if (uploadSaved.current) props.onSaved(savedVersion.current) }, (batchId, signal) => api.completePhotoUpload(album.id, batchId, signal))
   }
-  async function save(uploaded?: AlbumSource[], propagate = false, keepOpen = false) {
+  async function save(uploaded?: AlbumSource[], propagate = false, keepOpen = false, notificationBatchId = selectionBatchId.current ?? undefined) {
     if (saving.current || conflict || sourceLoading || sourceError) { if (propagate) throw new Error('Загрузите материалы перед добавлением'); return }
     const chosen = workshop && !entry && separate
       ? (uploaded ?? sources).filter((source) => !createdSourceKeys.current.has(sourceKey(source)))
@@ -112,13 +115,13 @@ export function EntryEditor(props: Props & { photosOnly?: boolean }) {
       if (event && (!title.trim() || (!caption.trim() && !chosen.some((source) => source.available) && !hasExistingSources))) { setError('Добавьте название и историю или материал.'); if (propagate) throw new Error('Добавьте название события'); return }
       if (workshop && !chosen.some((source) => source.available && source.kind === 'photo') && !hasExistingSources) { setError('Для работы нужна хотя бы одна фотография.'); if (propagate) throw new Error('Нужна фотография'); return }
       const chosenDate = uploaded && date.precision === 'unknown' && !entry && chosen[0] ? sourceDate(chosen[0], timezone) : date
-      const base: CreateAlbumEntryRequest = { expectedVersion: savedVersion.current, kind: event ? 'event' : 'work', title: title.trim() || null, caption: caption.trim() || null, childQuote: workshop ? quote.trim() || null : null, category: workshop ? category : null, date: chosenDate, sources: sourceRefs(chosen) }
+      const base: CreateAlbumEntryRequest = { expectedVersion: savedVersion.current, ...(notificationBatchId ? { notificationBatchId } : {}), kind: event ? 'event' : 'work', title: title.trim() || null, caption: caption.trim() || null, childQuote: workshop ? quote.trim() || null : null, category: workshop ? category : null, date: chosenDate, sources: sourceRefs(chosen) }
       const split = workshop && !target && separate
       const inputs = split ? chosen.map((source) => ({ ...base, date: source.memoryId === null && source.sourceKind === 'private_storage' && date.precision !== 'unknown' ? date : sourceDate(source, timezone), sources: sourceRefs([source]) })) : [base]
       const additions = target ? chosen.filter((source) => !baseline.current.has(sourceKey(source))) : split ? [] : chosen.slice(48)
       const deletions = [...removed.current]
       const changes: Change[] = []
-      for (let offset = 0; offset < Math.max(additions.length, deletions.length); offset += 48) changes.push({ add: sourceRefs(additions.slice(offset, offset + 48)), removeIds: deletions.slice(offset, offset + 48) })
+      for (let offset = 0; offset < Math.max(additions.length, deletions.length); offset += 48) changes.push({ ...(notificationBatchId ? { notificationBatchId } : {}), add: sourceRefs(additions.slice(offset, offset + 48)), removeIds: deletions.slice(offset, offset + 48) })
       if (target && promoted.current) changes.push({ add: [], removeIds: [], firstSource: sourceRefs([promoted.current])[0] })
       attempt.current = { inputs, keys: inputs.map(() => crypto.randomUUID()), next: 0, version: savedVersion.current, metadataSaved: false, target, creating: !target, changes, changeKeys: changes.map(() => crypto.randomUUID()), changeNext: 0, chosen }
     }
@@ -195,7 +198,10 @@ export function EntryEditor(props: Props & { photosOnly?: boolean }) {
         operation.chosen.forEach((source) => baseline.current.set(sourceKey(source), source.id))
         continueUpload = chosen.some((source) => !baseline.current.has(sourceKey(source)))
         removed.current.clear(); promoted.current = null; attempt.current = null; setLocked(false)
-      } else props.onSaved(operation.version, monthEntry)
+      } else {
+        if (notificationBatchId && (operation.creating || operation.changes.some((change) => change.notificationBatchId))) await api.completePhotoUpload(album.id, notificationBatchId)
+        props.onSaved(operation.version, monthEntry)
+      }
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === 'AbortError') return
       const isConflict = reason instanceof ApiRequestError && reason.status === 409
@@ -206,7 +212,7 @@ export function EntryEditor(props: Props & { photosOnly?: boolean }) {
       if (reason instanceof ApiRequestError && (reason.status === 422 || reason.status === 400)) { attempt.current = null; setLocked(false); setError('Проверьте поля и дату. Работа должна содержать фото, событие — название и историю или материал.') }
       if (propagate) throw reason
     } finally { saving.current = false; setBusy(false) }
-    if (continueUpload) await save(uploaded, propagate, keepOpen)
+    if (continueUpload) await save(uploaded, propagate, keepOpen, notificationBatchId)
   }
   if (picker) return <SourcePicker accountId={accountId} api={api} initial={[]} monthPhotos={props.photosOnly} onCancel={() => setPicker(false)} onChoose={choose} photosOnly={workshop || props.photosOnly} scopeKey={scopeKey} transport={transport} />
   if (props.photosOnly) return <section className="month-photo-add">

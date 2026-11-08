@@ -77,7 +77,8 @@ function MonthPhotoFlow({ api, albumId, entry, familyId, accountId, scopeKey, tr
     void api.withMonthPhotoScope(controller.signal, (signal) => next.run({
       reserve: (count, key, requestSignal) => api.reserveMonthPhotoBatch(albumId, entry.id, { count, discussionGeneration, membershipEpoch }, key, requestSignal),
       upload: (file, key, resume, requestSignal, onProgress) => uploadAlbumPhoto(transport, familyId, file, key, resume, requestSignal, onProgress),
-      attach: (item, key, requestSignal) => api.appendMonthPhoto(albumId, entry.id, item, key, requestSignal),
+      attach: (item, key, requestSignal, batchId) => api.appendMonthPhoto(albumId, entry.id, { ...item, notificationBatchId: batchId }, key, requestSignal),
+      complete: (batchId, requestSignal) => api.completePhotoUpload(albumId, batchId, requestSignal),
     }, signal, notify)).finally(() => {
       if (request.current === controller) request.current = null
     })
@@ -116,6 +117,7 @@ function MonthPhotoFlow({ api, albumId, entry, familyId, accountId, scopeKey, tr
       {progress.retryDelayMs !== null ? <p className="albums-muted" role="status">Сервер просит подождать. Очередь продолжится автоматически.</p> : progress.current ? <p className="albums-muted">{phaseLabel[progress.current.phase]} · {progress.current.name}</p> : null}
       {progress.stale ? <p className="albums-error" role="alert">Месяц или доступ изменился. Вернитесь к месяцу и проверьте добавленные фотографии.</p> : null}
       {progress.queueError ? <p className="albums-error" role="alert">{progress.queueError}</p> : null}
+      {progress.completionPending && !progress.running ? <button className="albums-primary" onClick={() => start(queue)} type="button">Повторить завершение</button> : null}
       {!progress.running && progress.pending > 0 && !progress.stale && !progress.queueError ? <p role="status">Очередь остановлена. Добавленные фотографии сохранены.</p> : null}
       {progress.failed ? <div className="albums-error">
         <h2>Фотографии с ошибками</h2>

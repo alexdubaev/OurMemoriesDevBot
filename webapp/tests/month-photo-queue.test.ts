@@ -171,3 +171,67 @@ test('repeated 429 pauses the queue without sending requests for subsequent file
   expect(sent[4]?.sourceId).toBe('second')
   expect(queue.snapshot()).toMatchObject({ saved: 2, pending: 0, failed: 0, queueError: null })
 })
+
+test('completion runs once after all jobs save and a failed completion retries without repeating uploads or attachments', async () => {
+  const queue = createMonthPhotoQueue([{ file: new File(['a'], 'a.jpg') }, { file: new File(['b'], 'b.jpg') }])
+  let uploads = 0
+  let attachments = 0
+  let completions = 0
+  let failCompletion = true
+  const ops = {
+    upload: async (file: File) => { uploads += 1; return file.name },
+    attachPhoto: async () => { attachments += 1 },
+    complete: async (batchId: string) => {
+      expect(batchId).toBe(queue.batchId)
+      completions += 1
+      if (failCompletion) { failCompletion = false; throw new TypeError('lost completion response') }
+    },
+  }
+  const signal = new AbortController().signal
+  await queue.run(ops, signal, () => {})
+  expect(queue.snapshot()).toMatchObject({ saved: 2, completionPending: true, queueError: expect.any(String) })
+  await queue.run(ops, signal, () => {})
+  await queue.run(ops, signal, () => {})
+  expect(queue.snapshot()).toMatchObject({ saved: 2, completionPending: false, queueError: null })
+  expect({ uploads, attachments, completions }).toEqual({ uploads: 2, attachments: 2, completions: 2 })
+})
+
+test('completion waits for retryable jobs and stopped queues', async () => {
+  const retryQueue = createMonthPhotoQueue([{ source: source('retry') }])
+  let completeCount = 0
+  let allowAttach = false
+  const retryOps = {
+    attachPhoto: async () => { if (!allowAttach) throw new TypeError('temporary') },
+    upload: async () => 'unused',
+    complete: async () => { completeCount += 1 },
+  }
+  const signal = new AbortController().signal
+  await retryQueue.run(retryOps, signal, () => {})
+  expect(completeCount).toBe(0)
+  allowAttach = true
+  await retryQueue.run(retryOps, signal, () => {})
+  expect(completeCount).toBe(1)
+
+  const stopQueue = createMonthPhotoQueue([{ file: new File(['x'], 'stop.jpg') }])
+  const controller = new AbortController()
+  await stopQueue.run({
+    upload: async () => { controller.abort(); return 'asset' },
+    attachPhoto: async () => {},
+    complete: async () => { completeCount += 1 },
+  }, controller.signal, () => {})
+  expect(stopQueue.snapshot()).toMatchObject({ pending: 1 })
+  expect(completeCount).toBe(1)
+})
+
+test('one notification batch ID is reused across the 48-item request chunks', async () => {
+  const queue = createMonthPhotoQueue(Array.from({ length: 49 }, (_, index) => ({ source: source(String(index)) })))
+  const received: string[] = []
+  await queue.run({
+    reserve: async () => ({ grant: 'batch' }),
+    upload: async () => 'unused',
+    attach: async (_body: { source: SourceRef }, _key: string, _signal: AbortSignal, batchId: string) => { received.push(batchId) },
+    complete: async (batchId) => { received.push(batchId) },
+  }, new AbortController().signal, () => {})
+  expect(queue.batchId).toMatch(/^[0-9a-f-]{36}$/i)
+  expect(received).toEqual(Array(50).fill(queue.batchId))
+})

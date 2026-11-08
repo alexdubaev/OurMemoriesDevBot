@@ -86,15 +86,19 @@ export const albumMonthPhotoBatchGrantSchema = z.object({
   grant: z.string().min(1).max(2048),
 }).strict()
 export const albumMonthPhotoAppendRequestSchema = z.object({
+  notificationBatchId: uuid.optional(),
   grant: z.string().min(1).max(2048),
   offset: z.number().int().nonnegative().max(47),
   source: albumSourceRefSchema,
 }).strict()
+export const albumPhotoUploadCompleteRequestSchema = z.object({ batchId: uuid }).strict()
+export const albumPhotoUploadCompleteResponseSchema = z.object({ photoCount: z.number().int().nonnegative() }).strict()
 export const albumMonthCoverRequestSchema = z.object({
   expectedVersion: z.number().int().positive(),
   sourceId: uuid.nullable(),
 }).strict()
 export const createAlbumEntryRequestSchema = z.object({
+  notificationBatchId: uuid.optional(),
   expectedVersion: z.number().int().positive(),
   kind: z.enum(['event', 'work']),
   title: text(120).nullable().optional(),
@@ -120,6 +124,7 @@ export const albumSourceSelectionSchema = z.object({
     .superRefine(validateAlbumSourceRefs),
 }).strict()
 export const albumSourceChangesSchema = z.object({
+  notificationBatchId: uuid.optional(),
   expectedVersion: z.number().int().positive(),
   add: z.array(albumSourceRefSchema).max(48).default([]).superRefine(validateAlbumSourceRefs),
   removeIds: z.array(uuid).max(48).default([]).superRefine((ids, ctx) => {
