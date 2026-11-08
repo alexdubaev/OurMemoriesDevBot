@@ -46,8 +46,8 @@ test('free albums open a unified collage and add photos directly', async ({ page
   }
   await page.setViewportSize({ width: 390, height: 844 })
   const files = (count: number) => Array.from({ length: count }, (_, index) => ({ name: `synthetic-${index}.png`, mimeType: 'image/png', buffer: solidPng(index * 18, 90, 140, index % 2 ? 120 : 180, index % 2 ? 180 : 120) }))
-  await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(files(11))
-  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 11 · добавлено: 11' })).toBeVisible({ timeout: 120_000 })
+  await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(files(25))
+  await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 25 · добавлено: 25' })).toBeVisible({ timeout: 120_000 })
   await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
   const gallery = page.getByRole('group', { name: 'Фотографии альбома', exact: true })
   await expect(gallery).toBeVisible()
@@ -64,7 +64,7 @@ test('free albums open a unified collage and add photos directly', async ({ page
   expect(geometry.radius).toBe('0px')
   expect(geometry.ratio).toBeCloseTo(1.5, 1)
   await second.click()
-  await expect(page.locator('[data-mixed-viewer]')).toContainText('2 / 11')
+  await expect(page.locator('[data-mixed-viewer]')).toContainText('2 / 25')
   await page.getByRole('button', { name: 'Закрыть просмотр', exact: true }).click()
   await expect(second).toBeFocused()
   await page.screenshot({ path: testInfo.outputPath('free-album-collage.png') })
@@ -77,9 +77,15 @@ test('free albums open a unified collage and add photos directly', async ({ page
   await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 2 · добавлено: 2' })).toBeVisible()
   await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-  await expect(page.getByRole('button', { name: 'Открыть фото 13', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Открыть фото 13', exact: true }).click()
-  await expect(page.locator('[data-mixed-viewer]')).toContainText('13 / 13')
+  await expect(page.getByRole('button', { name: 'Открыть фото 27', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Открыть фото 24', exact: true }).click()
+  const viewer = page.locator('[data-mixed-viewer]')
+  await expect(viewer).toContainText('24 / 27')
+  for (const index of [25, 26, 27]) {
+    await viewer.getByRole('button', { name: 'Далее', exact: true }).click()
+    await expect(viewer).toContainText(`${index} / 27`)
+  }
+  expect(await gallery.locator('[data-month-photo]').count()).toBeLessThanOrEqual(85)
   await page.getByRole('button', { name: 'Закрыть просмотр', exact: true }).click()
   await page.evaluate(() => window.scrollTo(0, 0))
   await page.getByRole('button', { name: '+ Добавить фотографии', exact: true }).click()
@@ -92,7 +98,7 @@ test('free albums open a unified collage and add photos directly', async ({ page
   const { items: albums } = await (await page.request.get(`/api/v1/families/${familyId}/albums`, { headers })).json() as { items: { id: string }[] }
   const { items: entries } = await (await page.request.get(`/api/v1/families/${familyId}/albums/${albums[0].id}/entries?view=collection-summary`, { headers })).json() as { items: { sourceCount: number }[] }
   expect(entries).toHaveLength(2)
-  expect(entries.reduce((count, entry) => count + entry.sourceCount, 0)).toBe(15)
+  expect(entries.reduce((count, entry) => count + entry.sourceCount, 0)).toBe(29)
 })
 
 test('large existing stories page their sources and retain the unseen tail after editing', async ({ page }) => {
