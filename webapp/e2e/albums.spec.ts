@@ -76,8 +76,11 @@ test('free albums open a unified collage and add photos directly', async ({ page
   await page.getByLabel('Выбрать фотографии с устройства').setInputFiles(files(2))
   await expect(page.getByRole('status').filter({ hasText: 'Выбрано: 2 · добавлено: 2' })).toBeVisible()
   await page.getByRole('button', { name: 'Вернуться к альбому', exact: true }).click()
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-  await expect(page.getByRole('button', { name: 'Открыть фото 27', exact: true })).toBeVisible()
+  await expect(first).toBeVisible()
+  await expect.poll(async () => {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    return page.getByRole('button', { name: 'Открыть фото 27', exact: true }).isVisible()
+  }).toBe(true)
   await page.getByRole('button', { name: 'Открыть фото 24', exact: true }).click()
   const viewer = page.locator('[data-mixed-viewer]')
   await expect(viewer).toContainText('24 / 27')
