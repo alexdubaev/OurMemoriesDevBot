@@ -26,7 +26,7 @@ title, reorder, removal and upload alone do not notify. Photo selections carryin
 `notificationBatchId` defer notification until `/albums/:albumId/photo-uploads/complete`.
 The server aggregates actor/family/album-scoped source-operation receipts across files,
 technical chunks and workshop entries. Completion is idempotent and rejects revoked,
-cleared, deleted or already closed contexts; the client never supplies the count.
+cleared or deleted contexts; completed batches reject new photo additions; the client never supplies the count.
 Notification policy generations are recorded with the photo receipts, so OFF-period
 or earlier-activation work is never backfilled at completion. Legacy clients without
 the optional batch ID retain their previous operation semantics. The actual stored album title is read at
