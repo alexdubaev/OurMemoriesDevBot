@@ -78,7 +78,7 @@ body:has(.albums-composer-host)>[data-slot='drawer-overlay']{z-index:70}body:has
 .albums-surface[data-albums-route=album][data-albums-kind=workshop] .albums-workshop-heading{font-size:.82rem!important;font-weight:650;color:var(--albums-accent);height:42px}
 .albums-surface[data-albums-route=album][data-albums-kind=workshop] .albums-workshop-heading:has(.albums-gallery-bear):after{margin-right:80px}
 .albums-gallery-bear{position:absolute;right:0;bottom:1px;width:78px;height:46px;z-index:2}
-.albums-surface[data-albums-route=album][data-albums-kind=workshop] .albums-workshop-tile{border:2px solid #fffaf4;border-radius:10px;box-shadow:0 2px 7px #80684412}
+.albums-surface[data-albums-route=album][data-albums-kind=workshop] .albums-workshop-tile,.albums-surface[data-albums-route=album][data-albums-kind=workshop] .albums-workshop-tile>.albums-preview{border:0;border-radius:0;box-shadow:none}
 .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-year-modes{margin:0 0 10px}
 .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-year-timeline{margin:0}
 .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-year-timeline .albums-entry-card{min-height:66px;padding:8px;gap:8px;border-radius:13px;box-shadow:0 2px 7px #697d5b0b}

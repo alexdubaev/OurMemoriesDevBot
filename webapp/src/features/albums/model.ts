@@ -53,7 +53,7 @@ export type Tile = { id: string; index: number; x: number; y: number; width: num
 export type WorkshopLayout = { tiles: Tile[]; headings: { y: number; title: string }[]; height: number }
 /** Shelf packing preserves source reading order; it never fills earlier holes with later photos. */
 export function workshopLayout(entries: AlbumEntryDto[], columns: number, width: number): WorkshopLayout {
-  const gap = 3
+  const gap = 2
   const cell = Math.max(1, (width - (columns - 1) * gap) / columns)
   const tiles: Tile[] = []; const headings: WorkshopLayout['headings'] = []
   let y = 0; let col = 0; let shelfHeight = 0; let group = ''; let shelfStart = 0

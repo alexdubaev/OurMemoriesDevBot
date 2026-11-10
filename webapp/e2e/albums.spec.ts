@@ -1244,12 +1244,31 @@ test('a large month keeps bounded tiles and navigates the photo window past a pa
   expect(requests.filter((path) => path.includes('/memories/'))).toEqual([])
 })
 
-test('2000 works page progressively with bounded DOM, stable zoom anchor and source viewer return', async ({ page }) => {
+test('2000 works page progressively with bounded DOM, stable zoom anchor and source viewer return', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message))
   await openSynthetic(page, 'albums=2000')
   await page.getByRole('button', { name: /Мастерская/ }).click()
   await expect(page.locator('.albums-workshop-wall')).toHaveAttribute('data-columns', '5')
+  const workshopTileStyle = await page.locator('.albums-workshop-tile').first().evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { borderWidth: style.borderWidth, borderRadius: style.borderRadius, boxShadow: style.boxShadow }
+  })
+  expect(workshopTileStyle).toEqual({ borderWidth: '0px', borderRadius: '0px', boxShadow: 'none' })
+  const workshopGap = await page.locator('.albums-workshop-wall').evaluate((wall) => {
+    const tiles = [...wall.querySelectorAll<HTMLElement>('.albums-workshop-tile')]
+    const boxes = tiles.map((tile) => tile.getBoundingClientRect())
+    return boxes.flatMap((box, index) => boxes.slice(index + 1).flatMap((other) => {
+      const horizontalGap = Math.abs(Math.max(box.left, other.left) - Math.min(box.right, other.right))
+      const verticalOverlap = Math.min(box.bottom, other.bottom) - Math.max(box.top, other.top)
+      if (verticalOverlap > 1 && horizontalGap < 5) return [horizontalGap]
+      const verticalGap = Math.abs(Math.max(box.top, other.top) - Math.min(box.bottom, other.bottom))
+      const horizontalOverlap = Math.min(box.right, other.right) - Math.max(box.left, other.left)
+      return horizontalOverlap > 1 && verticalGap < 5 ? [verticalGap] : []
+    })).sort((a, b) => a - b)[0] ?? null
+  })
+  expect(workshopGap).toBeCloseTo(2, 0)
+  await page.screenshot({ path: testInfo.outputPath('workshop-collage.png') })
   expect(await page.evaluate(() => (window as unknown as { __albumsEvidence: { entries: Map<string, unknown[]>; albums: { kind: string; id: string }[] } }).__albumsEvidence.entries.get((window as unknown as { __albumsEvidence: { albums: { kind: string; id: string }[] } }).__albumsEvidence.albums.find((album) => album.kind === 'workshop')!.id)!.length)).toBe(2000)
   for (let index = 0; index < 2; index += 1) {
     const more = page.getByRole('button', { name: 'Ещё истории', exact: true })
