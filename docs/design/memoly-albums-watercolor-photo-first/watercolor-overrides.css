@@ -1,0 +1,45 @@
+
+/* Approved first watercolor direction: use genuine, sanitized image assets. */
+body{background:#f4f4ec;color:#284137}
+.shell{background:linear-gradient(180deg,#fcf9f3 0%,#f9f6ee 54%,#f8f7ef 100%)}
+.top{background:#27272c;color:#fff;border-color:#27272c}
+.top a,.top h1{color:#fff}
+.crumb{min-height:48px}
+.crumb strong{font-size:19px;font-weight:720;letter-spacing:-.015em}
+.hero{position:relative;overflow:hidden;isolation:isolate;display:flex;gap:12px;
+min-height:86px;padding:10px 14px;border-radius:27px;
+background:linear-gradient(90deg,#f3f7eaef 0%,#e5efdfc7 68%,#c9ddc393 100%),url("./assets/hero-hills.webp") right bottom/cover no-repeat}
+.hero::after{content:"";position:absolute;inset:auto 0 0;height:18px;background:linear-gradient(0deg,#d9e9d2a3,transparent);pointer-events:none;z-index:-1}
+.hero p{font-size:15px;font-weight:540;line-height:1.35}
+.hero small{font-size:11px;font-weight:400;color:#728071}
+.hero .wc-palette{width:71px;height:64px;flex:none;object-fit:contain;filter:drop-shadow(0 2px 5px #8c947d22)}
+.hero .wc-sprig{width:54px;height:55px;object-fit:contain;margin-left:auto;opacity:.72}
+.hero .wc-mini-bear{width:63px;height:59px;object-fit:contain}
+.hero .wc-mini-palette{width:62px;height:55px;object-fit:contain}
+.hero .wc-mini-sprig{width:45px;height:55px;object-fit:contain}
+.section-title{position:relative;color:#32533e;font-size:15px;margin:19px 0 10px;font-weight:720}
+.section-title.group-2026:first-of-type{margin-top:21px}
+.section-title .wc-bear{width:86px;height:58px;object-fit:contain;position:absolute;right:3px;bottom:-15px;z-index:2;pointer-events:none}
+.section-title.group-2026:has(.wc-bear):after{margin-right:92px}
+.photo{border:3px solid #fffaf6;border-radius:15px;box-shadow:0 4px 14px #836a4220}
+.wall{gap:5px}
+.filters{gap:6px;padding-bottom:9px}
+.filters label,.disclose summary{border-radius:23px;background:#fffcf7;border-color:#e0e3d5;color:#425e4e}
+#cat-all:checked~.shell label[for=cat-all],#cat-drawing:checked~.shell label[for=cat-drawing],#cat-applique:checked~.shell label[for=cat-applique],#cat-craft:checked~.shell label[for=cat-craft]{background:#42755d;color:#fff}
+.footer-art.wc-footer{position:relative;display:flex;align-items:end;justify-content:end;min-height:111px;margin:17px -15px -16px;
+padding:0 15px 3px;background:linear-gradient(0deg,#e3edd7 0%,transparent 85%),url("./assets/hero-hills.webp") center bottom/100% auto no-repeat}
+.wc-rabbit{width:116px;height:102px;object-fit:contain;margin-right:10px;pointer-events:none}
+.wc-footer-sprig{width:44px;height:50px;object-fit:contain;opacity:.74}
+.wc-flower{position:absolute;left:21px;bottom:9px;font-size:22px;color:#f0cc8a}
+.month{background:#fffefa;box-shadow:0 2px 7px #697d5b0f}
+.bottom-nav{background:#fffefa;box-shadow:0 -4px 14px #314c3010}
+@media(max-width:350px){.hero .wc-palette{width:52px;height:51px}.hero{gap:8px;padding:8px 10px}.hero .wc-sprig{width:35px}.footer-art.wc-footer{min-height:94px}}
+
+/* Production design assets in the same package:
+   palette.webp, bear.webp, rabbit.webp, hero-hills.webp, sprig.webp.
+   No customer media is included in this package. */
+.wc-palette{content:url("./assets/palette.webp")}
+.wc-bear,.wc-mini-bear{content:url("./assets/bear.webp")}
+.wc-rabbit{content:url("./assets/rabbit.webp")}
+.wc-sprig,.wc-mini-sprig,.wc-footer-sprig{content:url("./assets/sprig.webp")}
+.wc-mini-palette{content:url("./assets/palette.webp")}
