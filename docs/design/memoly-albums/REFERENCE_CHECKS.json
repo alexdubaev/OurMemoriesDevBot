@@ -1,0 +1,11 @@
+{
+  "checkedAt": "2026-10-23",
+  "scope": "docs/reference only; not production albums implementation",
+  "repoBase": "ea7d9149055e3632a7b9279c9a4e37021955318e",
+  "archive": {"bytes": 36020, "sha256": "e9fe1a698d2993d2a3ce095419001fc67f0142c0ce5c31ae29bef2395bacaab7", "parts": 3, "restoredFiles": 12, "checksum": "PASS", "idempotentRestore": "PASS"},
+  "build": {"command": "node build.cjs", "network": false, "embeddedNeutralImages": 63, "demoAlbums": 5, "exitCode": 0},
+  "sourceTests": {"command": "node --test model.test.cjs workshop-layout.test.cjs", "passed": 6, "failed": 0, "skipped": 0, "exitCode": 0},
+  "navigation": {"browser": "Chromium 144.0.7559.96", "variants": ["original imagery", "public neutral fixtures"], "viewports": [[320,844],[390,844],[430,932],[1280,900]], "combinationsPassed": 8, "labels": ["Лента","Альбомы","Добавить","Семья"], "checks": ["initial Albums active","year Albums active","workshop Albums active","Family navigation","return to Albums","no root horizontal overflow","no JavaScript page errors"], "errors": []},
+  "visualInspection": ["original-library at390x844", "public-workshop at390x844"],
+  "limitations": ["Browser connector offers read-only tabs only", "file:// blocked by environment; Playwright set_content on fresh about:blank used", "No physical iPhone/MAX tests", "No current production or private data read", "No backend implementation or FULL product verification", "Public images replaced; source CSS and functionality retained", "Historical prototype tests not restated as fresh evidence"]
+}
