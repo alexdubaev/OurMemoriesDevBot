@@ -105,7 +105,7 @@ export function FamilyPresentation({ active = true, familyResponse, hostBridge, 
     })
   }, [active, busy, hostBridge, inviteReturnView, onCloseInvite, view])
   return <main className="ml-family-content family-screen" data-slot="family-presentation">
-    <h1 className="sr-only">Семья</h1>
+    {view === 'overview' ? null : <h1 className="sr-only">Семья</h1>}
     {savedRefreshFailed ? <div className="family-error" role="alert"><p>Изменение сохранено, но данные семьи не удалось обновить. Повторите только обновление данных.</p><button onClick={onRefresh} type="button">Обновить данные</button></div> : null}
     <div className={view === 'overview' ? 'family-overview-host' : 'family-shell'}>
       {view === 'overview' ? <FamilyOverview canInvite={canInvite} canManageMaxChannel={canManageMaxChannel} currentUserId={currentUserId} maxChannelError={maxChannelError} maxChannelLoading={maxChannelLoading} maxChannelStatus={maxChannelStatus} onRetryMaxChannel={onRetryMaxChannel} child={child} childAvatarUrl={childAvatarUrl} childAvatarStatus={childAvatarStatus} family={familyResponse.family} childList={familyChildren(familyResponse)} canEditChild={canEditChild} hasError={hasError} invites={invites} members={presentedMembers} onAddChild={onAddChild} onAllFamilies={onAllFamilies} onEditChild={onEditChild} renderChildAvatar={renderChildAvatar} onOpenChild={canEditChild && child ? () => onEditChild(child.id) : undefined} onInvite={() => { setInviteReturnView('overview'); setView('invite') }} onOpenInvites={() => setView('invites')} onOpenMember={(member) => { setSelectedMember(member); setView('member') }} onOpenSettings={openSettings} onRefresh={onRefresh} onRefreshUsage={onRefreshUsage} theme={theme} usage={usage} usageFailed={usageFailed} /> : null}
@@ -131,11 +131,12 @@ function FamilyOverview({ family, child, childList, canEditChild, onAddChild, on
       ? <FamilyHeaderV2 childList={childList} familyName={family.name} mode="family" onAllFamilies={onAllFamilies} onOpenSettings={onOpenSettings} onSelectChild={canEditChild ? onEditChild : undefined} renderChildAvatar={renderChildAvatar} selectChildLabel={(item) => `Редактировать профиль ребёнка: ${item.name}`} theme={theme} />
       : <ChildHeader childAvatarCrop={child?.avatarCrop ?? null} childAvatarUrl={childAvatarUrl} childAvatarStatus={childAvatarStatus} childName={child?.name ?? 'Ребёнок'} childSubtitle={child ? feedChildSubtitle(child.birthDate, family.timezone) : 'Профиль ребёнка'} mode="family" onAllFamilies={onAllFamilies} onOpenChild={child ? onOpenChild : undefined} onOpenSettings={onOpenSettings} theme={theme} />}
     <div className="family-shell family-overview-body">
+    <h1 className="astryx-family-title">{family.name}</h1>
     {hasError ? <div className="family-error"><InlineError onRetry={onRefresh} /></div> : null}
     {uiV2 ? <FamilyChildrenSection canEdit={canEditChild} childList={childList} onAddChild={onAddChild} onEditChild={onEditChild} renderAvatar={renderChildAvatar} timezone={family.timezone} /> : null}
     <div className="family-section-head"><h2>Ваши близкие</h2><span className="family-count">{formatMemberCount(members.length)}</span></div>
     <div className="family-list">{members.map((member) => <FamilyMemberRow key={member.userId} currentUserId={currentUserId} member={member} onOpen={onOpenMember} />)}</div>
-    {canInvite ? <button className="family-invite-btn" onClick={onInvite} type="button"><span className="family-invite-plus">+</span><span>Пригласить родственника</span></button> : null}
+    {canInvite ? <button className="family-invite-btn" onClick={onInvite} type="button"><span aria-hidden="true" className="family-invite-plus">+</span><span>Пригласить родственника</span></button> : null}
     <FamilyMaxChannelCard canManage={canManageMaxChannel} error={maxChannelError} loading={maxChannelLoading} onRetry={onRetryMaxChannel} status={maxChannelStatus} />
     <p className="family-overview-privacy-note">Фото, видео и истории видны только участникам семьи.</p>
     {canInvite ? <button className="family-management-invites-link" onClick={onOpenInvites} type="button"><span><WebpIcon decorative name="info" size={22} /></span><span><strong>Активные приглашения</strong><small>{invites.length === 0 ? 'Нет активных ссылок' : `${invites.length} ${invites.length === 1 ? 'ссылка ожидает' : 'ссылки ожидают'} вступления`}</small></span>{invites.length > 0 ? <b>{invites.length}</b> : null}<span aria-hidden="true">›</span></button> : null}

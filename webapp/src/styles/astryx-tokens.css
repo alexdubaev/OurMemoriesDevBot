@@ -1,0 +1,33 @@
+:root {
+  --astryx-canvas: #f1f1f1;
+  --astryx-surface: #fff;
+  --astryx-neutral: #f0f0f0;
+  --astryx-line: #e3e3e3;
+  --astryx-line-strong: #8b8b8b;
+  --astryx-text: #202020;
+  --astryx-muted: #474747;
+  --astryx-accent: #1b1b1b;
+  --astryx-accent-soft: #f0f0f0;
+  --astryx-on-accent: #fff;
+  --astryx-focus: #1b1b1b;
+  --astryx-danger: #a5303c;
+  --astryx-danger-soft: #fae9eb;
+  --astryx-hover: rgb(27 27 27 / 6%);
+  --astryx-pressed: rgb(27 27 27 / 12%);
+  --astryx-shadow: 0 8px 32px rgb(27 27 27 / 14%);
+  --astryx-radius-control: 8px;
+  --astryx-radius-panel: 12px;
+  --astryx-rail-width: 216px;
+  --astryx-avatar-swatch: #749180;
+}
+
+[data-memoly-theme='mint'] { --astryx-avatar-swatch: #749180; }
+[data-memoly-theme='rose'] { --astryx-avatar-swatch: #b18193; }
+[data-memoly-theme='sky'] { --astryx-avatar-swatch: #799bb7; }
+[data-memoly-theme='lavender'] { --astryx-avatar-swatch: #a092b7; }
+[data-memoly-theme='apricot'] { --astryx-avatar-swatch: #c68d6b; }
+[data-memoly-theme='sand'] { --astryx-avatar-swatch: #ae9c70; }
+
+@media (min-width: 1200px) {
+  :root { --astryx-rail-width: 240px; }
+}
