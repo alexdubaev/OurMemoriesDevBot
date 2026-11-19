@@ -2,16 +2,19 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { AvatarResourcePool, isImmutableMemberAvatarPath } from './avatar-resource-pool'
+import { clearIdleFeedPosters, forgetIdleFeedPoster, keepIdleFeedPoster, takeIdleFeedPoster } from './feed-poster-cache'
 import { cachePrivateImageResponse, eligiblePrivateImage, privateFamilyCacheGeneration, privateCacheIdentityGeneration, isActivePrivateCacheIdentity, readPrivateImage, removePrivateImage, clearPrivateUserCache, privateFamilyAccessRevokedEvent, subscribePrivateCacheInvalidation } from '@/platform/persistence/private-cache'
 
 const memberAvatarPool = new AvatarResourcePool<{ url: string; size: number }>((resource) => URL.revokeObjectURL(resource.url))
 subscribePrivateCacheInvalidation((invalidation) => {
-  memberAvatarPool.invalidate((key) => {
+  const matches = (key: string) => {
     const [userId, familyId] = JSON.parse(key) as [string, string]
     if (invalidation.type === 'identity' || invalidation.type === 'all') return true
     if (invalidation.type === 'user') return userId === invalidation.userId
     return userId === invalidation.userId && familyId === invalidation.familyId
-  })
+  }
+  memberAvatarPool.invalidate(matches)
+  clearIdleFeedPosters(matches)
 })
 
 export function invalidatePrivateChildAvatar(userId: string, familyId: string, mediaId: string) {
@@ -28,7 +31,7 @@ export function usePrivateImageUrl(userId: string, path: string | null, transpor
   return usePrivateImageResource(userId, path, transport, enabled, onSettled, scopeKey).url
 }
 
-export function usePrivateImageResource(userId: string, path: string | null, transport: AuthenticatedTransport | undefined, enabled = true, onSettled?: () => void, scopeKey = '', poolMode?: 'child-avatar'): PrivateImageResourceState {
+export function usePrivateImageResource(userId: string, path: string | null, transport: AuthenticatedTransport | undefined, enabled = true, onSettled?: () => void, scopeKey = '', poolMode?: 'child-avatar' | 'feed-poster'): PrivateImageResourceState {
   const identityGeneration = privateCacheIdentityGeneration()
   const eligible = path ? eligiblePrivateImage(path) : null
   const familyId = eligible?.familyId
@@ -37,29 +40,37 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
   const poolKey = usesAvatarPool && familyId
     ? JSON.stringify([userId, familyId, identityGeneration, familyGeneration, scopeKey, path])
     : null
+  const posterKey = poolMode === 'feed-poster' && scopeKey && familyId && !usesAvatarPool
+    ? JSON.stringify([userId, familyId, identityGeneration, familyGeneration, scopeKey, path])
+    : null
+  const posterTransport = posterKey ? transport : undefined
   const pooledSnapshot = useSyncExternalStore(
     useCallback((listener) => poolKey ? memberAvatarPool.subscribe(poolKey, listener) : () => undefined, [poolKey]),
     useCallback(() => poolKey ? memberAvatarPool.getSnapshot(poolKey) : memberAvatarPool.getSnapshot(''), [poolKey]),
     () => memberAvatarPool.getSnapshot(''),
   )
   const [invalidationRevision, setInvalidationRevision] = useState(0)
-  const [loaded, setLoaded] = useState<{ userId: string; path: string; url: string | null; identityGeneration: number; scopeKey: string; familyId?: string; familyGeneration?: number; poolKey?: string } | null>(null)
+  const [loaded, setLoaded] = useState<{ userId: string; path: string; url: string | null; identityGeneration: number; scopeKey: string; familyId?: string; familyGeneration?: number; poolKey?: string; posterBytes?: number } | null>(null)
   const loadedRef = useRef(loaded)
   const lastRequest = useRef<{ userId: string; path: string; transport: AuthenticatedTransport; scopeKey: string } | null>(null)
+  const requestController = useRef<AbortController | null>(null)
   const ownedUrls = useRef(new Set<string>())
   const [ownedUrlSet, setOwnedUrlSet] = useState<Set<string>>(() => new Set())
   const ownUrl = useCallback((url: string) => {
     ownedUrls.current.add(url)
     setOwnedUrlSet((current) => new Set(current).add(url))
   }, [])
-  const releaseUrl = useCallback((url: string) => {
-    if (revokeOwnedUrl(ownedUrls.current, url)) setOwnedUrlSet((current) => {
+  const forgetUrl = useCallback((url: string) => {
+    setOwnedUrlSet((current) => {
       if (!current.has(url)) return current
       const next = new Set(current)
       next.delete(url)
       return next
     })
   }, [])
+  const releaseUrl = useCallback((url: string) => {
+    if (revokeOwnedUrl(ownedUrls.current, url)) forgetUrl(url)
+  }, [forgetUrl])
   const onSettledRef = useRef(onSettled)
   useLayoutEffect(() => { loadedRef.current = loaded }, [loaded])
   useEffect(() => { onSettledRef.current = onSettled }, [onSettled])
@@ -73,13 +84,32 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
     })
     return () => { unsubscribe() }
   }, [familyId, userId])
-  useEffect(() => {
+  useLayoutEffect(() => {
     const urls = ownedUrls.current
+    if (posterKey && path && posterTransport && isActivePrivateCacheIdentity(userId, identityGeneration)) {
+      const cached = takeIdleFeedPoster(posterKey, posterTransport)
+      if (cached) {
+        urls.add(cached.url)
+        loadedRef.current = { userId, path, url: cached.url, identityGeneration, scopeKey, familyId, familyGeneration, posterBytes: cached.size }
+        setOwnedUrlSet(new Set(ownedUrls.current))
+        setLoaded(loadedRef.current)
+      }
+    }
     return () => {
+      // Cancel in-flight work before handing off or releasing URL ownership.
+      requestController.current?.abort()
+      const current = loadedRef.current
+      if (posterKey && path && posterTransport && current?.url && current.posterBytes &&
+        isActivePrivateCacheIdentity(userId, identityGeneration) &&
+        hasOwnedReadyUrl(current, urls, userId, path, identityGeneration, scopeKey) &&
+        keepIdleFeedPoster(posterKey, posterTransport, { url: current.url, size: current.posterBytes })) {
+        urls.delete(current.url)
+        forgetUrl(current.url)
+      }
       urls.forEach((url) => releaseUrl(url))
       urls.clear()
     }
-  }, [familyGeneration, identityGeneration, path, releaseUrl, scopeKey, userId])
+  }, [familyGeneration, familyId, forgetUrl, identityGeneration, path, posterKey, posterTransport, releaseUrl, scopeKey, userId])
   useEffect(() => {
     if (!userId || !path || !enabled || !transport) return
     if (usesAvatarPool && poolKey) {
@@ -129,6 +159,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
     if (hasOwnedReadyUrl(loadedRef.current, ownedUrls.current, userId, path, identityGeneration, scopeKey) && lastRequest.current?.userId === userId && lastRequest.current.path === path && lastRequest.current.transport === transport && lastRequest.current.scopeKey === scopeKey) return
     lastRequest.current = { userId, path, transport, scopeKey }
     const controller = new AbortController()
+    requestController.current = controller
     const requestFamilyId = eligiblePrivateImage(path)?.familyId
     const familyGeneration = requestFamilyId ? privateFamilyCacheGeneration(userId, requestFamilyId) : undefined
     let cachedWasShown = false
@@ -138,10 +169,12 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
     const showBlob = async (blob: Blob) => {
       const url = URL.createObjectURL(blob)
       ownUrl(url)
+      let posterBytes: number | undefined
       try {
         const image = new Image()
         image.src = url
         await image.decode()
+        if (posterKey) posterBytes = blob.size + image.naturalWidth * image.naturalHeight * 4
         if (!isCurrent()) {
           releaseUrl(url)
           return false
@@ -150,7 +183,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
         releaseUrl(url)
         throw error
       }
-      setLoaded({ userId, path, url, identityGeneration, scopeKey, ...(requestFamilyId ? { familyId: requestFamilyId, familyGeneration } : {}) })
+      setLoaded({ userId, path, url, identityGeneration, scopeKey, posterBytes, ...(requestFamilyId ? { familyId: requestFamilyId, familyGeneration } : {}) })
       return true
     }
     void (async () => {
@@ -168,10 +201,12 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       if (!isCurrent()) return
       const candidateUrl = URL.createObjectURL(blob)
       ownUrl(candidateUrl)
+      let posterBytes: number | undefined
       try {
         const image = new Image()
         image.src = candidateUrl
         await image.decode()
+        if (posterKey) posterBytes = blob.size + image.naturalWidth * image.naturalHeight * 4
       } catch (error) {
         releaseUrl(candidateUrl)
         throw error
@@ -182,7 +217,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       }
       const keepWarmUrl = readyUrlAlreadyShown || cachedWasShown || hasPriorReadyUrl()
       if (!keepWarmUrl) {
-      setLoaded({ userId, path, url: candidateUrl, identityGeneration, scopeKey, ...(requestFamilyId ? { familyId: requestFamilyId, familyGeneration } : {}) })
+        setLoaded({ userId, path, url: candidateUrl, identityGeneration, scopeKey, posterBytes, ...(requestFamilyId ? { familyId: requestFamilyId, familyGeneration } : {}) })
       } else {
         // Keep a warm URL stable while refreshing the persistent Blob. The fullscreen viewer can
         // borrow this URL, so replacing it here could revoke a URL still used by that viewer.
@@ -194,6 +229,11 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
     })().catch((error: unknown) => {
       if (!isCurrent()) return
       onSettledRef.current?.()
+      if (posterKey && error instanceof ApiRequestError && [401, 403, 404].includes(error.status)) {
+        forgetIdleFeedPoster(posterKey)
+        const url = loadedRef.current?.url
+        if (url) releaseUrl(url)
+      }
       if (error instanceof ApiRequestError && error.status === 401) void clearPrivateUserCache(userId).catch(() => undefined)
       if (requestFamilyId && error instanceof ApiRequestError && error.status === 403) {
         window.dispatchEvent(new CustomEvent(privateFamilyAccessRevokedEvent, { detail: { userId, familyId: requestFamilyId } }))
@@ -207,8 +247,9 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
     })
     return () => {
       controller.abort()
+      if (requestController.current === controller) requestController.current = null
     }
-  }, [enabled, familyGeneration, familyId, identityGeneration, invalidationRevision, ownUrl, path, poolKey, releaseUrl, scopeKey, transport, userId, usesAvatarPool])
+  }, [enabled, familyGeneration, familyId, identityGeneration, invalidationRevision, ownUrl, path, poolKey, posterKey, releaseUrl, scopeKey, transport, userId, usesAvatarPool])
   if (usesAvatarPool) {
     const current = Boolean(enabled && userId && transport && poolKey && familyId &&
       isActivePrivateCacheIdentity(userId, identityGeneration) &&

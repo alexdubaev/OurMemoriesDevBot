@@ -21,7 +21,7 @@ class FakeTransaction {
   onerror: Handler = null
   private pending = 0
   private finished = false
-  constructor(private readonly rows: Map<string, Row>) {}
+  constructor(private readonly rows: Map<string, Row>, readonly beforeGet?: () => Promise<void> | undefined) {}
 
   objectStore() { return new FakeStore(this.rows, this) }
 
@@ -48,18 +48,20 @@ class FakeStore {
   constructor(private readonly rows: Map<string, Row>, private readonly transaction: FakeTransaction) {}
   readonly indexNames = { contains: () => true }
 
-  private run<T>(operation: () => T) {
+  private run<T>(operation: () => T, beforeRequest?: Promise<void>) {
     const request = new FakeRequest<T>()
     this.transaction.begin()
-    queueMicrotask(() => {
+    const complete = () => {
       request.result = operation()
       request.onsuccess?.()
       this.transaction.end()
-    })
+    }
+    if (beforeRequest) void beforeRequest.then(complete)
+    else queueMicrotask(complete)
     return request
   }
 
-  get(id: string) { return this.run(() => this.rows.get(id)) }
+  get(id: string) { return this.run(() => this.rows.get(id), this.transaction.beforeGet?.()) }
   put(value: Row) { return this.run(() => { this.rows.set(value.id, structuredClone(value)); return value.id }) }
   delete(id: string) { return this.run(() => { this.rows.delete(id) }) }
   clear() { return this.run(() => { this.rows.clear() }) }
@@ -94,12 +96,12 @@ class FakeStore {
   }
 }
 
-export function installFakeIndexedDb() {
+export function installFakeIndexedDb(beforeGet?: (mode: IDBTransactionMode) => Promise<void> | undefined) {
   const rows = new Map<string, Row>()
   const database = {
     objectStoreNames: { contains: () => true },
     createObjectStore: () => new FakeStore(rows, new FakeTransaction(rows)),
-    transaction: () => new FakeTransaction(rows),
+    transaction: (_name: string, mode: IDBTransactionMode = 'readonly') => new FakeTransaction(rows, beforeGet && (() => beforeGet(mode))),
     close: () => undefined,
   }
   Object.defineProperty(globalThis, 'indexedDB', {

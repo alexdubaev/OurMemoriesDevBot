@@ -107,25 +107,24 @@ export function AddSheetPanel({
       <DrawerTitle className="sheet-title">Добавить воспоминание</DrawerTitle>
       <DrawerDescription className="sheet-subtitle">Сохраняйте моменты, которые важны</DrawerDescription>
       <div className="add-options">
-        <AddAction icon="photo" label={photoOnly ? 'Добавить фото' : 'Добавить фото и видео'} name="photo" onClick={onPhoto} photoOnly={photoOnly} copy={<>Файлы<br />с устройства</>} />
-        <AddAction icon="note" label="Добавить заметку" name="note" onClick={onNote} copy={<>Мысли<br />и события</>} />
-        <AddAction icon="voice" label="Добавить голос или видео" name="voice-or-video" onClick={onVoiceOrVideo} copy={<>Файл<br />с устройства</>} />
+        <AddAction label={photoOnly ? 'Добавить фото' : 'Добавить фото и видео'} name="photo" onClick={onPhoto} photoOnly={photoOnly} copy="Файлы с устройства" />
+        <AddAction label="Добавить заметку" name="note" onClick={onNote} copy="Мысли и события" />
+        <AddAction label="Добавить голос или видео" name="voice-or-video" onClick={onVoiceOrVideo} copy="Файл с устройства" />
       </div>
     </div>
   )
 }
 
-function AddAction({ icon, label, name, onClick, copy, photoOnly = false }: { icon: 'note' | 'photo' | 'voice' | 'video'; label: string; name: 'note' | 'photo' | 'video' | 'voice-or-video'; onClick: () => void; copy: ReactNode; photoOnly?: boolean }) {
+function AddAction({ label, name, onClick, copy, photoOnly = false }: { label: string; name: 'note' | 'photo' | 'video' | 'voice-or-video'; onClick: () => void; copy: ReactNode; photoOnly?: boolean }) {
   const kind = name === 'photo' ? 'kind-photo' : name === 'note' ? 'kind-note' : 'kind-media'
   return <button aria-label={label} className={`add-option ${kind}`} data-add-action={name} onClick={onClick} type="button">
-    <span className="add-option-icon"><WebpIcon decorative name={icon} size={38} state="active" /></span>
     <Typography as="span" className="add-option-title" variant="memoryBodyMedium">{name === 'photo' ? photoOnly ? 'Фото' : 'Фото и видео' : name === 'note' ? 'Заметка' : name === 'video' ? 'Видео' : 'Голос или видео'}</Typography>
     <Typography as="span" className="add-option-copy" tone="muted" variant="memoryMeta">{copy}</Typography>
   </button>
 }
 
 export function VoiceOrVideoAction({ onClick }: { onClick: () => void }) {
-  return AddAction({ copy: <>Файл<br />с устройства</>, icon: 'voice', label: 'Голос или видео', name: 'voice-or-video', onClick })
+  return AddAction({ copy: "Файл с устройства", label: 'Голос или видео', name: 'voice-or-video', onClick })
 }
 
 export function MediaChoiceAction({ icon, label, name, onClick, title, copy }: {
@@ -163,11 +162,11 @@ export function VoiceOrVideoPanel({ onBack, onClose, onOpenBot, onVideo }: { onB
 
 // These presentation boundaries are intentionally kept isolated until T09 supplies real create flows.
 export function PhotoAddPresentation({ onSelect }: { onSelect?: () => void } = {}) {
-  return <AddAction copy={<>Снимок<br />из жизни</>} icon="photo" label="Фото" name="photo" onClick={onSelect ?? noop} />
+  return <AddAction copy="Снимок из жизни" label="Фото" name="photo" onClick={onSelect ?? noop} />
 }
 
 export function NoteAddPresentation({ onSelect }: { onSelect?: () => void } = {}) {
-  return <AddAction copy={<>Мысли<br />и события</>} icon="note" label="Заметка" name="note" onClick={onSelect ?? noop} />
+  return <AddAction copy="Мысли и события" label="Заметка" name="note" onClick={onSelect ?? noop} />
 }
 
 function noop() {}

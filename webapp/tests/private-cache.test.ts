@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, test } from 'bun:test'
 import { QueryClient } from '@tanstack/react-query'
+import { setImmediate as nextTurn } from 'node:timers/promises'
 import { withControlledTimers } from './controlled-timers'
+import { installFakeIndexedDb } from './indexeddb-fake'
 
 import {
+  PRIVATE_CACHE_SCHEMA,
   activatePrivateCacheIdentity,
   eligiblePrivateImage,
   isActivePrivateCacheIdentity,
@@ -15,6 +18,8 @@ import {
   clearPrivateUserCache,
   restorePrivateQueryCache,
   cachePrivateImageResponse,
+  persistPrivateQueryCache,
+  readPrivateImage,
   validatePresentation,
 } from '../src/platform/persistence/private-cache'
 
@@ -23,9 +28,12 @@ const mediaId = '22222222-2222-4222-8222-222222222222'
 const memberId = '33333333-3333-4333-8333-333333333333'
 const avatarId = '44444444-4444-4444-8444-444444444444'
 const originalIndexedDb = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB')
+const originalKeyRange = Object.getOwnPropertyDescriptor(globalThis, 'IDBKeyRange')
 afterEach(() => {
-  if (originalIndexedDb) Object.defineProperty(globalThis, 'indexedDB', originalIndexedDb)
-  else Reflect.deleteProperty(globalThis, 'indexedDB')
+  for (const [name, original] of [['indexedDB', originalIndexedDb], ['IDBKeyRange', originalKeyRange]] as const) {
+    if (original) Object.defineProperty(globalThis, name, original)
+    else Reflect.deleteProperty(globalThis, name)
+  }
 })
 
 test('late IndexedDB open closes its connection after the bounded open has failed', async () => {
@@ -49,6 +57,84 @@ test('late IndexedDB open closes its connection after the bounded open has faile
   request.result = { close: () => { closed = true } } as IDBDatabase
   request.onsuccess?.(new Event('success') as unknown as Event)
   expect(closed).toBe(true)
+  })
+})
+
+describe('warm private images', () => {
+  function heldImageGet(userId: string, heldMode: IDBTransactionMode) {
+    const started = Promise.withResolvers<void>()
+    const gate = Promise.withResolvers<void>()
+    const database = installFakeIndexedDb((mode) => {
+      if (mode !== heldMode) return
+      started.resolve()
+      return gate.promise
+    })
+    const path = `/api/v1/families/${familyId}/media/${mediaId}/content?variant=display`
+    const id = `memoLy:${PRIVATE_CACHE_SCHEMA}:${userId}:image:${path}`
+    const lastAccess = Date.now() - 1_000
+    database.seed({
+      id, userId, familyId, schema: PRIVATE_CACHE_SCHEMA, kind: 'image', key: path, size: 1, lastAccess,
+      imageBytes: new Uint8Array([42]).buffer, imageContentType: 'image/png',
+    })
+    activatePrivateCacheIdentity(userId)
+    allowPrivateFamilyCache(userId, familyId, 1)
+    return {
+      start: started.promise,
+      release: gate.resolve,
+      read: () => readPrivateImage(userId, path),
+      lastAccess,
+      currentLastAccess: () => database.rows.get(id)?.lastAccess,
+    }
+  }
+
+  it('returns the verified image while the recency write is pending', async () => {
+    const userId = 'warm-image-user'
+    const image = heldImageGet(userId, 'readwrite')
+    const read = image.read()
+    try {
+      await image.start
+      const result = await Promise.race([read, nextTurn()])
+      expect(await result?.arrayBuffer()).toEqual(new Uint8Array([42]).buffer)
+      expect(image.currentLastAccess()).toBe(image.lastAccess)
+    } finally {
+      image.release()
+      await read
+      await persistPrivateQueryCache(new QueryClient(), userId, privateCacheIdentityGeneration())
+      activatePrivateCacheIdentity(null)
+    }
+    expect(image.currentLastAccess()).toBeGreaterThan(image.lastAccess)
+  })
+
+  it('does not update recency after the family membership epoch changes', async () => {
+    const userId = 'warm-image-epoch-user'
+    const image = heldImageGet(userId, 'readwrite')
+    const read = image.read()
+    try {
+      await image.start
+      allowPrivateFamilyCache(userId, familyId, 2)
+    } finally {
+      image.release()
+      await read
+      await persistPrivateQueryCache(new QueryClient(), userId, privateCacheIdentityGeneration())
+      activatePrivateCacheIdentity(null)
+    }
+    expect(image.currentLastAccess()).toBe(image.lastAccess)
+  })
+
+  it('does not return a cached image after the account changes during lookup', async () => {
+    const image = heldImageGet('warm-image-old-user', 'readonly')
+    const read = image.read()
+    try {
+      await image.start
+      activatePrivateCacheIdentity('warm-image-new-user')
+    } finally {
+      image.release()
+    }
+    try {
+      expect(await read).toBeNull()
+    } finally {
+      activatePrivateCacheIdentity(null)
+    }
   })
 })
 

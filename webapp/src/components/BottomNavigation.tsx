@@ -1,8 +1,10 @@
-import type { Ref } from 'react'
+import { useContext, type Ref } from 'react'
 
-import { WebpIcon } from '@/components/WebpIcon'
 import { Typography } from '@/components/typography'
-import { cn } from '@/lib/utils'
+import { WebpIcon, type WebpIconName } from '@/components/WebpIcon'
+import { UiVersionContext } from '@/features/ui-version'
+
+import './BottomNavigation.css'
 
 export type BottomNavigationProps = {
   active: 'feed' | 'albums' | 'family' | 'gifts'
@@ -24,41 +26,27 @@ export function BottomNavigation({
   onFamily,
   onAlbums,
   onFeed,
-  onGifts = noop,
+  onGifts,
   role,
 }: BottomNavigationProps) {
+  const showIcons = useContext(UiVersionContext) === 'v2'
+
   return (
     <nav
       aria-label="Основная навигация"
-      className={cn(
-        'fixed inset-x-0 bottom-0 z-30 pb-[var(--host-inset-bottom)]',
-        appearance === 'memoly' ? 'border-0 bg-transparent shadow-none' : 'border-t bg-card',
-        appearance === 'memoly' && 'memoly-bottom-nav',
-      )}
+      className="astryx-nav"
       data-bottom-navigation-appearance={appearance}
       data-slot="bottom-navigation"
       data-testid="bottom-navigation"
     >
-      <div className={cn(
-        'mx-auto grid h-[var(--layout-bottom-nav)] max-w-[var(--layout-max-width)] grid-cols-5 pl-[calc(8px+var(--host-inset-left))] pr-[calc(8px+var(--host-inset-right))]',
-        appearance === 'memoly' && 'memoly-bottom-nav-grid',
-      )}>
-        <NavButton
-          active={active === 'feed'}
-          appearance={appearance}
-          icon="home"
-          label="Лента"
-          onClick={onFeed}
-        />
-        <NavButton active={active === 'albums'} appearance={appearance} icon="archive-box" label="Альбомы" onClick={onAlbums ?? (() => undefined)} />
+      <Typography aria-hidden="true" as="span" className="astryx-nav-brand" variant="memoryScreen">memoLy</Typography>
+      <div className="astryx-nav-list">
+        <NavButton active={active === 'feed'} icon={showIcons ? 'home' : undefined} label="Лента" onClick={onFeed} position="home" />
+        <NavButton active={active === 'albums'} icon={showIcons ? 'archive-box' : undefined} label="Альбомы" onClick={onAlbums} position="archive-box" />
         {role === 'full' ? (
           <button
             aria-label="Добавить"
-            className={cn(
-              'group flex min-w-0 flex-col items-center justify-center gap-0.5 text-muted-foreground transition-colors duration-[var(--duration-standard)]',
-              appearance === 'memoly' ? 'min-h-11' : 'min-h-[60px]',
-              appearance === 'memoly' && 'memoly-nav-add',
-            )}
+            className="astryx-nav-item astryx-nav-add"
             data-nav-position="add"
             data-v2-add="true"
             disabled={!onAdd}
@@ -66,81 +54,48 @@ export function BottomNavigation({
             ref={addButtonRef}
             type="button"
           >
-            <span className={cn(
-              'flex size-12 items-center justify-center rounded-full bg-[var(--memory-accent-soft)] transition-transform duration-[var(--duration-standard)] group-active:scale-95',
-              appearance === 'memoly' && 'memoly-nav-add-circle',
-            )}>
-              <WebpIcon decorative monochrome name="plus" size={29} state="active" />
-            </span>
-            <Typography variant="memoryNav">Добавить</Typography>
+            {showIcons
+              ? <span aria-hidden="true" className="astryx-nav-plus"><WebpIcon decorative name="plus" size={20} /></span>
+              : <Typography aria-hidden="true" as="span" className="astryx-nav-plus" variant="memoryNav">+</Typography>}
+            <Typography as="span" variant="memoryNav">Добавить</Typography>
           </button>
         ) : (
           <div
             aria-label="Режим просмотра"
-            className={cn(
-              'flex min-w-0 flex-col items-center justify-center gap-0.5 text-muted-foreground',
-              appearance === 'memoly' ? 'min-h-11' : 'min-h-[60px]',
-              appearance === 'memoly' && 'memoly-nav-viewer',
-            )}
+            className="astryx-nav-item astryx-nav-viewer"
             data-nav-position="viewer"
             data-nav-viewer="true"
             role="img"
           >
-            <WebpIcon decorative monochrome name="lock" size={23} />
-            <Typography variant="memoryNav">Просмотр</Typography>
+            {showIcons ? <WebpIcon decorative name="lock" size={20} /> : null}
+            <Typography as="span" variant="memoryNav">Просмотр</Typography>
           </div>
         )}
-        <NavButton
-          active={active === 'gifts'}
-          appearance={appearance}
-          icon="gift"
-          label="Вишлист"
-          onClick={onGifts}
-          position="gifts"
-        />
-        <NavButton
-          active={active === 'family'}
-          appearance={appearance}
-          icon="family"
-          label="Семья"
-          onClick={onFamily}
-        />
+        <NavButton active={active === 'gifts'} icon={showIcons ? 'gift' : undefined} label="Вишлист" onClick={onGifts} position="gifts" />
+        <NavButton active={active === 'family'} icon={showIcons ? 'family' : undefined} label="Семья" onClick={onFamily} position="family" />
       </div>
     </nav>
   )
 }
-function NavButton({
-  active,
-  appearance,
-  icon,
-  label,
-  onClick,
-  position = icon,
-}: {
+
+function NavButton({ active, icon, label, onClick, position }: {
   active: boolean
-  appearance: 'default' | 'memoly'
-  icon: 'family' | 'gift' | 'home' | 'archive-box'
+  icon?: WebpIconName
   label: string
-  onClick: () => void
-  position?: string
+  onClick?: () => void
+  position: string
 }) {
   return (
     <button
       aria-current={active ? 'page' : undefined}
-      className={cn(
-        'flex min-w-0 flex-col items-center justify-center gap-0.5 transition-colors duration-[var(--duration-standard)]',
-        appearance === 'memoly' ? 'min-h-11' : 'min-h-[60px]',
-        active ? 'text-primary' : 'text-muted-foreground',
-      )}
+      className="astryx-nav-item"
       data-nav-position={position}
       data-v2-active={active ? 'true' : undefined}
       onClick={onClick}
       type="button"
     >
-      <WebpIcon decorative monochrome name={icon} size={23} state={active ? 'active' : 'default'} />
-      <Typography variant="memoryNav">{label}</Typography>
+      {icon ? <WebpIcon decorative name={icon} size={20} /> : null}
+      <Typography as="span" variant="memoryNav">{label}</Typography>
     </button>
   )
 }
-
-function noop() {}

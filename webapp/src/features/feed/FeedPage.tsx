@@ -17,7 +17,7 @@ import { ChildHeader } from '@/components/ChildHeader'
 import { FamilyHeaderV2 } from '@/components/ui-v2/FamilyHeaderV2'
 import { useMemolyTheme } from '@/features/theme'
 import { privateMediaSource } from '@/platform/media/private-media-access'
-import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
+import { usePrivateImageResource, usePrivateImageUrl } from '@/platform/media/use-private-image-url'
 import { toggleAudioPlayback } from './audio-playback'
 import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { requestReactionHaptic } from '@/platform/reaction-haptics'
@@ -102,7 +102,7 @@ function pendingVideoQueryKey(familyId: string, accountId: string, membershipEpo
   return [...feedQueryKeys.all, familyId, 'video-rendition', accountId, membershipEpoch, memoryId] as const
 }
 
-const VideoQueryScope = createContext({ accountId: '', membershipEpoch: 0 })
+const VideoQueryScope = createContext({ accountId: '', familyId: '', membershipEpoch: 0 })
 const MAX_AUTO_PENDING_VIDEOS = 3
 const MAX_AUTO_PENDING_SUCCESSES = 12
 
@@ -401,7 +401,7 @@ export function FeedPage({
   }
 
   return (
-    <VideoQueryScope.Provider value={{ accountId, membershipEpoch: membershipEpoch ?? 0 }}>
+    <VideoQueryScope.Provider value={{ accountId, familyId, membershipEpoch: membershipEpoch ?? 0 }}>
     <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ id: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.id, path: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
     <MediaPlaybackCoordinator active={active && !commentsOpen}>
     <FeedPresentation activeFilter="all"
@@ -455,7 +455,7 @@ export function FeedPage({
           }}
           media={memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 0)
             ? <MixedMediaCarousel hostBridge={hostBridge} initialIndex={mixedIndexes.current.get(memory.id) ?? 0} memory={memory} onIndexChange={(index) => mixedIndexes.current.set(memory.id, index)} onPhotoUrlChange={(attachmentId, url) => { const previousUrl = mixedPhotoUrls.current.get(attachmentId); if (url) mixedPhotoUrls.current.set(attachmentId, url); else mixedPhotoUrls.current.delete(attachmentId); setMixedViewer((current) => current?.memory.id === memory.id && current.memory.attachments[current.index]?.id === attachmentId && (current.photoUrl === previousUrl || !url) ? { ...current, photoUrl: url ?? undefined } : current) }} onOpen={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index, photoUrl: photoUrl ?? mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) }} returnFocusRef={detailReturnFocusRef} transport={transport} />
-            : primary ? <Attachment attachment={primary} hostBridge={hostBridge} memory={memory} onOpenPhoto={(trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index: 0, photoUrl }) }} transport={transport} /> : null}
+            : primary ? <Attachment attachment={primary} feedPreview hostBridge={hostBridge} memory={memory} onOpenPhoto={(trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory, index: 0, photoUrl }) }} transport={transport} /> : null}
           memoryId={memory.id}
           reactionScopeKey={`${familyId}:${accountId}:${membershipEpoch ?? 0}`}
           seenContentRef={memory.author.id !== accountId ? registerSeenContent(memory.id, 'feed') : undefined}
@@ -620,7 +620,7 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
     if (event.key === 'ArrowLeft' && index > 0) { event.preventDefault(); embla?.scrollPrev() }
     if (event.key === 'ArrowRight' && index < memory.attachments.length - 1) { event.preventDefault(); embla?.scrollNext() }
   }} onPointerDownCapture={(event) => { pointerGesture.current = event.button === 0 && event.isPrimary !== false ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false } : null }} onPointerMoveCapture={(event) => { const gesture = pointerGesture.current; if (gesture?.pointerId === event.pointerId && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 10) gesture.moved = true }} onPointerCancelCapture={(event) => { if (pointerGesture.current?.pointerId === event.pointerId) pointerGesture.current = null }} ref={root} role="group" tabIndex={0}>
-    <div className="memoly-mixed-viewport" data-media-stage={isCarousel ? 'feed' : undefined} ref={viewportRef} style={{ '--memoly-active-media-aspect': mediaFrameRatio, '--memoly-carousel-aspect': mediaFrameRatio } as CSSProperties}>
+    <div className="memoly-mixed-viewport" data-media-stage={isCarousel ? 'feed' : undefined} ref={isCarousel ? viewportRef : undefined} style={{ '--memoly-active-media-aspect': mediaFrameRatio, '--memoly-carousel-aspect': mediaFrameRatio } as CSSProperties}>
       <div className="memoly-mixed-track">
         {memory.attachments.map((attachment, position) => <div aria-hidden={position !== index} aria-label={position === index ? `${position + 1} из ${memory.attachments.length}, ${attachment.kind === 'photo' ? 'фото' : attachment.kind === 'voice' ? 'голосовое' : 'видео'}` : undefined} className="memoly-mixed-slide" data-carousel-active={position === index} data-carousel-position={position + 1} data-media-kind={attachment.kind} inert={position !== index} key={attachment.id} role={position === index ? 'group' : undefined}>
           {position === index || position === settledIndex || (Math.abs(position - index) === 1 && (attachment.kind === 'photo' || attachment.kind === 'video'))
@@ -659,14 +659,14 @@ function MixedSlideMedia({ active, attachment, hostBridge, memory, multi, onOpen
   const posterUrl = usePrivateObjectUrl(videoPoster, transport)
   useEffect(() => () => { root.current?.querySelectorAll('video').forEach((video) => video.pause()) }, [])
   if (multi && attachment.kind === 'video') {
-    if (active && attachment.source !== 'telegram') return <div className="memoly-mixed-slide-media memoly-mixed-slide-inline-video" ref={root}><Attachment attachment={attachment} hostBridge={hostBridge} memory={memory} transport={transport} /></div>
+    if (active && attachment.source !== 'telegram') return <div className="memoly-mixed-slide-media memoly-mixed-slide-inline-video" ref={root}><Attachment attachment={attachment} feedPreview hostBridge={hostBridge} memory={memory} transport={transport} /></div>
     return <div className="memoly-mixed-slide-media memoly-mixed-slide-poster" data-poster-ready={Boolean(posterUrl)}><button aria-label={`Открыть видео, вложение ${attachment.id}`} onClick={(event) => onOpen(event.currentTarget)} style={{ aspectRatio: mediaAspectRatio(attachment.width, attachment.height) ?? '16 / 9' }} type="button">{posterUrl ? <img alt="Кадр видео" src={posterUrl} /> : <Typography as="span" className="memoly-carousel-video-loading" variant="memoryMeta">Загружаем кадр видео…</Typography>}<span aria-hidden="true" className="memoly-carousel-video-play"><WebpIcon decorative name="play" size={24} state="white" /></span></button></div>
   }
   return <div className="memoly-mixed-slide-media" ref={root}><Attachment attachment={attachment} hostBridge={hostBridge} memory={memory} onOpenPhoto={onOpen} onPhotoUrlChange={onPhotoUrlChange} transport={transport} /></div>
 }
 
 export function MemoryMediaScope({ accountId, membershipEpoch, children }: { accountId: string; membershipEpoch: number; children: ReactNode }) {
-  return <VideoQueryScope.Provider value={{ accountId, membershipEpoch }}>{children}</VideoQueryScope.Provider>
+  return <VideoQueryScope.Provider value={{ accountId, familyId: '', membershipEpoch }}>{children}</VideoQueryScope.Provider>
 }
 
 export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvatarUrl, childName, familyTimezone, hostBridge, index: initialIndex, initialPhotoUrl, memory, onClose, onIndexChange, registerSeenContent, returnFocusRef, transport, preferReturnFocus = false, sourceMemories, sourcePresentation, pageWindow }: { childAvatarCrop?: Props['childAvatarCrop']; childAvatarStatus?: Props['childAvatarStatus']; childAvatarUrl?: Props['childAvatarUrl']; childName: string; familyTimezone: string; hostBridge: HostBridge; index: number; initialPhotoUrl?: string; memory: MemoryDto; onClose: () => void; onIndexChange: (index: number) => void; registerSeenContent?: (element: HTMLElement | null) => void; returnFocusRef: RefObject<HTMLElement | null>; transport: AuthenticatedTransport; preferReturnFocus?: boolean; sourceMemories?: Record<string, MemoryDto>; sourcePresentation?: Record<string, { authorLabel: string; dateLabel: string }>; pageWindow?: { offset: number; total: number; onRequestNext: () => void } }) {
@@ -921,10 +921,11 @@ function ViewerThumbnail({ attachment, active, index, onSelect, total, transport
   return <button aria-label={`Перейти к вложению ${index} из ${total}`} aria-pressed={active} className="memoly-viewer-thumbnail" onClick={onSelect} type="button">{url ? <img alt="" src={url} /> : <span aria-hidden="true">{attachment.kind === 'video' ? <WebpIcon decorative monochrome name="video" size={18} /> : <Typography as="span" variant="memoryMeta">Фото</Typography>}</span>}</button>
 }
 
-function Attachment({ attachment, autoplay = false, borrowedPhotoUrl, fullscreen = false, hostBridge, memory, onOpenPhoto, onPhotoUrlChange, photoInteractive = true, transport }: {
+function Attachment({ attachment, autoplay = false, borrowedPhotoUrl, feedPreview = false, fullscreen = false, hostBridge, memory, onOpenPhoto, onPhotoUrlChange, photoInteractive = true, transport }: {
   attachment: MemoryAttachment
   autoplay?: boolean
   borrowedPhotoUrl?: string
+  feedPreview?: boolean
   fullscreen?: boolean
   hostBridge: HostBridge
   memory: MemoryDto
@@ -934,10 +935,10 @@ function Attachment({ attachment, autoplay = false, borrowedPhotoUrl, fullscreen
   transport: AuthenticatedTransport
 }) {
   if (attachment.source === 'telegram') return <TelegramVideo attachment={attachment} familyId={memory.familyId} hostBridge={hostBridge} memoryId={memory.id} transport={transport} />
-  if (attachment.source === 'max') return <MaxVideo attachment={attachment} autoplay={autoplay} fullscreen={fullscreen} hostBridge={hostBridge} transport={transport} />
+  if (attachment.source === 'max') return <MaxVideo attachment={attachment} autoplay={autoplay} feedPreview={feedPreview} fullscreen={fullscreen} hostBridge={hostBridge} transport={transport} />
   if (attachment.kind === 'photo') return <PrivateImage attachment={attachment} borrowedUrl={borrowedPhotoUrl} onOpenPhoto={onOpenPhoto} onUrlChange={onPhotoUrlChange} interactive={photoInteractive} transport={transport} />
   if (attachment.kind === 'voice') return <AudioPlayer durationMs={attachment.durationMs} path={attachment.playbackPath} waveform={attachment.waveform} />
-  return <PrivateVideo attachment={attachment} autoplay={autoplay} fullscreen={fullscreen} memory={memory} transport={transport} />
+  return <PrivateVideo attachment={attachment} autoplay={autoplay} feedPreview={feedPreview} fullscreen={fullscreen} memory={memory} transport={transport} />
 }
 
 export function TelegramVideo({ attachment, familyId, hostBridge, memoryId, transport }: { attachment: Extract<MemoryAttachment, { source: 'telegram' }>; familyId: string; hostBridge: HostBridge; memoryId: string; transport: AuthenticatedTransport }) {
@@ -1086,9 +1087,10 @@ export function TelegramVideoPoster({ durationMs, frameRatio, posterUrl, posterR
   </button>
 }
 
-function MaxVideo({ attachment, autoplay = false, fullscreen, hostBridge, transport }: {
+function MaxVideo({ attachment, autoplay = false, feedPreview, fullscreen, hostBridge, transport }: {
   attachment: Extract<MemoryAttachment, { source: 'max' }>
   autoplay?: boolean
+  feedPreview: boolean
   fullscreen?: boolean
   hostBridge: HostBridge
   transport: AuthenticatedTransport
@@ -1115,7 +1117,7 @@ function MaxVideo({ attachment, autoplay = false, fullscreen, hostBridge, transp
     ? maxVideoPosterPath(attachment.playbackPath)
     : attachment.posterState === 'ready' ? attachment.posterPath ?? null
       : posterReadiness.data?.state === 'ready' ? posterReadiness.data.posterPath : null
-  const posterUrl = usePrivateObjectUrl(posterPath, transport, nearViewport)
+  const posterUrl = useFeedVideoPosterUrl(posterPath, transport, nearViewport, feedPreview)
   const readinessKey = [...feedQueryKeys.all, 'max-video-readiness', accountId, membershipEpoch, readinessPath] as const
   const cachedReadiness = queryClient.getQueryState<MaxVideoReadiness>(readinessKey)
   const checkInterval = cachedReadiness ? maxVideoReadinessInterval(cachedReadiness) : 0
@@ -1374,7 +1376,7 @@ function VoiceSeek({ current, duration, onSeek, waveform }: { current: number; d
   </div>
 }
 
-function PrivateVideo({ attachment, autoplay = false, fullscreen = false, memory, transport }: { attachment: Extract<MemoryAttachment, { source: 'private_storage' }>; autoplay?: boolean; fullscreen?: boolean; memory: MemoryDto; transport: AuthenticatedTransport }) {
+function PrivateVideo({ attachment, autoplay = false, feedPreview, fullscreen = false, memory, transport }: { attachment: Extract<MemoryAttachment, { source: 'private_storage' }>; autoplay?: boolean; feedPreview: boolean; fullscreen?: boolean; memory: MemoryDto; transport: AuthenticatedTransport }) {
   const frameRatio = useMediaFrameRatio(memory.id, [attachment])
   const { accountId, membershipEpoch } = useContext(VideoQueryScope)
   const rendition = useQuery({
@@ -1399,7 +1401,7 @@ function PrivateVideo({ attachment, autoplay = false, fullscreen = false, memory
   const video = useRef<HTMLVideoElement | null>(null)
   const stage = useRef<HTMLDivElement | null>(null)
   const [nearViewport, setNearViewport] = useState(false)
-  const posterUrl = usePrivateObjectUrl(posterPath, transport, nearViewport)
+  const posterUrl = useFeedVideoPosterUrl(posterPath, transport, nearViewport, feedPreview)
   useEffect(() => {
     const element = stage.current
     if (!element || typeof IntersectionObserver === 'undefined') return
@@ -1481,6 +1483,15 @@ function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTrans
   const auth = useContext(AuthContext)
   const mediaTransport = transport ?? auth?.transport
   return usePrivateImageUrl(auth?.user?.id ?? '', path, mediaTransport, enabled && Boolean(mediaTransport), onSettled)
+}
+
+function useFeedVideoPosterUrl(path: string | null, transport: AuthenticatedTransport, nearViewport: boolean, feedPreview: boolean) {
+  const auth = useContext(AuthContext)
+  const { accountId, familyId, membershipEpoch } = useContext(VideoQueryScope)
+  const userId = auth?.user?.id ?? ''
+  const reuse = feedPreview && userId === accountId && membershipEpoch > 0 &&
+    path?.startsWith(`/api/v1/families/${encodeURIComponent(familyId)}/media/`)
+  return usePrivateImageResource(userId, path, transport, nearViewport, undefined, reuse ? String(membershipEpoch) : '', reuse ? 'feed-poster' : undefined).url
 }
 
 function usePrivateMediaSource(path: string | null, enabled = true) {

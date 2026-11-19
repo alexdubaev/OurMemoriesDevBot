@@ -2,7 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react'
 
 import { AuthContext } from '@/features/auth'
-import { readUiVersion } from '@/features/ui-version'
+import { readUiVersion, UiVersionContext } from '@/features/ui-version'
 import { isMemolyTheme, type MemolyTheme } from './theme'
 
 type MemolyThemeContextValue = {
@@ -53,7 +53,9 @@ export function ThemeProvider({ children }: PropsWithChildren) {
 
   return (
     <div className="memoly-app-root" data-memoly-theme={theme} data-ui-version={uiVersion} data-slot="memoly-theme-root">
-      <MemolyThemeContext.Provider value={value}>{children}</MemolyThemeContext.Provider>
+      <UiVersionContext.Provider value={uiVersion}>
+        <MemolyThemeContext.Provider value={value}>{children}</MemolyThemeContext.Provider>
+      </UiVersionContext.Provider>
     </div>
   )
 }

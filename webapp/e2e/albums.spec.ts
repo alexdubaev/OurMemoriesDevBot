@@ -1395,23 +1395,19 @@ test('bottom navigation grows and wraps labels at 200% text without reducing tou
   const nav = page.getByTestId('bottom-navigation')
   await expect(nav).toBeVisible()
   const baseHeight = await nav.evaluate((element) => element.getBoundingClientRect().height)
-  expect(baseHeight).toBe(50)
-  await page.addStyleTag({ content: "nav[data-bottom-navigation-appearance='memoly'] [data-variant='memoryNav'] { font-size: 22px !important; line-height: 1.1 !important; }" })
-  const dimensions = await nav.evaluate((element) => {
-    const navRect = element.getBoundingClientRect()
+  await page.locator('html').evaluate((element) => element.style.setProperty('font-size', '200%', 'important'))
+  await expect.poll(() => nav.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(baseHeight)
+  const labels = await nav.evaluate((element) => {
     const buttons = [...element.querySelectorAll<HTMLElement>('[data-nav-position]')]
-    const labels = buttons.map((button) => {
+    return buttons.map((button) => {
       const label = button.querySelector<HTMLElement>("[data-variant='memoryNav']")!
       const rect = label.getBoundingClientRect()
       return { text: label.textContent?.trim(), left: rect.left, right: rect.right, width: rect.width, scrollWidth: label.scrollWidth, buttonHeight: button.getBoundingClientRect().height }
     })
-    return { navHeight: navRect.height, labels }
   })
-  expect(dimensions.navHeight).toBeGreaterThan(baseHeight)
-  expect(dimensions.labels).toHaveLength(5)
-  expect(dimensions.labels.map((label) => label.text)).toEqual(['Лента', 'Альбомы', 'Добавить', 'Вишлист', 'Семья'])
-  expect(dimensions.labels.every((label) => label.scrollWidth <= label.width + 1 && label.buttonHeight >= 44)).toBe(true)
-  for (let index = 1; index < dimensions.labels.length; index += 1) expect(dimensions.labels[index - 1].right).toBeLessThanOrEqual(dimensions.labels[index].left + 1)
+  expect(labels.map((label) => label.text)).toEqual(['Лента', 'Альбомы', 'Добавить', 'Вишлист', 'Семья'])
+  expect(labels.every((label) => label.scrollWidth <= label.width + 1 && label.buttonHeight >= 44)).toBe(true)
+  for (let index = 1; index < labels.length; index += 1) expect(labels[index - 1].right).toBeLessThanOrEqual(labels[index].left + 1)
 })
 
 async function openSynthetic(page: Page, query: string) {
