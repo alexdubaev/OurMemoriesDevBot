@@ -386,3 +386,34 @@ test('fullscreen photo navigation syncs the feed carousel only when the viewer c
   await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-pressed', 'true')
   await expect(card.locator('[data-carousel-position="2"]').getByRole('button', { name: 'Открыть фото' })).toBeFocused()
 })
+
+test('fullscreen photos stay centered and fully visible in a short viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 740 })
+  await page.goto('/e2e/fixed-carousel.harness.html?fullscreen-swipe')
+  const card = page.locator('.memory-card').nth(1)
+  await card.locator('[data-carousel-dot="2"]').click()
+  await card.locator('[data-carousel-position="2"]').getByRole('button', { name: 'Открыть фото' }).click()
+  const viewer = page.locator('[data-mixed-viewer]')
+  const expectPhotoFits = async () => {
+    await expectFullscreenSlideSettled(viewer)
+    const photo = viewer.locator('[data-carousel-active="true"]').getByAltText('Воспоминание')
+    await expect.poll(() => photo.evaluate((image: HTMLImageElement) => {
+      if (!image.naturalWidth) return Number.POSITIVE_INFINITY
+      const bounds = image.getBoundingClientRect()
+      const stage = image.closest('.memoly-mixed-viewer-media')!.getBoundingClientRect()
+      const scale = Math.min(1, stage.width / image.naturalWidth, stage.height / image.naturalHeight)
+      return Math.max(
+        Math.abs(bounds.x + bounds.width / 2 - stage.x - stage.width / 2),
+        Math.abs(bounds.y + bounds.height / 2 - stage.y - stage.height / 2),
+        Math.abs(bounds.width - image.naturalWidth * scale),
+        Math.abs(bounds.height - image.naturalHeight * scale),
+      )
+    })).toBeLessThan(2)
+  }
+
+  await expect(viewer.getByText('2 / 3')).toBeVisible()
+  await expectPhotoFits()
+  await viewer.getByRole('button', { name: 'Назад' }).click()
+  await expect(viewer.getByText('1 / 3')).toBeVisible()
+  await expectPhotoFits()
+})
