@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { AvatarResourcePool, isImmutableMemberAvatarPath } from './avatar-resource-pool'
-import { clearIdleFeedPosters, forgetIdleFeedPoster, keepIdleFeedPoster, takeIdleFeedPoster } from './feed-poster-cache'
+import { idleAlbumPreviews, idleFeedPosters } from './feed-poster-cache'
 import { cachePrivateImageResponse, eligiblePrivateImage, privateFamilyCacheGeneration, privateCacheIdentityGeneration, isActivePrivateCacheIdentity, readPrivateImage, removePrivateImage, clearPrivateUserCache, privateFamilyAccessRevokedEvent, subscribePrivateCacheInvalidation } from '@/platform/persistence/private-cache'
 
 const memberAvatarPool = new AvatarResourcePool<{ url: string; size: number }>((resource) => URL.revokeObjectURL(resource.url))
@@ -14,7 +14,8 @@ subscribePrivateCacheInvalidation((invalidation) => {
     return userId === invalidation.userId && familyId === invalidation.familyId
   }
   memberAvatarPool.invalidate(matches)
-  clearIdleFeedPosters(matches)
+  idleFeedPosters.clear(matches)
+  idleAlbumPreviews.clear(matches)
 })
 
 export function invalidatePrivateChildAvatar(userId: string, familyId: string, mediaId: string) {
@@ -31,7 +32,7 @@ export function usePrivateImageUrl(userId: string, path: string | null, transpor
   return usePrivateImageResource(userId, path, transport, enabled, onSettled, scopeKey).url
 }
 
-export function usePrivateImageResource(userId: string, path: string | null, transport: AuthenticatedTransport | undefined, enabled = true, onSettled?: () => void, scopeKey = '', poolMode?: 'child-avatar' | 'feed-poster'): PrivateImageResourceState {
+export function usePrivateImageResource(userId: string, path: string | null, transport: AuthenticatedTransport | undefined, enabled = true, onSettled?: () => void, scopeKey = '', poolMode?: 'child-avatar' | 'feed-poster' | 'album-preview'): PrivateImageResourceState {
   const identityGeneration = privateCacheIdentityGeneration()
   const eligible = path ? eligiblePrivateImage(path) : null
   const familyId = eligible?.familyId
@@ -40,17 +41,18 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
   const poolKey = usesAvatarPool && familyId
     ? JSON.stringify([userId, familyId, identityGeneration, familyGeneration, scopeKey, path])
     : null
-  const posterKey = poolMode === 'feed-poster' && scopeKey && familyId && !usesAvatarPool
+  const idlePool = poolMode === 'album-preview' ? idleAlbumPreviews : poolMode === 'feed-poster' ? idleFeedPosters : null
+  const idleKey = idlePool && scopeKey && familyId && !usesAvatarPool
     ? JSON.stringify([userId, familyId, identityGeneration, familyGeneration, scopeKey, path])
     : null
-  const posterTransport = posterKey ? transport : undefined
+  const idleTransport = idleKey ? transport : undefined
   const pooledSnapshot = useSyncExternalStore(
     useCallback((listener) => poolKey ? memberAvatarPool.subscribe(poolKey, listener) : () => undefined, [poolKey]),
     useCallback(() => poolKey ? memberAvatarPool.getSnapshot(poolKey) : memberAvatarPool.getSnapshot(''), [poolKey]),
     () => memberAvatarPool.getSnapshot(''),
   )
   const [invalidationRevision, setInvalidationRevision] = useState(0)
-  const [loaded, setLoaded] = useState<{ userId: string; path: string; url: string | null; identityGeneration: number; scopeKey: string; familyId?: string; familyGeneration?: number; poolKey?: string; posterBytes?: number } | null>(null)
+  const [loaded, setLoaded] = useState<{ userId: string; path: string; url: string | null; identityGeneration: number; scopeKey: string; familyId?: string; familyGeneration?: number; poolKey?: string; idleBytes?: number } | null>(null)
   const loadedRef = useRef(loaded)
   const lastRequest = useRef<{ userId: string; path: string; transport: AuthenticatedTransport; scopeKey: string } | null>(null)
   const requestController = useRef<AbortController | null>(null)
@@ -86,11 +88,11 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
   }, [familyId, userId])
   useLayoutEffect(() => {
     const urls = ownedUrls.current
-    if (posterKey && path && posterTransport && isActivePrivateCacheIdentity(userId, identityGeneration)) {
-      const cached = takeIdleFeedPoster(posterKey, posterTransport)
+    if (idleKey && path && idleTransport && isActivePrivateCacheIdentity(userId, identityGeneration)) {
+      const cached = idlePool?.take(idleKey, idleTransport)
       if (cached) {
         urls.add(cached.url)
-        loadedRef.current = { userId, path, url: cached.url, identityGeneration, scopeKey, familyId, familyGeneration, posterBytes: cached.size }
+        loadedRef.current = { userId, path, url: cached.url, identityGeneration, scopeKey, familyId, familyGeneration, idleBytes: cached.size }
         setOwnedUrlSet(new Set(ownedUrls.current))
         setLoaded(loadedRef.current)
       }
@@ -99,17 +101,17 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       // Cancel in-flight work before handing off or releasing URL ownership.
       requestController.current?.abort()
       const current = loadedRef.current
-      if (posterKey && path && posterTransport && current?.url && current.posterBytes &&
+      if (idleKey && path && idleTransport && current?.url && current.idleBytes &&
         isActivePrivateCacheIdentity(userId, identityGeneration) &&
         hasOwnedReadyUrl(current, urls, userId, path, identityGeneration, scopeKey) &&
-        keepIdleFeedPoster(posterKey, posterTransport, { url: current.url, size: current.posterBytes })) {
+        idlePool?.keep(idleKey, idleTransport, { url: current.url, size: current.idleBytes })) {
         urls.delete(current.url)
         forgetUrl(current.url)
       }
       urls.forEach((url) => releaseUrl(url))
       urls.clear()
     }
-  }, [familyGeneration, familyId, forgetUrl, identityGeneration, path, posterKey, posterTransport, releaseUrl, scopeKey, userId])
+  }, [familyGeneration, familyId, forgetUrl, identityGeneration, path, idleKey, idlePool, idleTransport, releaseUrl, scopeKey, userId])
   useEffect(() => {
     if (!userId || !path || !enabled || !transport) return
     if (usesAvatarPool && poolKey) {
@@ -169,12 +171,12 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
     const showBlob = async (blob: Blob) => {
       const url = URL.createObjectURL(blob)
       ownUrl(url)
-      let posterBytes: number | undefined
+      let idleBytes: number | undefined
       try {
         const image = new Image()
         image.src = url
         await image.decode()
-        if (posterKey) posterBytes = blob.size + image.naturalWidth * image.naturalHeight * 4
+        if (idleKey) idleBytes = blob.size + image.naturalWidth * image.naturalHeight * 4
         if (!isCurrent()) {
           releaseUrl(url)
           return false
@@ -183,7 +185,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
         releaseUrl(url)
         throw error
       }
-      setLoaded({ userId, path, url, identityGeneration, scopeKey, posterBytes, ...(requestFamilyId ? { familyId: requestFamilyId, familyGeneration } : {}) })
+      setLoaded({ userId, path, url, identityGeneration, scopeKey, idleBytes, ...(requestFamilyId ? { familyId: requestFamilyId, familyGeneration } : {}) })
       return true
     }
     void (async () => {
@@ -201,12 +203,12 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       if (!isCurrent()) return
       const candidateUrl = URL.createObjectURL(blob)
       ownUrl(candidateUrl)
-      let posterBytes: number | undefined
+      let idleBytes: number | undefined
       try {
         const image = new Image()
         image.src = candidateUrl
         await image.decode()
-        if (posterKey) posterBytes = blob.size + image.naturalWidth * image.naturalHeight * 4
+        if (idleKey) idleBytes = blob.size + image.naturalWidth * image.naturalHeight * 4
       } catch (error) {
         releaseUrl(candidateUrl)
         throw error
@@ -217,7 +219,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       }
       const keepWarmUrl = readyUrlAlreadyShown || cachedWasShown || hasPriorReadyUrl()
       if (!keepWarmUrl) {
-        setLoaded({ userId, path, url: candidateUrl, identityGeneration, scopeKey, posterBytes, ...(requestFamilyId ? { familyId: requestFamilyId, familyGeneration } : {}) })
+        setLoaded({ userId, path, url: candidateUrl, identityGeneration, scopeKey, idleBytes, ...(requestFamilyId ? { familyId: requestFamilyId, familyGeneration } : {}) })
       } else {
         // Keep a warm URL stable while refreshing the persistent Blob. The fullscreen viewer can
         // borrow this URL, so replacing it here could revoke a URL still used by that viewer.
@@ -229,8 +231,8 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
     })().catch((error: unknown) => {
       if (!isCurrent()) return
       onSettledRef.current?.()
-      if (posterKey && error instanceof ApiRequestError && [401, 403, 404].includes(error.status)) {
-        forgetIdleFeedPoster(posterKey)
+      if (idleKey && error instanceof ApiRequestError && [401, 403, 404].includes(error.status)) {
+        idlePool?.forget(idleKey)
         const url = loadedRef.current?.url
         if (url) releaseUrl(url)
       }
@@ -249,7 +251,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       controller.abort()
       if (requestController.current === controller) requestController.current = null
     }
-  }, [enabled, familyGeneration, familyId, identityGeneration, invalidationRevision, ownUrl, path, poolKey, posterKey, releaseUrl, scopeKey, transport, userId, usesAvatarPool])
+  }, [enabled, familyGeneration, familyId, identityGeneration, invalidationRevision, ownUrl, path, poolKey, idleKey, idlePool, releaseUrl, scopeKey, transport, userId, usesAvatarPool])
   if (usesAvatarPool) {
     const current = Boolean(enabled && userId && transport && poolKey && familyId &&
       isActivePrivateCacheIdentity(userId, identityGeneration) &&
