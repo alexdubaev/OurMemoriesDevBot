@@ -90,12 +90,12 @@ export function GiftCardPresentation({ gift, locked, onAction, onDelete, onEdit,
             </button>
           ))}
           {actions.canEdit ? (
-            <button aria-label={`Изменить подарок «${gift.title}»`} className="gift-icon-button" disabled={locked} onClick={() => onEdit(gift)} type="button">
+            <button aria-label={`Изменить подарок «${gift.title}»`} className="gift-manage-button" disabled={locked} onClick={() => onEdit(gift)} type="button">
               <Typography as="span" variant="memoryButton">Изменить</Typography>
             </button>
           ) : null}
           {actions.canDelete ? (
-            <button aria-label={`Удалить подарок «${gift.title}»`} className="gift-icon-button" disabled={locked} onClick={() => onDelete(gift)} type="button">
+            <button aria-label={`Удалить подарок «${gift.title}»`} className="gift-manage-button" disabled={locked} onClick={() => onDelete(gift)} type="button">
               <Typography as="span" variant="memoryButton">Удалить</Typography>
             </button>
           ) : null}
