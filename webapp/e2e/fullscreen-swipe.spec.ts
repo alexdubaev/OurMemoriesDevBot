@@ -370,3 +370,19 @@ test('fullscreen MAX video keeps its preview and play control when selected afte
   await expect(viewer.getByText('2 / 2')).toBeVisible()
   await expect(viewer.locator('[data-carousel-active="true"]').getByAltText('Воспоминание')).toBeVisible()
 })
+
+test('fullscreen photo navigation syncs the feed carousel only when the viewer closes', async ({ page }) => {
+  await page.goto('/e2e/fixed-carousel.harness.html?fullscreen-swipe')
+  const card = page.locator('.memory-card').nth(1)
+  await card.locator('[data-carousel-position="1"]').getByRole('button', { name: 'Открыть фото' }).click()
+  const viewer = page.locator('[data-mixed-viewer]')
+  await viewer.getByRole('button', { name: 'Далее' }).click()
+  await expect(viewer.getByText('2 / 3')).toBeVisible()
+  await expectFullscreenSlideSettled(viewer)
+  await expect(card.locator('[data-carousel-dot="1"]')).toHaveAttribute('aria-pressed', 'true')
+
+  await viewer.getByRole('button', { name: 'Закрыть просмотр' }).click()
+  await expect(viewer).toHaveCount(0)
+  await expect(card.locator('[data-carousel-dot="2"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(card.locator('[data-carousel-position="2"]').getByRole('button', { name: 'Открыть фото' })).toBeFocused()
+})
