@@ -23,7 +23,7 @@ export function FamilyChildrenSection({ childList, canEdit, timezone, onAddChild
       <div className="family-section-head"><h2>Дети</h2><span className="family-count">{childList.length}</span></div>
       <div className="family-list">{childList.map((child) => <FamilyChildRow key={child.id} canEdit={canEdit} child={child} onOpen={onEditChild} renderAvatar={renderAvatar} timezone={timezone} />)}</div>
     </> : null}
-    {onAddChild ? <button className="family-invite-btn family-add-child-btn" onClick={onAddChild} type="button"><span aria-hidden="true" className="family-invite-plus">+</span><span>Добавить ребёнка</span></button> : null}
+    {onAddChild ? <button className="family-invite-btn family-add-child-btn" onClick={onAddChild} type="button"><span className="family-invite-plus">+</span><span>Добавить ребёнка</span></button> : null}
   </section>
 }
 

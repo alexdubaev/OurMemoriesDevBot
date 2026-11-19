@@ -1,9 +1,15 @@
 /* eslint-disable typographyPolicy/use-typography-component -- Scoped Family Hub typography follows the frozen reference dimensions. */
+import type { CSSProperties } from 'react'
 import type { FamilyHomeResponse } from '@web-app-demo/contracts'
 
+import { BrandLogo } from '@/components/BrandLogo'
+import { WebpIcon } from '@/components/WebpIcon'
 import { ChildAvatar } from './ChildAvatar'
 import { roleLabel } from './model'
 import { useChildAvatar } from './useChildAvatar'
+import { getMemolyThemeConfig, useMemolyTheme } from '@/features/theme'
+import { getUiV2HeaderAsset } from '@/components/ui-v2/header-assets'
+import { readUiVersion } from '@/features/ui-version'
 import type { AuthenticatedTransport } from '@/platform/api'
 
 import './family-hub.css'
@@ -39,7 +45,7 @@ export function FamilySummaryCard({ family, onSelect, transport, avatarAccessCon
     <span className="family-hub-card-side">
       {unread !== null && unread > 0 ? <span className="family-hub-count" aria-hidden="true">{unread > 99 ? '99+' : unread}</span> : null}
       {family.unreadState === 'unavailable' ? <span className="family-hub-count-unknown" aria-hidden="true">—</span> : null}
-      <span aria-hidden="true" className="family-hub-chevron">›</span>
+      <WebpIcon decorative name="chevron" size={18} />
     </span>
   </button>
 }
@@ -58,20 +64,24 @@ export function FamilyHubPage({ home, loading, error, notice, busy, loadingMore,
   transport: AuthenticatedTransport
   avatarAccessConfirmed: boolean
 }) {
+  const { theme } = useMemolyTheme()
+  const headerArt = readUiVersion() === 'v2' ? getUiV2HeaderAsset(theme) : getMemolyThemeConfig(theme).headerArtUrl
+  const style = { '--family-hub-theme-art': `url(${headerArt})` } as CSSProperties
   const own = home?.items.filter((family) => family.isOwner) ?? []
   const invited = home?.items.filter((family) => !family.isOwner) ?? []
   const empty = !loading && !error && home?.items.length === 0
   const countUnavailable = home?.items.some((family) => family.unreadState === 'unavailable')
 
-  return <div className="family-hub-page" data-slot="family-hub">
+  return <div className="family-hub-page" data-slot="family-hub" style={style}>
+    <div aria-hidden="true" className="family-hub-art"><div className="family-hub-picture" /></div>
     <main aria-busy={loading || busy} className="family-hub-shell">
-      <div className="family-hub-brand">memoLy</div>
+      <div className="family-hub-brand"><BrandLogo className="family-hub-logo" /><span>Маленькие моменты<br />большое счастье</span></div>
       <header className="family-hub-intro"><h1>Мои семьи</h1><p>Выберите семейный альбом</p></header>
       {notice ? <div className="family-hub-notice" role="status">{notice}</div> : null}
       {countUnavailable ? <div className="family-hub-notice" role="status">Счётчик новых воспоминаний временно недоступен. Семьи можно открыть.</div> : null}
       {loading ? <div aria-label="Загружаем семьи" className="family-hub-skeleton" role="status"><span /><span /><span /></div> : null}
       {error ? <div className="family-hub-state" role="alert"><h2>Не удалось загрузить семьи</h2><p>{error}</p><button onClick={onRetry} type="button">Повторить</button></div> : null}
-      {empty ? <div className="family-hub-state family-hub-state-empty"><h2>Пока здесь нет семей</h2><p>Создайте свой семейный альбом или откройте приглашение от близких.</p>{home?.canCreateOwnFamily ? <button className="family-hub-create-primary" disabled={busy} onClick={onCreate} type="button">＋ &nbsp; Создать свою семью</button> : null}</div> : null}
+      {empty ? <div className="family-hub-state family-hub-state-empty"><div aria-hidden="true" className="family-hub-state-icon"><WebpIcon decorative monochrome name="family" size={28} /></div><h2>Пока здесь нет семей</h2><p>Создайте свой семейный альбом или откройте приглашение от близких.</p>{home?.canCreateOwnFamily ? <button className="family-hub-create-primary" disabled={busy} onClick={onCreate} type="button">＋ &nbsp; Создать свою семью</button> : null}</div> : null}
       {own.length > 0 ? <section className="family-hub-section"><h2>Моя семья</h2><div className="family-hub-cards">{own.map((family) => <FamilySummaryCard avatarAccessConfirmed={avatarAccessConfirmed} disabled={busy} family={family} key={family.familyId} onSelect={onSelect} transport={transport} />)}</div></section> : null}
       {invited.length > 0 ? <section className="family-hub-section"><h2>Семьи близких</h2><div className="family-hub-cards">{invited.map((family) => <FamilySummaryCard avatarAccessConfirmed={avatarAccessConfirmed} disabled={busy} family={family} key={family.familyId} onSelect={onSelect} transport={transport} />)}</div></section> : null}
       {home?.nextCursor ? <button className="family-hub-more" disabled={loadingMore} onClick={onLoadMore} type="button">{loadingMore ? 'Загружаем…' : 'Показать ещё семьи'}</button> : null}

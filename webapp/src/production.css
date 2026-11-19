@@ -2,6 +2,5 @@
 @import "./features/memoly-ui/memoly-ui.css";
 @import "./features/family/ChildProfile.css";
 @import "./components/ui-v2/shared-skin.css";
-@import "./styles/astryx-surfaces.css";
 
 @source not "./stories";
