@@ -9,6 +9,15 @@ export const astryxIconAtlas = {
   sha256: '54920928660341676f055f73dd6e19049d65d5b7f4c30ba328d154d78938296e',
 } as const
 
+export const astryxGiftCover = {
+  url: '/assets/astryx/gift-cover-v1.webp',
+  width: 72,
+  height: 72,
+  alpha: true,
+  bytes: 2044,
+  sha256: '73666a371243cdfb53257d3cdfe604944aa49447cfc7a884dad3764e94af01ca',
+} as const
+
 // Centers and viewport are measured in the original 1254px ImageGen board.
 // The WebP atlas preserves those proportions after resampling.
 const masterSize = 1254
