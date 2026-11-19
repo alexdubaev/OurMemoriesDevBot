@@ -1,7 +1,6 @@
 import type { GiftDto } from '@web-app-demo/contracts'
 
 import { Typography } from '@/components/typography'
-import { WebpIcon } from '@/components/WebpIcon'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { usePrivateImageResource, type PrivateImageResourceState } from '@/platform/media/use-private-image-url'
 
@@ -67,7 +66,7 @@ export function GiftCardPresentation({ gift, locked, onAction, onDelete, onEdit,
         <span aria-hidden="true" className="gift-card-photo" data-photo-status={photo.status}>
           {photo.url
             ? <img alt="" decoding="async" draggable={false} src={photo.url} />
-            : <WebpIcon decorative monochrome name="gift" size={32} />}
+            : null}
         </span>
         <span className="gift-card-body">
           <Typography as="span" className="gift-card-title" variant="memoryBodyMedium">{gift.title}</Typography>
@@ -92,12 +91,12 @@ export function GiftCardPresentation({ gift, locked, onAction, onDelete, onEdit,
           ))}
           {actions.canEdit ? (
             <button aria-label={`Изменить подарок «${gift.title}»`} className="gift-icon-button" disabled={locked} onClick={() => onEdit(gift)} type="button">
-              <WebpIcon decorative monochrome name="edit" size={20} />
+              <Typography as="span" variant="memoryButton">Изменить</Typography>
             </button>
           ) : null}
           {actions.canDelete ? (
             <button aria-label={`Удалить подарок «${gift.title}»`} className="gift-icon-button" disabled={locked} onClick={() => onDelete(gift)} type="button">
-              <WebpIcon decorative monochrome name="trash" size={20} />
+              <Typography as="span" variant="memoryButton">Удалить</Typography>
             </button>
           ) : null}
         </div>
