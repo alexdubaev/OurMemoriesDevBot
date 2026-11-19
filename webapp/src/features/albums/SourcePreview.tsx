@@ -5,7 +5,7 @@ import { usePrivateImageResource } from '@/platform/media/use-private-image-url'
 import type { AuthenticatedTransport } from '@/platform/api'
 import { previewPath, type AlbumSource } from './model'
 
-export function SourcePreview({ source, accountId, scopeKey, transport, active = true }: { source?: AlbumSource | null; accountId: string; scopeKey: string; transport: AuthenticatedTransport; active?: boolean }) {
+export function SourcePreview({ source, accountId, scopeKey, transport, active = true, keepWarm = false }: { source?: AlbumSource | null; accountId: string; scopeKey: string; transport: AuthenticatedTransport; active?: boolean; keepWarm?: boolean }) {
   const root = useRef<HTMLSpanElement>(null)
   const [visible, setVisible] = useState(false)
   useEffect(() => {
@@ -14,7 +14,7 @@ export function SourcePreview({ source, accountId, scopeKey, transport, active =
     observer.observe(root.current)
     return () => observer.disconnect()
   }, [active])
-  const image = usePrivateImageResource(accountId, previewPath(source), transport, active && visible, undefined, scopeKey)
+  const image = usePrivateImageResource(accountId, previewPath(source), transport, active && visible, undefined, scopeKey, keepWarm ? 'album-preview' : undefined)
   return <span className="albums-preview" data-preview-kind={source?.kind ?? 'empty'} ref={root}>
     {image.url ? <img alt="" decoding="async" height={source?.attachment?.height ?? 240} loading="lazy" src={image.url} width={source?.attachment?.width ?? 240} /> : <WebpIcon decorative name={!source?.available && source ? 'warning' : source?.kind === 'voice' ? 'voice' : source?.kind === 'note' ? 'note' : source?.kind === 'video' ? 'video' : 'photo'} size={28} />}
     {source && !source.available ? <Typography as="span" className="albums-unavailable" variant="memoryMeta">Оригинал недоступен</Typography> : null}
