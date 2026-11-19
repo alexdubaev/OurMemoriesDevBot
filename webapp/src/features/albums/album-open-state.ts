@@ -22,7 +22,7 @@ export function createAlbumOpenState() {
   const prefetches = new Map<string, Prefetch>()
 
   function remember(album: AlbumDto, page: AlbumEntryPage) {
-    if (!canPreload(album)) return
+    if (!canPreload(album) && album.kind !== 'free') return
     recent.delete(album.id)
     recent.set(album.id, { version: page.items[0]?.aggregateVersion ?? album.version, page })
     if (recent.size > MAX_PAGES) recent.delete(recent.keys().next().value!)

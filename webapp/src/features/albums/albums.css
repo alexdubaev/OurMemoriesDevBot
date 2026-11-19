@@ -160,6 +160,7 @@ body:has(.albums-composer-host)>[data-slot='drawer-overlay']{z-index:70}body:has
 .month-collage{display:flex;flex-direction:column;width:100%}
 .month-collage-cover,.month-collage-wall{position:relative;width:100%}
 .month-collage-cover{aspect-ratio:3/2}
+.albums-free-gallery-loading{background:color-mix(in srgb,var(--albums-muted) 12%,transparent)}
 .month-collage-cover>.month-collage-tile{inset:0;width:100%;height:100%}
 .month-collage-cover+.month-collage-wall[data-populated]{margin-top:2px}
 .month-collage .month-collage-tile,.month-collage .albums-preview,.month-collage .albums-preview>img{
