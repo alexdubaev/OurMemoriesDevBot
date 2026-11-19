@@ -8,14 +8,15 @@ import type { HostBridge } from '@/platform/telegram'
 import { AlbumEntrySocial } from './AlbumEntrySocial'
 import { MonthPhotoCollage } from './MonthPhotoCollage'
 import { SourcePreview } from './SourcePreview'
+import type { AlbumOpenState } from './album-open-state'
 import type { AlbumsApi } from './api'
 import { categories, dateLabel, filled, monthAgeLabel, type AlbumSource } from './model'
 import { useMonthSourcePages } from './useMonthSourcePages'
 
 type Props = {
-  api: AlbumsApi; albumId: string; entry: AlbumEntryDto; accountId: string; membershipEpoch: number; scopeKey: string
+  api: AlbumsApi; albumId: string; albumOpenState: AlbumOpenState; entry: AlbumEntryDto; accountId: string; membershipEpoch: number; scopeKey: string
   transport: AuthenticatedTransport; familyId: string; timezone: string; childName: string; hostBridge: HostBridge
-  busy: boolean; onBack: () => void; onEdit: () => void; onClear: () => void; onAdd: () => void; onCover: () => void
+  busy: boolean; loadingSummary: boolean; onBack: () => void; onEdit: () => void; onClear: () => void; onAdd: () => void; onCover: () => void
   onRemovePhoto: () => void; onRefresh: () => void; onViewerOpenChange: (open: boolean) => void
   onDiscussionInvalidated: (reason: ApiRequestError) => void
 }
@@ -34,13 +35,14 @@ function photoCountLabel(count: number) {
   return `${count} ${suffix}`
 }
 
-export function MonthEntryDetail({ api, albumId, entry, accountId, membershipEpoch, scopeKey, transport, familyId, timezone, childName, hostBridge, busy, onBack, onEdit, onClear, onAdd, onCover, onRemovePhoto, onRefresh, onViewerOpenChange, onDiscussionInvalidated }: Props) {
+export function MonthEntryDetail({ api, albumId, albumOpenState, entry, accountId, membershipEpoch, scopeKey, transport, familyId, timezone, childName, hostBridge, busy, loadingSummary, onBack, onEdit, onClear, onAdd, onCover, onRemovePhoto, onRefresh, onViewerOpenChange, onDiscussionInvalidated }: Props) {
   const collection = entry.month ?? entry.collection
   const cover = collection?.cover?.kind === 'photo' ? collection.cover : null
   const photoCount = collection?.photoCount ?? 0
   const otherCount = collection?.otherCount ?? 0
   const month = entry.kind === 'month'
-  const photos = useMonthSourcePages(api, albumId, entry.id, 'photo', photoCount > Number(Boolean(cover)))
+  const photoVersion = month ? [entry.version, cover?.id, photoCount].join(':') : undefined
+  const photos = useMonthSourcePages(api, albumId, entry.id, 'photo', photoCount > Number(Boolean(cover)), photoVersion, albumOpenState)
   const { more: morePhotos, nextCursor: photoCursor, loading: photosLoading, error: photosError } = photos
   const others = useMonthSourcePages(api, albumId, entry.id, 'other', otherCount > 0)
   const photoPages = useMemo(() => photos.pages.map((page) => page.filter(({ id }) => id !== cover?.id)), [cover, photos.pages])
@@ -147,6 +149,7 @@ export function MonthEntryDetail({ api, albumId, entry, accountId, membershipEpo
     reactionCounts: {}, currentUserReaction: null, likes: { count: 0, likedByMe: false }, capabilities: { edit: false, delete: false, like: false },
   } : null
   const date = entry.date.precision === 'unknown' ? '' : dateLabel(entry.date)
+  const editingUnavailable = busy || loadingSummary
 
   return <MemoryMediaScope accountId={accountId} membershipEpoch={membershipEpoch}><MediaPlaybackCoordinator active>
     <section className="albums-entry-detail month-entry-detail">
@@ -156,11 +159,11 @@ export function MonthEntryDetail({ api, albumId, entry, accountId, membershipEpo
         {entry.capabilities.edit || filled(entry) ? <details className="albums-menu" ref={menu}>
           <summary aria-label={month ? 'Меню месяца' : 'Меню истории'}>⋯</summary>
           <div className="albums-menu-content">
-            {entry.capabilities.edit ? <><button disabled={busy} onClick={() => chooseAction(onAdd)} type="button">Добавить фотографии</button>
-            {month ? <button disabled={busy} onClick={() => chooseAction(onCover)} type="button">Обложка месяца</button> : null}
-            <button disabled={busy} onClick={() => chooseAction(onEdit)} type="button">Редактировать историю</button>
-            {photoCount ? <button disabled={busy} onClick={() => chooseAction(onRemovePhoto)} type="button">Убрать фотографию</button> : null}
-            <button disabled={busy} onClick={() => chooseAction(onClear)} type="button">{month ? 'Очистить главу' : 'Убрать из альбома'}</button></> : null}
+            {entry.capabilities.edit ? <><button disabled={editingUnavailable} onClick={() => chooseAction(onAdd)} type="button">Добавить фотографии</button>
+            {month ? <button disabled={editingUnavailable} onClick={() => chooseAction(onCover)} type="button">Обложка месяца</button> : null}
+            <button disabled={editingUnavailable} onClick={() => chooseAction(onEdit)} type="button">Редактировать историю</button>
+            {photoCount ? <button disabled={editingUnavailable} onClick={() => chooseAction(onRemovePhoto)} type="button">Убрать фотографию</button> : null}
+            <button disabled={editingUnavailable} onClick={() => chooseAction(onClear)} type="button">{month ? 'Очистить главу' : 'Убрать из альбома'}</button></> : null}
             {filled(entry) ? <button onClick={() => chooseAction(() => jumpTo(storyAndDiscussion.current))} type="button">История и обсуждение</button> : null}
             {otherCount ? <button onClick={() => chooseAction(() => jumpTo(otherMaterials.current))} type="button">Другие материалы</button> : null}
           </div>
@@ -168,9 +171,9 @@ export function MonthEntryDetail({ api, albumId, entry, accountId, membershipEpo
       </header>
       <div className="month-entry-meta">
         <p>{[date, entry.category ? categories[entry.category] : '', photoCountLabel(photoCount), otherCount ? `Другие материалы: ${otherCount}` : ''].filter(Boolean).join(' · ')}</p>
-        {entry.capabilities.edit ? <button className="month-entry-add" disabled={busy} onClick={onAdd} type="button"><WebpIcon decorative name="plus" size={16} />Добавить фотографии</button> : null}
+        {entry.capabilities.edit ? <button className="month-entry-add" disabled={editingUnavailable} onClick={onAdd} type="button"><WebpIcon decorative name="plus" size={16} />Добавить фотографии</button> : null}
       </div>
-      {photoCount ? <MonthPhotoCollage accountId={accountId} cover={cover} onOpen={openPhoto} pages={photoPages} scopeKey={scopeKey} showCoverIcon={month} transport={transport} />
+      {photoCount ? <MonthPhotoCollage accountId={accountId} cover={cover} keepWarm={month} onOpen={openPhoto} pages={photoPages} scopeKey={scopeKey} showCoverIcon={month} transport={transport} />
         : <div className="month-photo-empty"><SourcePreview accountId={accountId} scopeKey={scopeKey} transport={transport} /><p>Фотографий пока нет</p></div>}
       <div ref={sentinel} />
       {photos.loading ? <p className="albums-muted" role="status">Загружаем фотографии…</p> : null}

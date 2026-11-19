@@ -90,6 +90,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
   const [conflict, setConflict] = useState(false)
   const [savedRefreshFailed, setSavedRefreshFailed] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [loadingMonthSummary, setLoadingMonthSummary] = useState(false)
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null)
   const [confirmationLifecycle, setConfirmationLifecycle] = useState({ scopeKey, active })
   if (confirmationLifecycle.scopeKey !== scopeKey || confirmationLifecycle.active !== active) {
@@ -102,6 +103,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
   const [albumOpenRevision, setAlbumOpenRevision] = useState(0)
   const [monthRevision, setMonthRevision] = useState(0)
   const pending = useRef(false)
+  const monthSummaryRead = useRef<symbol | null>(null)
   const paging = useRef(false)
   const requestGeneration = useRef(0)
   const activeAlbumId = useRef<string | null>(null)
@@ -116,6 +118,10 @@ export function AlbumsPage(props: AlbumsPageProps) {
   const onMonthViewerOpenChange = useCallback((open: boolean) => { monthViewerOpen.current = open }, [])
   const clearWorkshopFocus = useCallback(() => { setWorkshopFocusId(null); setWorkshopFocusTop(null) }, [])
   const backRef = useRef<() => void>(() => undefined)
+  const cancelMonthSummary = useCallback(() => {
+    monthSummaryRead.current = null
+    setLoadingMonthSummary(false)
+  }, [])
   useLayoutEffect(() => { routeRef.current = route }, [route])
   const navigate = useCallback((next: Route) => {
     const previous = routeRef.current
@@ -141,6 +147,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
       albumRead.current += 1
       activeAlbumId.current = null
       pending.current = false
+      cancelMonthSummary()
       paging.current = false
       scopeController.abort()
       albumOpenState.clear()
@@ -155,7 +162,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
     }
     setConflict(reason instanceof ApiRequestError && reason.status === 409)
     setError(reason instanceof ApiRequestError && reason.status === 409 ? 'Альбом уже изменили. Обновите данные перед новым действием.' : 'Не удалось загрузить альбомы. Проверьте соединение и повторите.')
-  }, [albumOpenState, scopeController, props])
+  }, [albumOpenState, cancelMonthSummary, scopeController, props])
   useLayoutEffect(() => { scopeFailureSink.setHandler(fail) }, [scopeFailureSink, fail])
   useEffect(() => {
     if (album) return
@@ -227,16 +234,17 @@ export function AlbumsPage(props: AlbumsPageProps) {
     if (route === 'free-add' || route === 'stories') { navigate('album'); return }
     if (route === 'edit-entry') { navigate(entry ? 'entry' : 'album'); return }
     if (route === 'month-cover' || route === 'month-photo-remove') { navigate('entry'); return }
-    if (route === 'entry') { navigate(entryReturn.current); return }
+    if (route === 'entry') { cancelMonthSummary(); navigate(entryReturn.current); return }
     if (route === 'overview' || route === 'edit-album' || route === 'cover') { navigate('album'); return }
     if (route === 'album') { activeAlbumId.current = null; albumRead.current += 1; setLoading(true); setError(null); setAlbum(null); setEntry(null); setCategory(undefined); setYear(undefined); setWorkshopFocusId(null); navigate('catalog'); return }
     if (route === 'create') { navigate('catalog'); return }
     props.onFeed()
-  }, [deleteConfirmation, upload, route, entry, navigate, props])
+  }, [deleteConfirmation, upload, route, entry, cancelMonthSummary, navigate, props])
   useLayoutEffect(() => { backRef.current = back }, [back])
   useEffect(() => { if (active) return hostBridge.onBack(() => backRef.current()) }, [active, hostBridge])
   async function openAlbum(item: AlbumDto, refreshMetadata = true) {
     if (pending.current) return
+    cancelMonthSummary()
     const recent = albumOpenState.peek(item)
     activeAlbumId.current = item.id; const generation = ++albumRead.current; setLoading(true); setWorkshopLevel(1); setWorkshopFocusId(null); setWorkshopFocusTop(null)
     // The same album may be selected again from the feed while this tab is still mounted.
@@ -277,20 +285,55 @@ export function AlbumsPage(props: AlbumsPageProps) {
     if (active && requestedAlbumId) openRequestedAlbum(requestedAlbumId)
   }, [active, requestedAlbumId, requestedAlbumNonce])
   async function openEntry(item: AlbumEntryDto, trigger?: HTMLElement) {
-    if (!album || pending.current) return
-    pending.current = true; setBusy(true); setError(null)
-    try {
-      const result = await api.entry(album.id, item.id, album.kind === 'year')
-      if (scopeController.isAborted() || activeAlbumId.current !== album.id) return
-      setEntry(result.entry); setAlbum((current) => current ? { ...current, version: result.entry.aggregateVersion } : current)
+    if (!album || pending.current || monthSummaryRead.current) return
+    const summary = item.month ? Symbol() : null
+    if (summary) {
+      monthSummaryRead.current = summary
+      setLoadingMonthSummary(true)
+    } else {
+      pending.current = true
+      setBusy(true)
+    }
+    setError(null)
+    const generation = albumRead.current
+    const isCurrent = () => !scopeController.isAborted() && activeAlbumId.current === album.id && albumRead.current === generation &&
+      (!summary || monthSummaryRead.current === summary)
+    const showEntry = (detail: AlbumEntryDto) => {
+      setEntry(detail)
       if (album.kind === 'workshop' && trigger?.dataset.albumTile) { setWorkshopFocusId(trigger.dataset.albumTile); setWorkshopFocusTop(trigger.getBoundingClientRect().top) }
       // Workshop tiles are virtualized. Restore them by logical ID after the
       // gallery has measured and remounted the tile, never by an old node ref.
       if (trigger && album.kind !== 'workshop') focus.current[route] = trigger
       entryReturn.current = route === 'stories' ? 'stories' : route === 'overview' ? 'overview' : 'album'
       scrolls.current.entry = 0; navigate('entry')
-    } catch (reason) { fail(reason) }
-    finally { pending.current = false; if (!scopeController.isAborted()) setBusy(false) }
+    }
+    // The timeline already has the authenticated month summary. Start the
+    // gallery without making its photo request wait for a second summary read.
+    if (summary) showEntry(item)
+    try {
+      const result = await api.entry(album.id, item.id, album.kind === 'year')
+      if (!isCurrent()) return
+      if (summary) {
+        setEntry(result.entry)
+        setEntries((items) => items.map((entry) => entry.id === result.entry.id ? result.entry : entry))
+      } else showEntry(result.entry)
+      setAlbum((current) => current ? { ...current, version: result.entry.aggregateVersion } : current)
+    } catch (reason) {
+      if (!isCurrent()) return
+      if (summary) {
+        if (reason instanceof ApiRequestError && reason.status === 404) albumOpenState.invalidate(album.id)
+        if (routeRef.current === 'entry') { setEntry(null); navigate(entryReturn.current) }
+      }
+      fail(reason)
+    }
+    finally {
+      if (summary) {
+        if (monthSummaryRead.current === summary) cancelMonthSummary()
+      } else {
+        pending.current = false
+        if (!scopeController.isAborted()) setBusy(false)
+      }
+    }
   }
   async function more() {
     if (paging.current || loading || conflict) return
@@ -461,7 +504,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
           <div ref={sentinel} />{!(album.kind === 'free' && route === 'album') && entryCursor && !loading ? <button className="albums-secondary" disabled={loadingMore || conflict} onClick={() => void more()} type="button">{loadingMore ? 'Загружаем…' : 'Ещё истории'}</button> : null}
         </> : null}
         {album && (route === 'edit-entry' || route === 'free-add') ? <EntryEditor photosOnly={route === 'free-add'} accountId={accountId} album={album} api={api} canUpload={role === 'full' && album.capabilities.edit} entry={entry} key={`${album.id}:${entry?.id ?? 'new'}:${suggestedTitle}`} onCancel={back} onSaved={saved} onUpload={(attach, attachPhotos, complete, completeBatch) => setUpload({ attach, attachPhotos, complete, completeBatch })} scopeKey={scopeKey} timezone={props.timezone} title={suggestedTitle} transport={transport} /> : null}
-        {active && album && (entry?.month || entry?.collection) && route === 'entry' ? <MonthEntryDetail accountId={accountId} albumId={album.id} api={api} busy={busy} childName={albumChild?.name ?? props.familyName} entry={entry} familyId={familyId} hostBridge={hostBridge} key={[scopeKey, entry.id, entry.version, monthRevision].join(':')} membershipEpoch={membershipEpoch} onAdd={() => { photoAddReturn.current = 'entry'; navigate('month-add') }} onBack={back} onClear={askRemoveEntry} onCover={() => navigate('month-cover')} onDiscussionInvalidated={discussionInvalidated} onEdit={() => navigate('edit-entry')} onRefresh={refreshMonth} onRemovePhoto={() => navigate('month-photo-remove')} onViewerOpenChange={onMonthViewerOpenChange} scopeKey={scopeKey} timezone={props.timezone} transport={transport} /> : null}
+        {active && album && (entry?.month || entry?.collection) && route === 'entry' ? <MonthEntryDetail accountId={accountId} albumId={album.id} albumOpenState={albumOpenState} api={api} busy={busy} childName={albumChild?.name ?? props.familyName} entry={entry} familyId={familyId} hostBridge={hostBridge} key={[scopeKey, entry.id, entry.version, monthRevision].join(':')} membershipEpoch={membershipEpoch} onAdd={() => { photoAddReturn.current = 'entry'; navigate('month-add') }} onBack={back} loadingSummary={loadingMonthSummary} onClear={askRemoveEntry} onCover={() => navigate('month-cover')} onDiscussionInvalidated={discussionInvalidated} onEdit={() => navigate('edit-entry')} onRefresh={refreshMonth} onRemovePhoto={() => navigate('month-photo-remove')} onViewerOpenChange={onMonthViewerOpenChange} scopeKey={scopeKey} timezone={props.timezone} transport={transport} /> : null}
         {active && album && (entry?.month || entry?.collection) && (route === 'month-cover' || route === 'month-photo-remove') ? <MonthCoverPicker accountId={accountId} albumId={album.id} api={api} busy={busy} conflict={conflict} entry={entry} key={[scopeKey, entry.id, entry.version, monthRevision].join(':')} onCancel={back} onRefresh={refreshMonth} onSave={monthPhotoAction} remove={route === 'month-photo-remove'} scopeKey={scopeKey} transport={transport} /> : null}
         {active && album && (entry?.month || entry?.collection) && route === 'month-add' ? <MonthAddPhotos accountId={accountId} albumId={album.id} api={api} entry={entry} familyId={familyId} hostBridge={hostBridge} onChanged={refreshMonth} onClose={() => navigate(photoAddReturn.current)} scopeKey={scopeKey} transport={transport} /> : null}
         {active && album && route === 'entry' && entry && !entry.month && !entry.collection ? <AlbumEntryDetail albumId={album.id} onDiscussionInvalidated={discussionInvalidated} accountId={accountId} active busy={busy} childName={albumChild?.name ?? props.familyName} entry={entry} familyId={familyId} hostBridge={hostBridge} membershipEpoch={membershipEpoch} onBack={back} onEdit={() => navigate('edit-entry')} onRemove={askRemoveEntry} loadSources={(entryId, cursor, signal) => api.monthSources(album.id, entryId, 'all', cursor, signal)} scopeKey={scopeKey} timezone={props.timezone} transport={transport} /> : null}

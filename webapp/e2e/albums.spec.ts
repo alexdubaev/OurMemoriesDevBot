@@ -1192,6 +1192,37 @@ test('album new upload opens photos directly and central Add keeps its chooser',
   await expect(page.locator('[data-navigation-surface="family"]')).toBeVisible()
 })
 
+test('recent album pages remain visible while their refresh is pending after a pause', async ({ page }) => {
+  await openSynthetic(page, 'albums=6&monthPhotos=8')
+  const firstYear = page.getByRole('button', { name: 'Первый год Алисы' })
+  const month = page.getByRole('button', { name: 'Нам 1 месяц', exact: true })
+  const monthPhoto = page.getByRole('button', { name: 'Открыть фото 2', exact: true })
+  await firstYear.click()
+  await month.click()
+  await expect(monthPhoto).toBeVisible()
+  await page.getByRole('button', { name: '‹ Назад', exact: true }).click()
+  await page.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
+  await expect(firstYear).toBeVisible()
+
+  await page.clock.setFixedTime(new Date(Date.now() + 45_000))
+  await page.evaluate(() => (window as unknown as { __albumsHoldPageReads: () => void }).__albumsHoldPageReads())
+  try {
+    await firstYear.click()
+    await expect(month).toBeVisible({ timeout: 2000 })
+    await month.click()
+    await expect(monthPhoto).toBeVisible({ timeout: 2000 })
+    await expect(page.getByText('Загружаем фотографии…', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '‹ Назад', exact: true }).click()
+    await expect(month).toBeVisible({ timeout: 2000 })
+    await month.click()
+    await expect(monthPhoto).toBeVisible({ timeout: 2000 })
+  } finally {
+    await page.evaluate(() => (window as unknown as { __albumsReleasePageReads: () => void }).__albumsReleasePageReads())
+  }
+  await expect(page.getByText('Загружаем фотографии…', { exact: true })).toBeHidden()
+  await expect(monthPhoto).toBeVisible()
+})
+
 test('a large month keeps bounded tiles and navigates the photo window past a page boundary', async ({ page }) => {
   await openSynthetic(page, 'albums=24&monthPhotos=2000')
   await page.getByRole('button', { name: 'Первый год Алисы' }).click()

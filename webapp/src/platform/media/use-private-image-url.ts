@@ -199,31 +199,12 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       }
       if (!isCurrent()) return
       const response = await transport.raw(path, { signal: controller.signal, headers: { 'X-Private-Media-Purpose': 'image' } })
-      const blob = await response.clone().blob()
       if (!isCurrent()) return
-      const candidateUrl = URL.createObjectURL(blob)
-      ownUrl(candidateUrl)
-      let idleBytes: number | undefined
-      try {
-        const image = new Image()
-        image.src = candidateUrl
-        await image.decode()
-        if (idleKey) idleBytes = blob.size + image.naturalWidth * image.naturalHeight * 4
-      } catch (error) {
-        releaseUrl(candidateUrl)
-        throw error
-      }
-      if (!isCurrent()) {
-        releaseUrl(candidateUrl)
-        return
-      }
-      const keepWarmUrl = readyUrlAlreadyShown || cachedWasShown || hasPriorReadyUrl()
-      if (!keepWarmUrl) {
-        setLoaded({ userId, path, url: candidateUrl, identityGeneration, scopeKey, idleBytes, ...(requestFamilyId ? { familyId: requestFamilyId, familyGeneration } : {}) })
-      } else {
-        // Keep a warm URL stable while refreshing the persistent Blob. The fullscreen viewer can
-        // borrow this URL, so replacing it here could revoke a URL still used by that viewer.
-        releaseUrl(candidateUrl)
+      // A viewer may already be using the ready URL. Refresh the stored bytes
+      // without making another decoded URL that the UI would immediately discard.
+      if (!readyUrlAlreadyShown && !cachedWasShown && !hasPriorReadyUrl()) {
+        const blob = await response.clone().blob()
+        if (!isCurrent() || !await showBlob(blob)) return
       }
       if (eligiblePrivateImage(path)) await cachePrivateImageResponse(userId, path, response, identityGeneration, familyGeneration).catch(() => false)
       if (!isCurrent()) return
