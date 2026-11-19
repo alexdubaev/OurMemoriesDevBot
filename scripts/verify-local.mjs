@@ -26,6 +26,7 @@ const REVIEWED_FULL_PATHS = new Set([
   'webapp/e2e/album-social.playwright.config.ts',
   'webapp/e2e/telegram-auth-only.playwright.config.ts',
   'webapp/e2e/fixtures/albums.ts',
+  'webapp/e2e/selected-family-app.harness.tsx',
 ])
 
 function isFastSafe(path) {
@@ -119,7 +120,18 @@ function validateFrontendModes(base) {
   }
 }
 
-function frontendPlan(paths, base, journeys, journeyGreps, repositoryRoot = process.cwd()) {
+const CAROUSEL_JOURNEYS = ['fixed-carousel', 'fullscreen-swipe'].map((name) => [
+  `Browser journey webapp/e2e/${name}.spec.ts`,
+  ['bun', ['run', '--cwd', 'webapp', 'e2e', `--config=e2e/${name}.playwright.config.ts`, `e2e/${name}.spec.ts`]],
+])
+const CAROUSEL_RENDERING_PATHS = new Set([
+  'webapp/src/features/feed/FeedPage.tsx',
+  'webapp/src/features/feed/presentation/astryx-feed.css',
+  'webapp/src/features/feed/presentation/memoly-feed.css',
+  'webapp/src/production.css',
+])
+
+export function frontendPlan(paths, base, journeys, journeyGreps, repositoryRoot = process.cwd()) {
   const commands = [
     ['Committed frontend diff whitespace validation', ['git', ['diff', '--check', base, 'HEAD', '--']]],
     ['Working tree whitespace validation', ['git', ['diff', '--check', 'HEAD', '--']]],
@@ -129,7 +141,10 @@ function frontendPlan(paths, base, journeys, journeyGreps, repositoryRoot = proc
   ]
   const tests = relatedWebappTests(paths, repositoryRoot)
   if (tests.length) commands.push(['Related web app unit tests', ['bun', ['test', ...tests]]])
+  const carouselJourneys = paths.some((path) => CAROUSEL_RENDERING_PATHS.has(path)) ? CAROUSEL_JOURNEYS : []
+  commands.push(...carouselJourneys)
   for (const [index, journey] of journeys.entries()) {
+    if (carouselJourneys.some(([name]) => name === `Browser journey ${journey}`)) continue
     const dedicatedConfig = journey.replace(/\.spec\.ts$/, '.playwright.config.ts')
     const config = existsSync(resolve(repositoryRoot, dedicatedConfig)) ? dedicatedConfig : 'webapp/playwright.max.config.ts'
     const args = ['run', '--cwd', 'webapp', 'e2e', `--config=${config.replace(/^webapp\//, '')}`, journey.replace(/^webapp\//, '')]
@@ -386,7 +401,7 @@ export function planFor(profile, paths = [], base = 'refs/remotes/origin/main', 
       const python = process.platform === 'win32' ? 'python' : 'python3'
       full.splice(full.length - 1, 0, ['Control host-sampler Python tests', [python, ['-B', '-m', 'unittest', 'discover', '-s', 'deploy/selectel/control', '-p', '*test*.py']]])
     }
-    return dedupeCommands([...full, ...browserJourneys])
+    return dedupeCommands([...full, ...CAROUSEL_JOURNEYS, ...browserJourneys])
   }
   if (commands.length === 1) throw new Error(`No mandatory STANDARD checks mapped for changed paths: ${paths.join(', ') || '(none)'}`)
   return dedupeCommands(commands)
@@ -410,7 +425,8 @@ function relatedBackendTests(paths, repositoryRoot) {
 }
 
 const MAX_BROWSER_SPECS = new Set([
-  'max-browser-link.spec.ts', 'albums.spec.ts', 'children.spec.ts', 'gifts.spec.ts',
+  'max-browser-link.spec.ts', 'max-closing-confirmation.spec.ts', 'pwa-screen-watch.spec.ts',
+  'albums.spec.ts', 'children.spec.ts', 'gifts.spec.ts',
   'comments.spec.ts', 'comments-state.spec.ts', 'memoly-v4.spec.ts', 'voice-player.spec.ts',
   'video-lifecycle.spec.ts', 'shared-author-avatar.spec.ts',
 ])

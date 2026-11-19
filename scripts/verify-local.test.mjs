@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bashExecutable, gitBashPath } from '../tests/bash-runtime.mjs'
-import { classifyChanges, executePlan, planFor, selectProfile, validateFrontendScope } from './verify-local.mjs'
+import { classifyChanges, executePlan, frontendPlan, planFor, selectProfile, validateFrontendScope } from './verify-local.mjs'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const frontendScopeCli = resolve(repositoryRoot, 'deploy/selectel/frontend-scope.sh')
@@ -275,13 +275,15 @@ describe('risk based verification', () => {
 
   test('reviewed exact metadata and album browser infrastructure require FULL without accepting adjacent unknown files', () => {
     const paths = ['.autopilot/2026-10-23-wishlist/state.js', '.autopilot/dashboard.html', '.autopilot/state.js',
-      'assets/manifest.json', 'webapp/e2e/album-social.playwright.config.ts', 'webapp/e2e/fixtures/albums.ts']
+      'assets/manifest.json', 'webapp/e2e/album-social.playwright.config.ts', 'webapp/e2e/fixtures/albums.ts',
+      'webapp/e2e/selected-family-app.harness.tsx']
     for (const path of paths) {
       expect(classifyChanges([path])).toBe('full')
       expect(() => selectProfile({ paths: [path], requested: 'standard' })).toThrow('Profile downgrade refused')
     }
     for (const path of ['.autopilot/another-task/state.js', '.autopilot/new-dashboard.html', '.autopilot/state-other.js',
-      'assets/other-manifest.json', 'webapp/e2e/new-journey.playwright.config.ts', 'webapp/e2e/fixtures/new-albums.ts']) {
+      'assets/other-manifest.json', 'webapp/e2e/new-journey.playwright.config.ts', 'webapp/e2e/fixtures/new-albums.ts',
+      'webapp/e2e/other-family-app.harness.tsx']) {
       expect(classifyChanges([path])).toBe('review-required')
       expect(() => selectProfile({ paths: [...paths, path], requested: 'full' })).toThrow('REVIEW_REQUIRED')
     }
@@ -377,6 +379,18 @@ describe('risk based verification', () => {
     expect(commands.find(([name]) => name === 'Browser journey webapp/e2e/max-family-audit.max-e2e.ts')?.[1][1]).toEqual([
       'run', '--cwd', 'webapp', 'e2e', '--config=e2e/max-family-audit.playwright.config.ts', 'e2e/max-family-audit.max-e2e.ts',
     ])
+  })
+
+  test('FULL and carousel rendering changes run both complete carousel journeys once', () => {
+    const requested = 'webapp/e2e/fullscreen-swipe.spec.ts'
+    const full = planFor('full', [requested])
+    const frontend = frontendPlan(['webapp/src/features/feed/presentation/memoly-feed.css'], 'base', [requested], ['one test'])
+    const expected = ['fixed-carousel', 'fullscreen-swipe'].map((name) => [
+      'run', '--cwd', 'webapp', 'e2e', `--config=e2e/${name}.playwright.config.ts`, `e2e/${name}.spec.ts`,
+    ])
+    for (const plan of [full, frontend]) {
+      expect(plan.filter(([name]) => /fixed-carousel|fullscreen-swipe/.test(name)).map(([, [, args]]) => args)).toEqual(expected)
+    }
   })
 
   test('FAST builds production UI when CSS changes but docs-only checks stay lightweight', () => {
