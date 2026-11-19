@@ -1,6 +1,8 @@
-import type { Ref } from 'react'
+import { useContext, type Ref } from 'react'
 
 import { Typography } from '@/components/typography'
+import { WebpIcon, type WebpIconName } from '@/components/WebpIcon'
+import { UiVersionContext } from '@/features/ui-version'
 
 import './BottomNavigation.css'
 
@@ -27,6 +29,8 @@ export function BottomNavigation({
   onGifts,
   role,
 }: BottomNavigationProps) {
+  const showIcons = useContext(UiVersionContext) === 'v2'
+
   return (
     <nav
       aria-label="Основная навигация"
@@ -37,8 +41,8 @@ export function BottomNavigation({
     >
       <Typography aria-hidden="true" as="span" className="astryx-nav-brand" variant="memoryScreen">memoLy</Typography>
       <div className="astryx-nav-list">
-        <NavButton active={active === 'feed'} label="Лента" onClick={onFeed} position="home" />
-        <NavButton active={active === 'albums'} label="Альбомы" onClick={onAlbums} position="archive-box" />
+        <NavButton active={active === 'feed'} icon={showIcons ? 'home' : undefined} label="Лента" onClick={onFeed} position="home" />
+        <NavButton active={active === 'albums'} icon={showIcons ? 'archive-box' : undefined} label="Альбомы" onClick={onAlbums} position="archive-box" />
         {role === 'full' ? (
           <button
             aria-label="Добавить"
@@ -50,7 +54,9 @@ export function BottomNavigation({
             ref={addButtonRef}
             type="button"
           >
-            <Typography aria-hidden="true" as="span" className="astryx-nav-plus" variant="memoryNav">+</Typography>
+            {showIcons
+              ? <span aria-hidden="true" className="astryx-nav-plus"><WebpIcon decorative name="plus" size={20} /></span>
+              : <Typography aria-hidden="true" as="span" className="astryx-nav-plus" variant="memoryNav">+</Typography>}
             <Typography as="span" variant="memoryNav">Добавить</Typography>
           </button>
         ) : (
@@ -61,18 +67,20 @@ export function BottomNavigation({
             data-nav-viewer="true"
             role="img"
           >
+            {showIcons ? <WebpIcon decorative name="lock" size={20} /> : null}
             <Typography as="span" variant="memoryNav">Просмотр</Typography>
           </div>
         )}
-        <NavButton active={active === 'gifts'} label="Вишлист" onClick={onGifts} position="gifts" />
-        <NavButton active={active === 'family'} label="Семья" onClick={onFamily} position="family" />
+        <NavButton active={active === 'gifts'} icon={showIcons ? 'gift' : undefined} label="Вишлист" onClick={onGifts} position="gifts" />
+        <NavButton active={active === 'family'} icon={showIcons ? 'family' : undefined} label="Семья" onClick={onFamily} position="family" />
       </div>
     </nav>
   )
 }
 
-function NavButton({ active, label, onClick, position }: {
+function NavButton({ active, icon, label, onClick, position }: {
   active: boolean
+  icon?: WebpIconName
   label: string
   onClick?: () => void
   position: string
@@ -86,6 +94,7 @@ function NavButton({ active, label, onClick, position }: {
       onClick={onClick}
       type="button"
     >
+      {icon ? <WebpIcon decorative name={icon} size={20} /> : null}
       <Typography as="span" variant="memoryNav">{label}</Typography>
     </button>
   )

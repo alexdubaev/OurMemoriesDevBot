@@ -67,9 +67,6 @@ body:has(.albums-composer-host)>[data-slot='drawer-overlay']{z-index:70}body:has
   background: var(--astryx-surface);
   box-shadow: none;
 }
-.albums-watercolor-art{display:block;object-fit:contain;flex-shrink:0;mix-blend-mode:multiply;pointer-events:none;user-select:none}
-.albums-intro-art{width:56px;height:52px}
-.albums-intro-sprig{width:40px;height:42px;opacity:.8}
 .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-year-copy{flex:1 1 0;gap:4px;min-width:0}
 .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-year-copy>.albums-intro-caption{font-size:.85rem;font-weight:550;line-height:1.35;margin:0;color:var(--albums-ink)}
 .albums-year-copy>small,.albums-year-progress>small{font-size:.66rem;line-height:1.35;color:var(--albums-muted)}
@@ -86,8 +83,6 @@ body:has(.albums-composer-host)>[data-slot='drawer-overlay']{z-index:70}body:has
 .albums-surface[data-albums-route=album][data-albums-kind=workshop] .albums-workshop-zoom>div{flex-shrink:0;border-radius:18px}
 .albums-surface[data-albums-route=album][data-albums-kind=workshop] .albums-workshop-zoom output{min-width:64px;font-size:.65rem}
 .albums-surface[data-albums-route=album][data-albums-kind=workshop] .albums-workshop-heading{font-size:.82rem!important;font-weight:650;color:var(--albums-accent);height:42px}
-.albums-surface[data-albums-route=album][data-albums-kind=workshop] .albums-workshop-heading:has(.albums-gallery-bear):after{margin-right:80px}
-.albums-gallery-bear{position:absolute;right:0;bottom:1px;width:78px;height:46px;z-index:2}
 .albums-surface[data-albums-route=album][data-albums-kind=workshop] .albums-workshop-tile,.albums-surface[data-albums-route=album][data-albums-kind=workshop] .albums-workshop-tile>.albums-preview{border:0;border-radius:0;box-shadow:none}
 .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-year-modes{margin:0 0 10px}
 .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-year-timeline{margin:0}
@@ -110,10 +105,7 @@ body:has(.albums-composer-host)>[data-slot='drawer-overlay']{z-index:70}body:has
 .albums-surface[data-albums-route=album][data-albums-kind=free] .albums-free-grid{margin:14px 0 0;gap:14px 10px}
 .albums-surface[data-albums-route=album][data-albums-kind=free] .albums-entry-image{border:2px solid #fffaf4;border-radius:12px;box-shadow:0 2px 7px #80684412}
 .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-empty{padding:22px 10px}
-.albums-watercolor-footer{position:relative;display:flex;align-items:flex-end;justify-content:flex-end;gap:12px;min-height:104px;margin:18px 0 -12px;padding:0 6px 2px;background:linear-gradient(0deg,#e4ecd766,transparent 80%);isolation:isolate}
-.albums-watercolor-footer:before{content:'';position:absolute;inset:0;z-index:-1;background:url('/assets/albums/watercolor-hero-hills.v1.webp') center 75%/cover no-repeat;mix-blend-mode:multiply;opacity:.45;border-radius:40% 45% 0 0}
-.albums-footer-rabbit{width:103px;height:90px}.albums-footer-sprig{width:38px;height:36px;margin-right:auto;margin-bottom:8px;opacity:.75}
-@media(max-width:349px){.albums-internal-toolbar>h1{font-size:.95rem}.albums-internal-toolbar>button{min-width:60px;font-size:.65rem}.albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-intro{gap:8px;padding:8px 9px}.albums-intro-art{width:45px;height:46px}.albums-compact-add{min-width:48px}.albums-intro-sprig{width:30px}}
+@media(max-width:349px){.albums-internal-toolbar>h1{font-size:.95rem}.albums-internal-toolbar>button{min-width:60px;font-size:.65rem}.albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-intro{gap:8px;padding:8px 9px}.albums-compact-add{min-width:48px}}
 /* Match the app's control typography specificity without changing its global skin. */
 .memoly-app-root[data-ui-version='v2'] .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-compact-add{width:56px;font-family:inherit;font-size:.68rem;font-weight:550;line-height:1.35;color:var(--albums-accent)}
 .memoly-app-root[data-ui-version='v2'] .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-internal-toolbar>button{font-family:inherit;font-size:.7rem;line-height:1.4;color:var(--albums-accent)}
@@ -132,7 +124,6 @@ body:has(.albums-composer-host)>[data-slot='drawer-overlay']{z-index:70}body:has
   .albums-internal-toolbar>h1{grid-column:1/-1;grid-row:2;text-align:left;font-size:1.05rem;padding:2px 0 8px;word-break:normal}
   .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-intro{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:start;gap:8px 12px}
   .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-year-copy{grid-column:2;grid-row:1}
-  .albums-intro-art{width:44px;height:44px}.albums-intro-sprig{display:none}
   .albums-surface:is([data-albums-route=album],[data-albums-route=overview]) .albums-year-cover{width:44px;height:44px}
   .albums-compact-add{grid-column:2;justify-self:start;flex-direction:row;gap:6px}
   .albums-surface[data-albums-route=album][data-albums-kind=workshop] .albums-workshop-zoom{flex-wrap:wrap;gap:2px}
