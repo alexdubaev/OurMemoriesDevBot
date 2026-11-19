@@ -162,7 +162,7 @@ export function FeedPage({
   const [reactionPickerRequest, setReactionPickerRequest] = useState<{ memoryId: string; revision: number }>({ memoryId: '', revision: 0 })
   const [mixedViewer, setMixedViewer] = useState<{ memory: MemoryDto; index: number; photoUrl?: string } | null>(null)
   const mixedIndexes = useRef(new Map<string, number>())
-  const [, setMixedIndexRevision] = useState(0)
+  const viewedSlideIndex = useRef<number | null>(null)
   const mixedPhotoUrls = useRef(new Map<string, string>())
   const detailReturnFocusRef = useRef<HTMLElement | null>(null)
   const [addSheetOpen, setAddSheetOpen] = useState(openAddInitially && role === 'full')
@@ -336,11 +336,20 @@ export function FeedPage({
     setTagsMemory(null)
     setDetail(null)
     setMixedViewer(null)
+    viewedSlideIndex.current = null
     setActionsMemory(null)
     setDeleteTarget(null)
     setDeleteTargetIndex(null)
     setDeleteError(null)
   }, [active])
+
+  const closeMixedViewer = () => {
+    if (currentMixedViewer && viewedSlideIndex.current !== null) {
+      mixedIndexes.current.set(currentMixedViewer.memory.id, viewedSlideIndex.current)
+    }
+    viewedSlideIndex.current = null
+    setMixedViewer(null)
+  }
 
   useEffect(() => {
     if (!active) return
@@ -474,7 +483,7 @@ export function FeedPage({
         ? <div className="feed-unread-restart" role="status"><Typography as="p" variant="memoryMeta">Список изменился. Обновите непросмотренные, чтобы продолжить.</Typography><Button onClick={() => { window.scrollTo({ top: 0, behavior: 'instant' }); setUnreadCycle((value) => value + 1) }} type="button">Обновить список</Button></div>
         : <InlineError nextPage onRetry={() => void feed.fetchNextPage()} /> : null}
       {active && currentDetail ? <MemoryDetail familyTimezone={familyTimezone} hostBridge={hostBridge} memory={currentDetail} onClose={() => setDetail(null)} onOpenPhoto={(index, trigger, photoUrl) => { detailReturnFocusRef.current = trigger; setMixedViewer({ memory: currentDetail, index, photoUrl }) }} registerSeenContent={currentDetail.author.id !== accountId ? registerSeenContent : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
-      {active && currentMixedViewer ? <MixedMediaViewer childAvatarCrop={currentMixedViewer.memory.childId === childId ? childAvatarCrop : null} childAvatarStatus={currentMixedViewer.memory.childId === childId ? displayedChildAvatarStatus : 'absent'} childAvatarUrl={currentMixedViewer.memory.childId === childId ? displayedChildAvatarUrl : null} childName={childName} familyTimezone={familyTimezone} hostBridge={hostBridge} index={currentMixedViewer.index} initialPhotoUrl={currentMixedViewer.photoUrl} memory={currentMixedViewer.memory} onClose={() => setMixedViewer(null)} onIndexChange={(index) => { mixedIndexes.current.set(currentMixedViewer.memory.id, index); detailReturnFocusRef.current = document.querySelector<HTMLElement>(`[data-carousel-memory="${currentMixedViewer.memory.id}"] [data-carousel-position="${index + 1}"] button`); setMixedIndexRevision((value) => value + 1) }} registerSeenContent={currentMixedViewer.memory.author.id !== accountId ? registerSeenContent(currentMixedViewer.memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
+      {active && currentMixedViewer ? <MixedMediaViewer childAvatarCrop={currentMixedViewer.memory.childId === childId ? childAvatarCrop : null} childAvatarStatus={currentMixedViewer.memory.childId === childId ? displayedChildAvatarStatus : 'absent'} childAvatarUrl={currentMixedViewer.memory.childId === childId ? displayedChildAvatarUrl : null} childName={childName} familyTimezone={familyTimezone} hostBridge={hostBridge} index={currentMixedViewer.index} initialPhotoUrl={currentMixedViewer.photoUrl} memory={currentMixedViewer.memory} onClose={closeMixedViewer} onIndexChange={(index) => { viewedSlideIndex.current = index }} registerSeenContent={currentMixedViewer.memory.author.id !== accountId ? registerSeenContent(currentMixedViewer.memory.id, 'fullscreen') : undefined} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
       {active && tagsMemory && canEditChildTags(role, childList, tagsMemory) ? <MemoryChildTagsEditor accountId={accountId} childOptions={childList} key={tagsMemory.id} memory={tagsMemory} onClose={() => setTagsMemory(null)} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
       {commentsOpen && currentCommentsSelection ? <CommentsPanel familyTimezone={familyTimezone} hostBridge={hostBridge} onClose={() => setCommentsSelection(null)} open scope={currentCommentsSelection} transport={transport} returnFocusRef={detailReturnFocusRef} hostInsets={insets} /> : null}
     </FeedPresentation>
@@ -583,9 +592,9 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
   const pointerGesture = useRef<{ pointerId: number; x: number; y: number; moved: boolean } | null>(null)
   const latestIndex = useRef(startIndex)
   useEffect(() => { reportInitialIndex() }, [startIndex])
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!embla || embla.selectedScrollSnap() === initialIndex) return
-    embla.scrollTo(Math.max(0, Math.min(initialIndex, memory.attachments.length - 1)))
+    embla.scrollTo(Math.max(0, Math.min(initialIndex, memory.attachments.length - 1)), true)
   }, [embla, initialIndex, memory.attachments.length])
   useLayoutEffect(() => {
     const target = root.current?.querySelector<HTMLElement>(`[data-carousel-position="${index + 1}"] button`)
