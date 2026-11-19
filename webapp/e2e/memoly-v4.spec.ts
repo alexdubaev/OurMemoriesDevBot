@@ -617,6 +617,94 @@ test('feed and family navigation expose working controls', async ({ page }) => {
   await expect(page.locator('.family-invite-btn')).toBeVisible()
 })
 
+test('feed photo and free album retain their visual anchors through app navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/e2e/selected-family-app.harness.html?albums=6&feedPhotos')
+  await startProductionFeed(page)
+
+  const nav = page.getByRole('navigation', { name: 'Основная навигация' })
+  const feed = page.locator('[data-navigation-surface="feed"]')
+  const card = feed.locator('article[data-memory-id]').filter({ hasText: 'Синтетическая работа 2' })
+  const photo = card.getByRole('button', { name: 'Открыть фото', exact: true }).locator('img')
+  const imageReady = (image: HTMLImageElement) => image.complete && image.naturalWidth > 0
+  await photo.scrollIntoViewIfNeeded()
+  await expect.poll(() => photo.evaluate(imageReady)).toBe(true)
+  const anchorTop = await photo.evaluate((image) => image.getBoundingClientRect().top)
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+  const memoryId = await card.getAttribute('data-memory-id')
+  expect(memoryId).toBeTruthy()
+
+  await nav.getByRole('button', { name: 'Семья', exact: true }).click()
+  await page.locator('[data-navigation-surface="family"]').getByRole('button', { name: 'Настройки', exact: true }).click()
+  await expect(page.locator('.ml-settings-sheet[data-view="menu"]')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.ml-settings-sheet[data-view="menu"]')).toBeHidden()
+  await nav.getByRole('button', { name: 'Альбомы', exact: true }).click()
+
+  type AlbumFixtureWindow = Window & { __albumsHoldPageReads: () => void; __albumsReleasePageReads: () => void }
+  const albums = page.locator('[data-navigation-surface="albums"]')
+  const album = albums.getByRole('button', { name: /У бабушки/ })
+  const gallery = albums.getByRole('group', { name: 'Фотографии альбома', exact: true })
+  const first = gallery.getByRole('button', { name: 'Открыть фото 1', exact: true }).locator('img')
+  const second = gallery.getByRole('button', { name: 'Открыть фото 2', exact: true }).locator('img')
+  await album.waitFor({ state: 'visible' })
+  await page.evaluate(() => (window as unknown as AlbumFixtureWindow).__albumsHoldPageReads())
+  let pending: Awaited<ReturnType<typeof first.boundingBox>>
+  try {
+    await album.click()
+    const placeholder = albums.getByRole('status', { name: 'Загружаем фотографии…', exact: true })
+    await expect(placeholder).toBeVisible()
+    pending = await placeholder.boundingBox()
+    expect(pending?.height).toBeGreaterThan(0)
+  } finally {
+    await page.evaluate(() => (window as unknown as AlbumFixtureWindow).__albumsReleasePageReads())
+  }
+
+  await expect.poll(() => first.evaluate(imageReady)).toBe(true)
+  await expect.poll(() => second.evaluate(imageReady)).toBe(true)
+  const loaded = await first.boundingBox()
+  expect(loaded).not.toBeNull()
+  expect(Math.abs(loaded!.y - pending!.y)).toBeLessThanOrEqual(2)
+  expect(Math.abs(loaded!.height - pending!.height)).toBeLessThanOrEqual(2)
+
+  await albums.getByRole('button', { name: '‹ Альбомы', exact: true }).click()
+  await album.waitFor({ state: 'visible' })
+  await page.evaluate(() => (window as unknown as AlbumFixtureWindow).__albumsHoldPageReads())
+  try {
+    await album.click()
+    await expect.poll(() => first.evaluate(imageReady)).toBe(true)
+    await expect.poll(() => second.evaluate(imageReady)).toBe(true)
+  } finally {
+    await page.evaluate(() => (window as unknown as AlbumFixtureWindow).__albumsReleasePageReads())
+  }
+
+  const returned = await page.evaluateHandle((id) => {
+    const state: { frame: { ready: boolean; top: number | null } | null } = { frame: null }
+    const sample = () => {
+      const surface = document.querySelector<HTMLElement>('[data-navigation-surface="feed"]')
+      if (!surface || surface.hidden) {
+        requestAnimationFrame(sample)
+        return
+      }
+      const image = surface.querySelector<HTMLImageElement>(`article[data-memory-id="${id}"] button[aria-label="Открыть фото"] img`)
+      const bounds = image?.getBoundingClientRect()
+      state.frame = { ready: Boolean(image?.complete && image.naturalWidth > 0 && bounds?.height), top: bounds?.top ?? null }
+    }
+    requestAnimationFrame(sample)
+    return state
+  }, memoryId)
+  try {
+    await nav.getByRole('button', { name: 'Лента', exact: true }).click()
+    await expect.poll(() => returned.evaluate(({ frame }) => frame)).not.toBeNull()
+    const frame = await returned.evaluate(({ frame }) => frame!)
+    expect(frame.ready).toBe(true)
+    expect(frame.top).not.toBeNull()
+    expect(Math.abs(frame.top! - anchorTop)).toBeLessThanOrEqual(2)
+  } finally {
+    await returned.dispose()
+  }
+})
+
 test('returning to Albums restores the previous scroll without resetting to the top', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 500 })
   await page.goto('/e2e/selected-family-app.harness.html?channelMemory&albums=80')

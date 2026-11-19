@@ -3942,14 +3942,16 @@ cat "$SERVER_ROOT/events"
 })
 
 slowTest('notification batch source retains exact month recovery binding and rejects executable drift', () => {
-  const run = (drift = false) => spawnSync(bashExecutable, ['-s'], {
+  const notificationBatchSource = '412993fbe860ac15f43c166cdc9cdf238b42656f'
+  const laterFrontendSource = '161b57558a0aaf8c0bec6b0e7ebe60ee374cceb8'
+  const run = (source) => spawnSync(bashExecutable, ['-s'], {
     cwd: root,
-    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(root)}\nrollback_s3_host_inputs_match() { return 0; }\n${drift ? "rollback_compatibility_fingerprint() { printf '%s\\n' ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff; }" : ''}\nrollback_source_compatibility_profile HEAD 95496ef26b677529ee9b1ac10fc12f6075dd912b\n`,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(root)}\nrollback_s3_host_inputs_match() { return 0; }\nrollback_source_compatibility_profile ${shellLiteral(source)} 95496ef26b677529ee9b1ac10fc12f6075dd912b\n`,
     encoding: 'utf8',
   })
-  const current = run()
-  assert.equal(current.status, 0, current.stdout + current.stderr)
-  assert.equal(current.stdout.trim(), 's3-album-month-photos')
-  const drifted = run(true)
-  assert.notEqual(drifted.status, 0, 'unknown executable fingerprints must stay rejected')
+  const attested = run(notificationBatchSource)
+  assert.equal(attested.status, 0, attested.stdout + attested.stderr)
+  assert.equal(attested.stdout.trim(), 's3-album-month-photos')
+  const drifted = run(laterFrontendSource)
+  assert.equal(drifted.status, 1, 'an unattested frontend release must stay rejected for full recovery')
 })

@@ -73,29 +73,32 @@ function isPortAvailable(port: number) {
   })
 }
 
+const maxCoreSpecs = [
+  '**/max-browser-link.spec.ts',
+  '**/max-closing-confirmation.spec.ts',
+  '**/pwa-screen-watch.spec.ts',
+  '**/albums.spec.ts',
+  '**/album-social.spec.ts',
+  '**/children.spec.ts',
+  '**/gifts.spec.ts',
+  '**/comments.spec.ts',
+  '**/shared-author-avatar.spec.ts',
+  '**/comments-state.spec.ts',
+  '**/memoly-v4.spec.ts',
+  '**/voice-player.spec.ts',
+  '**/video-lifecycle.spec.ts',
+]
+
 export default defineConfig({
   ...baseConfig,
   webServer: [...(Array.isArray(webServer) ? webServer : webServer ? [webServer] : []), ...familyAuditServers],
   metadata: { ...baseConfig.metadata, commentsServerMode: 'dev-strict' },
-  testMatch: [
-    '**/max-browser-link.spec.ts',
-    '**/albums.spec.ts',
-    '**/album-social.spec.ts',
-    '**/children.spec.ts',
-    '**/gifts.spec.ts',
-    '**/comments.spec.ts',
-      '**/shared-author-avatar.spec.ts',
-    '**/comments-state.spec.ts',
-    '**/memoly-v4.spec.ts',
-    '**/voice-player.spec.ts',
-    '**/video-lifecycle.spec.ts',
-    '**/max-family-audit.max-e2e.ts',
-  ],
+  testMatch: [...maxCoreSpecs, '**/max-family-audit.max-e2e.ts'],
   projects: [
     {
       name: 'max-core',
       use: { browserName: 'chromium' },
-        testMatch: ['**/max-browser-link.spec.ts', '**/albums.spec.ts', '**/album-social.spec.ts', '**/children.spec.ts', '**/gifts.spec.ts', '**/comments.spec.ts', '**/comments-state.spec.ts', '**/memoly-v4.spec.ts', '**/voice-player.spec.ts', '**/video-lifecycle.spec.ts', '**/shared-author-avatar.spec.ts'],
+      testMatch: maxCoreSpecs,
     },
     {
       name: 'max-family-scope',

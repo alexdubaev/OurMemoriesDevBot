@@ -139,6 +139,9 @@ bun run --cwd webapp e2e -- comments.spec.ts -g 'draft'
 
 Playwright owns backend/Vite ports, database setup and scoped storage. E2E_SKIP_DOCKER=1 requires
 an explicitly owned safe test database. MAX configuration selects active critical journeys.
+FULL also runs both dedicated feed-carousel and fullscreen-swipe suites in their own browser
+configurations. FRONTEND runs both complete suites when the feed carousel rendering source or
+its styles change, including when one of those specs was supplied with a title filter.
 Browser tests protect session restoration, navigation, draft/conflict behavior, private-cache
 invalidation, playback, file transfer, focus and stale responses. ACL/data permutations primarily
 belong to endpoint integrations. Avoid routine theme/viewport screenshot matrices, decorative

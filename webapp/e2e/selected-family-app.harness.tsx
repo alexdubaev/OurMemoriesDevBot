@@ -185,7 +185,10 @@ const transport = {
       currentGift = { ...currentGift, title: body.title ?? currentGift.title, url: body.url ?? currentGift.url, price: body.price === undefined ? currentGift.price : body.price, photoMediaId: body.photoMediaId ?? currentGift.photoMediaId, version: 2, updatedAt: '2026-10-24T10:00:00.000Z' }
       return schema.parse({ gift: currentGift })
     }
-    if (path.startsWith(`/api/v1/families/${familyId}/memories`) || path.startsWith(`/api/v1/families/${secondFamilyId}/memories`)) return schema.parse({ items: params.has('channelMemory') && path.includes(familyId) ? [syntheticChannelMemory()] : [], nextCursor: null })
+    if (path.startsWith(`/api/v1/families/${familyId}/memories`) || path.startsWith(`/api/v1/families/${secondFamilyId}/memories`)) {
+      const items = !path.includes(familyId) ? [] : params.has('feedPhotos') ? albums?.feedMemories ?? [] : params.has('channelMemory') ? [syntheticChannelMemory()] : []
+      return schema.parse({ items, nextCursor: null })
+    }
     if (path === '/api/v1/me/welcome/claim') {
       if (!params.has('welcomeFirst') || sessionStorage.getItem(welcomeClaimKey) === 'claimed') {
         return schema.parse({ showWelcome: false })

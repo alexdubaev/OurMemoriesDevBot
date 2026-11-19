@@ -158,7 +158,7 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
       const comment = state.comments[index]; comment.body = String(body!.body); comment.version += 1
       return done({ comment, summary: summary() })
     }
-    if (method === 'GET' && segments[4] === 'sources' && item.kind === 'month') {
+    if (method === 'GET' && segments[4] === 'sources' && (item.kind === 'month' || album.kind === 'free')) {
       const kind = parsed.searchParams.get('kind')
       if (kind === 'photo') await heldRead
       const cover = projectedEntry(item, album, 'month-summary').month?.cover
@@ -194,5 +194,5 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
     ctx.fillStyle = '#f7f4e9'; ctx.fillRect(42, 69, 76, 23)
     return new Response(await new Promise<Blob>((resolve) => canvas.toBlob((blob) => resolve(blob!), 'image/png')), { headers: { 'Content-Type': 'image/png' } })
   }
-  return { request, raw }
+  return { request, raw, feedMemories: photos.slice(0, 6) }
 }

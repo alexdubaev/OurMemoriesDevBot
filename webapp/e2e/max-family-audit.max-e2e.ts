@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { expect, test, type Page } from '@playwright/test'
+import { jpegImage } from './helpers/images'
 
 const maxBotToken = '987654:max-family-audit-synthetic'
 type MaxAuditWindow = Window & { __openedLinks: string[]; WebApp: { initData: string } }
@@ -12,6 +13,134 @@ type ApiFamily = { family: { id: string } }
 type ApiChild = { child: { id: string } }
 type ApiMemory = { id: string }
 type ApiFamilyMember = { userId: string; version: number; role: 'full' | 'viewer' }
+
+test('MAX-FULL: owner publishes, edits and deletes a photo in the family feed', async ({ browser, page }) => {
+  const viewport = { width: 390, height: 844 }
+  await page.setViewportSize(viewport)
+  const owner = { id: 78_000_000 + Math.floor(Math.random() * 1_000_000), first_name: 'Publication owner' }
+  const ownerToken = await signInMax(page, owner)
+  const childName = 'Publication child'
+  const seedNote = 'A retained note beside the photo'
+  const family = await createAuditFamily(page, ownerToken, 'Photo publication family', childName, seedNote)
+  await page.reload()
+  await selectFamilyFeed(page, childName, seedNote)
+
+  const collectionPath = `/api/v1/families/${family.id}/memories`
+  const originalCaption = 'Фото для семейного архива'
+  const editedCaption = 'Обновлённая подпись к фото'
+  await page.getByRole('button', { name: 'Добавить', exact: true }).click()
+  await page.getByRole('button', { name: 'Добавить фото и видео' }).click()
+  await page.locator('#photo-composer-files').setInputFiles({ ...jpegImage, name: 'family-photo.jpg' })
+  await page.getByRole('textbox', { name: 'Подпись к фотографиям' }).fill(originalCaption)
+  const publish = page.waitForResponse((response) =>
+    response.request().method() === 'POST' && new URL(response.url()).pathname === collectionPath)
+  await page.getByRole('button', { name: 'Опубликовать (1)', exact: true }).click()
+  const published = await publish
+  expect(published.status()).toBe(201)
+  const { id } = await published.json() as ApiMemory
+  const memoryPath = `${collectionPath}/${id}`
+  const cardSelector = `.memory-card[data-memory-id="${id}"]`
+  const actionSelector = `[data-memory-actions-for="${id}"]`
+  await page.getByRole('button', { name: 'Смотреть в ленте', exact: true }).click()
+  const photo = page.locator(cardSelector)
+  await expect(photo.getByText(originalCaption, { exact: true })).toBeVisible()
+  await expect.poll(() => photo.getByRole('img', { name: 'Воспоминание' })
+    .evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
+
+  await photo.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+  await page.locator(actionSelector).getByRole('button', { name: /^Редактировать/ }).click()
+  const editor = page.getByRole('textbox', { name: 'Текст заметки' })
+  await expect(editor).toHaveValue(originalCaption)
+  await editor.fill(editedCaption)
+  const edit = page.waitForResponse((response) =>
+    response.request().method() === 'PATCH' && new URL(response.url()).pathname === memoryPath)
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  expect((await edit).status()).toBe(200)
+  await expect(photo.getByText(editedCaption, { exact: true })).toBeVisible()
+
+  const reopenedContext = await browser.newContext({ baseURL: new URL(page.url()).origin, viewport })
+  try {
+    const reopened = await reopenedContext.newPage()
+    const reopenedToken = await signInMax(reopened, owner)
+    const welcome = reopened.getByRole('button', { name: 'Продолжить', exact: true })
+    const familyChooser = reopened.getByRole('heading', { name: 'Мои семьи' })
+    await expect(welcome.or(familyChooser).first()).toBeVisible()
+    if (await welcome.isVisible()) await welcome.click()
+    await selectFamilyFeed(reopened, childName, seedNote)
+    const storedPhoto = reopened.locator(cardSelector)
+    await expect(storedPhoto.getByText(editedCaption, { exact: true })).toBeVisible()
+    await expect.poll(() => storedPhoto.getByRole('img', { name: 'Воспоминание' })
+      .evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
+
+    await storedPhoto.getByRole('button', { name: 'Действия с воспоминанием' }).click()
+    await reopened.locator(actionSelector).getByRole('button', { name: /^Удалить воспоминание/ }).click()
+    const deletion = reopened.waitForResponse((response) =>
+      response.request().method() === 'DELETE' && new URL(response.url()).pathname === memoryPath)
+    await reopened.getByRole('alertdialog', { name: 'Удалить воспоминание?' })
+      .getByRole('button', { name: 'Удалить', exact: true }).click()
+    expect((await deletion).status()).toBe(204)
+    await expect(storedPhoto).toHaveCount(0)
+    await expect(reopened.getByText(seedNote, { exact: true })).toBeVisible()
+    const stored = await reopened.request.get(memoryPath, { headers: { Authorization: `Bearer ${reopenedToken}` } })
+    expect(stored.status()).toBe(404)
+  } finally {
+    await reopenedContext.close()
+  }
+})
+
+test('MAX-FULL: a viewer reserves, marks bought and releases a wishlist gift', async ({ page, browser }) => {
+  const subject = 79_000_000 + Math.floor(Math.random() * 450_000) * 2
+  const ownerToken = await signInMax(page, { id: subject, first_name: 'Wishlist owner' })
+  const ownerHeaders = { Authorization: `Bearer ${ownerToken}` }
+  const family = await createAuditFamily(page, ownerToken, 'Wishlist family', 'Wishlist child', 'Wishlist family note')
+  const giftTitle = 'Набор для рисования'
+  const giftPath = `/api/v1/families/${family.id}/gifts`
+  const photoMediaId = await uploadPng(page, ownerToken, family.id, 'gift')
+  const created = await page.request.post(giftPath, {
+    headers: { ...ownerHeaders, 'Idempotency-Key': randomUUID() },
+    data: { title: giftTitle, url: 'https://shop.example/drawing', photoMediaId },
+  })
+  expect(created.status()).toBe(201)
+  const invitation = await page.request.post(`/api/v1/families/${family.id}/invites`, {
+    headers: { ...ownerHeaders, 'Idempotency-Key': randomUUID() }, data: { role: 'viewer' },
+  })
+  expect(invitation.status()).toBe(201)
+  const { rawToken } = await invitation.json() as { rawToken: string }
+
+  const viewerContext = await browser.newContext({ baseURL: new URL(page.url()).origin })
+  try {
+    const viewer = await viewerContext.newPage()
+    const viewerToken = await signInMax(viewer, { id: subject + 1, first_name: 'Wishlist viewer' })
+    const joined = await viewer.request.post('/api/v1/invites/accept', {
+      headers: { Authorization: `Bearer ${viewerToken}` }, data: { token: rawToken },
+    })
+    expect(joined.status()).toBe(200)
+    await viewer.reload()
+    await selectFamilyFeed(viewer, 'Wishlist child', 'Wishlist family note')
+    await viewer.getByRole('button', { name: 'Вишлист', exact: true }).click()
+    const gift = viewer.getByRole('article').filter({ hasText: giftTitle })
+    await expect(gift.getByText('Свободен', { exact: true })).toBeVisible()
+    await expect(gift.getByRole('button', { name: /^(Изменить|Удалить) подарок/ })).toHaveCount(0)
+    await gift.getByRole('button', { name: 'Забронирую' }).click()
+    await expect(gift.getByText('Вы забронировали', { exact: true })).toBeVisible()
+    await gift.getByRole('button', { name: 'Купил(а)', exact: true }).click()
+    await viewer.getByRole('button', { name: 'Подарено (1)' }).click()
+    await expect(gift.getByRole('button', { name: 'Отменить отметку' })).toBeVisible()
+    const gifts = await page.request.get(giftPath, { headers: ownerHeaders })
+    expect(gifts.status()).toBe(200)
+    expect((await gifts.json()).gifts).toEqual([expect.objectContaining({
+      title: giftTitle, reservation: expect.objectContaining({ boughtAt: expect.any(String) }),
+    })])
+    await gift.getByRole('button', { name: 'Отменить отметку' }).click()
+    await gift.getByRole('button', { name: 'Снять бронь' }).click()
+    await expect(gift.getByText('Свободен', { exact: true })).toBeVisible()
+    const openGifts = await page.request.get(giftPath, { headers: ownerHeaders })
+    expect(openGifts.status()).toBe(200)
+    expect((await openGifts.json()).gifts).toEqual([expect.objectContaining({ title: giftTitle, reservation: null })])
+  } finally {
+    await viewerContext.close()
+  }
+})
 
 test('MAX-FULL: owner connects Telegram from profile and cached Telegram sessions cannot skip the signed link exchange', async ({ page, browser }, testInfo) => {
   const initData = signedMaxInitData({ id: 85_000_000 + Math.floor(Math.random() * 1_000_000), first_name: 'Link owner' }, randomUUID(), '')
@@ -1250,6 +1379,45 @@ test(`MAX-FULL: ${hostSurface} surface creates one invite and can independently 
 })
 }
 
+test('MAX-FULL: sharing the bot from settings opens a public bot link without a family invite', async ({ page }) => {
+  const ownerMaxId = 26_000_000 + Math.floor(Math.random() * 1_000_000)
+  const owner = { id: ownerMaxId, first_name: 'Bot share owner' }
+  const ownerToken = await signInMax(page, owner)
+  const suffix = randomUUID()
+  const childName = 'Bot share child ' + suffix.slice(0, 8)
+  const noteBody = 'Bot share family note ' + suffix
+  const family = await createAuditFamily(page, ownerToken, 'Bot share family ' + suffix, childName, noteBody)
+
+  await page.evaluate((data) => { (window as unknown as MaxAuditWindow).WebApp.initData = data }, signedMaxInitData(owner, randomUUID(), ''))
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Мои семьи' })).toBeVisible({ timeout: 15_000 })
+  await selectFamilyFeed(page, childName, noteBody)
+  await page.getByRole('button', { name: 'Семья', exact: true }).click()
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click()
+
+  let inviteCreations = 0
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && /\/api\/v1\/families\/[^/]+\/invites$/.test(new URL(request.url()).pathname)) inviteCreations += 1
+  })
+  await page.evaluate(() => {
+    const sharedUrls: string[] = []
+    Object.assign(window, { __botSharedUrls: sharedUrls })
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: async ({ url }: { url: string }) => { sharedUrls.push(url) },
+    })
+  })
+  await page.getByRole('button', { name: /Поделиться ботом/ }).click()
+  await expect(page.getByText('Ссылка на бота отправлена', { exact: true })).toBeVisible()
+  const sharedUrls = await page.evaluate(() => (window as typeof window & { __botSharedUrls: string[] }).__botSharedUrls)
+  expect(sharedUrls).toEqual(['https://max.ru/OurMemoriesMaxBot'])
+
+  const inviteList = await page.request.get('/api/v1/families/' + family.id + '/invites', { headers: { Authorization: 'Bearer ' + ownerToken } })
+  expect(inviteList.status()).toBe(200)
+  expect((await inviteList.json() as { items: unknown[] }).items).toHaveLength(0)
+  expect(inviteCreations).toBe(0)
+})
+
 async function expectInviteReady(page: Page) {
   await expect(page.getByRole('heading', { name: 'Вас приглашают в семью' })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('button', { name: 'Присоединиться', exact: true })).toBeVisible()
@@ -1311,8 +1479,10 @@ async function persistedSelectedFamilyId(page: import('@playwright/test').Page, 
 
 async function openFamilyChooser(page: import('@playwright/test').Page) {
   const heading = page.getByRole('heading', { name: 'Мои семьи' })
-  if (await heading.isVisible().catch(() => false)) return
-  await page.getByRole('button', { name: /^(Мои семьи|Сменить семью)$/ }).click()
+  const switchFamily = page.getByRole('button', { name: /^(Мои семьи|Сменить семью)$/ })
+  await expect(heading.or(switchFamily).first()).toBeVisible()
+  if (await heading.isVisible()) return
+  await switchFamily.click()
   await expect(heading).toBeVisible()
 }
 
@@ -1375,7 +1545,7 @@ function signedMaxInitData(user: { id: number; first_name: string }, queryId: st
   return params.toString()
 }
 
-async function uploadPng(page: import('@playwright/test').Page, token: string, familyId: string, purpose: 'child_avatar' | 'memory') {
+async function uploadPng(page: import('@playwright/test').Page, token: string, familyId: string, purpose: 'child_avatar' | 'gift' | 'memory') {
   const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
   const reserve = await page.request.post(`/api/v1/families/${familyId}/uploads`, {
     headers: { Authorization: `Bearer ${token}` },

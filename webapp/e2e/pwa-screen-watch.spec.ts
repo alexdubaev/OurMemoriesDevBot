@@ -135,11 +135,12 @@ test('witness OPFS storage denial is reported as unavailable without becoming an
     })
   })
   await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Вход через MAX' })).toBeVisible()
   await page.waitForFunction(() => {
     const diagnostics = (window as Window & { __MEMOLY_DIAGNOSTICS__?: { report: () => string } }).__MEMOLY_DIAGNOSTICS__
     if (!diagnostics) return false
     const report = JSON.parse(diagnostics.report())
-    return report.current.phase === 'mounted' && report.witness?.status === 'storage-unavailable'
+    return report.current.phase === 'mounted' && report.current.rootState === 'present' && report.witness?.status === 'storage-unavailable'
   }, undefined, { timeout: 5_000 })
 
   const report = await page.evaluate(() => {
@@ -161,11 +162,12 @@ test('unavailable OPFS API is reported while the app remains mounted', async ({ 
     })
   }
   await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Вход через MAX' })).toBeVisible()
   await page.waitForFunction(() => {
     const diagnostics = (window as Window & { __MEMOLY_DIAGNOSTICS__?: { report: () => string } }).__MEMOLY_DIAGNOSTICS__
     if (!diagnostics) return false
     const report = JSON.parse(diagnostics.report())
-    return report.current.phase === 'mounted' && report.witness?.status === 'storage-unavailable'
+    return report.current.phase === 'mounted' && report.current.rootState === 'present' && report.witness?.status === 'storage-unavailable'
   }, undefined, { timeout: 5_000 })
   const report = await page.evaluate(() => {
     const diagnostics = (window as Window & { __MEMOLY_DIAGNOSTICS__?: { report: () => string } }).__MEMOLY_DIAGNOSTICS__
