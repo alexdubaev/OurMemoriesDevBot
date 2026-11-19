@@ -29,7 +29,7 @@ import './albums.css'
 type Route = 'free-add' | 'stories' | 'catalog' | 'create' | 'album' | 'overview' | 'entry' | 'edit-entry' | 'edit-album' | 'cover' | 'month-cover' | 'month-add' | 'month-photo-remove'
 type DeleteConfirmation = { kind: 'album' | 'entry' | 'month'; albumId: string; entryId?: string; version: number; scopeKey: string; route: Route }
 export type AlbumsPageProps = {
-  accountId: string; familyId: string; familyName: string; timezone: string; membershipEpoch: number; active: boolean
+  accountId: string; familyId: string; familyName: string; timezone: string; membershipEpoch: number; active: boolean; tabSelected: boolean
   child: { id: string; name: string; birthDate: string | null; avatarCrop?: { x: number; y: number; width: number; height: number } | null } | null
   childSubtitle: string; childAvatar?: { url: string | null; status: 'absent' | 'loading' | 'ready' | 'error' }
   role: 'full' | 'viewer'; transport: AuthenticatedTransport; hostBridge: HostBridge; onFeed: () => void; onFamily: () => void; onGifts: () => void; onAllFamilies: () => void; onAdd: () => void; onAccessLost: () => void
@@ -50,7 +50,7 @@ function countLabel(count: number, words: readonly [string, string, string]) {
 }
 function Loading() { return <div aria-label="Загрузка альбомов" className="albums-loading" role="status"><span /><span /><span /><span /></div> }
 export function AlbumsPage(props: AlbumsPageProps) {
-  const { accountId, familyId, membershipEpoch, active, role, transport, hostBridge } = props
+  const { accountId, familyId, membershipEpoch, active, tabSelected, role, transport, hostBridge } = props
   const scopeKey = `${accountId}:${familyId}:${membershipEpoch}`
   const { theme } = useMemolyTheme()
   const scopeController = useMemo(() => createAlbumRequestScope(), [])
@@ -104,6 +104,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
   const scrolls = useRef<Partial<Record<Route, number>>>({ catalog: 0 })
   const focus = useRef<Partial<Record<Route, HTMLElement>>>({})
   const routeRef = useRef(route)
+  const scrollNavigation = useRef({ active: false, route, tabSelected: false })
   const entryReturn = useRef<'album' | 'overview' | 'stories'>('album')
   const monthViewerOpen = useRef(false)
   const photoAddReturn = useRef<'album' | 'entry'>('entry')
@@ -119,11 +120,15 @@ export function AlbumsPage(props: AlbumsPageProps) {
     setRoute(next)
   }, [])
   useLayoutEffect(() => {
-    if (!active) return
+    const previous = scrollNavigation.current
+    scrollNavigation.current = { active, route, tabSelected }
+    // App restores scroll when selecting a tab. Restore here for album routes
+    // and when the composer closes within the already selected Albums tab.
+    if (!active || !previous.tabSelected || (previous.active && previous.route === route)) return
     window.scrollTo(0, scrolls.current[route] ?? 0)
     const target = focus.current[route]
     if (target?.isConnected) target.focus({ preventScroll: true })
-  }, [active, route])
+  }, [active, route, tabSelected])
   useEffect(() => { const online = () => setOffline(!navigator.onLine); window.addEventListener('online', online); window.addEventListener('offline', online); return () => { window.removeEventListener('online', online); window.removeEventListener('offline', online) } }, [])
   const fail = useCallback((reason: unknown) => {
     if (scopeController.isAborted()) return
