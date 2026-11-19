@@ -271,17 +271,28 @@ export function eligiblePrivateImage(path: string) {
 export async function readPrivateImage(userId: string, path: string) {
   const eligible = eligiblePrivateImage(path)
   if (!eligible || typeof indexedDB === 'undefined') return null
-  const entry = await readEntryWithMetadata(userId, 'image', eligible.key)
+  const { familyId, key } = eligible
+  const generation = identityGeneration
+  const familyGeneration = privateFamilyCacheGeneration(userId, familyId)
+  const familyScopeKey = familyCacheScopeKey(userId, familyId)
+  const isCurrent = () => isActivePrivateCacheIdentity(userId, generation) &&
+    !revokedFamilyCache.has(familyScopeKey) && privateFamilyCacheGeneration(userId, familyId) === familyGeneration
+  if (!isCurrent()) return null
+  const entry = await readEntryWithMetadata(userId, 'image', key)
+  if (!isCurrent()) return null
   const blob = entry?.blob instanceof Blob
     ? entry.blob
     : entry?.imageBytes instanceof ArrayBuffer && typeof entry.imageContentType === 'string'
       ? new Blob([entry.imageBytes], { type: entry.imageContentType })
       : null
-  if (!entry || !blob || blob.size > PRIVATE_CACHE_MAX_IMAGE_BYTES || entry.size > PRIVATE_CACHE_MAX_IMAGE_BYTES || Date.now() - entry.lastAccess > PRIVATE_CACHE_MAX_AGE_MS) {
-    if (entry) await removeEntry(userId, 'image', eligible.key)
+  const accessedAt = Date.now()
+  if (!entry || !blob || blob.size > PRIVATE_CACHE_MAX_IMAGE_BYTES || entry.size > PRIVATE_CACHE_MAX_IMAGE_BYTES || accessedAt - entry.lastAccess > PRIVATE_CACHE_MAX_AGE_MS) {
+    if (entry) await removeEntry(userId, 'image', key)
     return null
   }
-  await touchEntry(userId, 'image', eligible.key)
+  // Recency maintenance shares the write queue with every private cache mutation.
+  // A valid image can be displayed while its recency update waits in that queue.
+  void touchImageEntry(userId, key, accessedAt, isCurrent).catch(() => undefined)
   return blob
 }
 
@@ -403,15 +414,22 @@ async function evictPrivateImages(userId: string) {
   })
 }
 
-async function touchEntry(userId: string, kind: CacheEntry['kind'], key: string) {
-  const id = entryId(userId, kind, key)
-  await enqueue(async () => {
+function touchImageEntry(userId: string, key: string, accessedAt: number, isCurrent: () => boolean) {
+  const id = entryId(userId, 'image', key)
+  return enqueue(async () => {
+    if (!isCurrent()) return
     const db = await openDatabase()
     try {
+      if (!isCurrent()) return
       const transaction = db.transaction(STORE_NAME, 'readwrite')
       const store = transaction.objectStore(STORE_NAME)
       const request = store.get(id)
-      request.onsuccess = () => { if (request.result) store.put({ ...request.result, lastAccess: Date.now() }) }
+      request.onsuccess = () => {
+        const entry = request.result as CacheEntry | undefined
+        if (isCurrent() && entry?.schema === PRIVATE_CACHE_SCHEMA && entry.userId === userId && entry.lastAccess < accessedAt) {
+          store.put({ ...entry, lastAccess: accessedAt })
+        }
+      }
       await transactionDone(transaction)
     } finally { db.close() }
   })

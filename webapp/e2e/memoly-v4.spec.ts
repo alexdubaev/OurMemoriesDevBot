@@ -276,51 +276,43 @@ test('production App reuses one child avatar across feed, family and same-family
   expect(await rawRequestPaths(page)).not.toContain(channelPath)
 })
 
-test('welcome CTA is ready immediately, pauses with document visibility, and completes the real App transition', async ({ page }) => {
+test('welcome CTA is keyboard-ready without animation and completes the real App transition', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 740 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/e2e/selected-family-app.harness.html?avatarDelay=250&welcomeFirst')
 
-  const welcome = page.getByRole('button', { name: 'Продолжить', exact: true })
+  const splash = page.locator('[data-slot="welcome-splash"]')
+  const welcome = splash.getByRole('button', { name: 'Продолжить', exact: true })
   await expect(welcome).toBeVisible({ timeout: 1_500 })
+  await expect(splash.getByRole('heading', { level: 1, name: 'Семейные воспоминания' })).toBeVisible()
   await expect(welcome).toBeEnabled()
-  await welcome.focus()
+  await page.keyboard.press('Tab')
   await expect(welcome).toBeFocused()
 
-  await page.emulateMedia({ reducedMotion: 'reduce' })
-  await expect.poll(() => page.locator('.memolyWelcome .photo').evaluate((image) => getComputedStyle(image).opacity)).toBe('1')
-  await expect.poll(() => page.locator('.memolyWelcome .bg').evaluate((image) => getComputedStyle(image).animationName)).toBe('none')
+  expect(await splash.evaluate((element) => element.getAnimations({ subtree: true }).filter((animation) => animation instanceof CSSAnimation).length)).toBe(0)
   await page.emulateMedia({ reducedMotion: 'no-preference' })
-
-  await page.evaluate(() => {
-    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
-    document.dispatchEvent(new Event('visibilitychange'))
-  })
-  await expect.poll(() => page.locator('.memolyWelcome .bg').evaluate((image) => getComputedStyle(image).animationPlayState)).toBe('paused')
-  await page.evaluate(() => {
-    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
-    document.dispatchEvent(new Event('visibilitychange'))
-  })
-  await expect.poll(() => page.locator('.memolyWelcome .bg').evaluate((image) => getComputedStyle(image).animationPlayState)).toBe('running')
+  expect(await splash.evaluate((element) => element.getAnimations({ subtree: true }).filter((animation) => animation instanceof CSSAnimation).length)).toBe(0)
 
   await welcome.evaluate((button: HTMLButtonElement) => {
     button.click()
     button.click()
   })
   await expect(page.locator('[data-navigation-surface="feed"] .ui-v2-child-header')).toBeVisible()
-  await expect(page.locator('.memolyWelcome')).toHaveCount(0)
+  await expect(splash).toHaveCount(0)
 })
 
 test('production App skips the welcome after the account claim has been used', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/e2e/selected-family-app.harness.html?welcomeFirst')
-  const welcome = page.getByRole('button', { name: 'Продолжить', exact: true })
+  const splash = page.locator('[data-slot="welcome-splash"]')
+  const welcome = splash.getByRole('button', { name: 'Продолжить', exact: true })
   await expect(welcome).toBeVisible()
   await welcome.click()
   await expect(page.locator('[data-navigation-surface="feed"] .ui-v2-child-header')).toBeVisible()
 
   await page.reload()
   await expect(page.locator('[data-navigation-surface="feed"] .ui-v2-child-header')).toBeVisible()
-  await expect(page.locator('.memolyWelcome')).toHaveCount(0)
+  await expect(splash).toHaveCount(0)
 })
 
 test('production entry blocks page pinch zoom while preserving ordinary input and PhotoSwipe gestures', async ({ page }) => {
@@ -623,6 +615,40 @@ test('feed and family navigation expose working controls', async ({ page }) => {
   await page.goto('/e2e/memoly-v4.harness.html?family=1&role=owner')
   await expect(page.locator('.family-screen')).toBeVisible()
   await expect(page.locator('.family-invite-btn')).toBeVisible()
+})
+
+test('returning to Albums restores the previous scroll without resetting to the top', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 500 })
+  await page.goto('/e2e/selected-family-app.harness.html?channelMemory&albums=80')
+  const nav = page.getByRole('navigation', { name: 'Основная навигация' })
+  const albums = page.locator('[data-navigation-surface="albums"]:visible')
+  await nav.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await albums.getByRole('button', { name: /Мастерская/ }).click()
+  await expect(albums.getByRole('heading', { name: 'Мастерская' })).toBeVisible()
+  await expect(albums.locator('[data-album-tile]').first()).toBeVisible()
+  await page.evaluate(() => window.scrollTo(0, 700))
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(700)
+
+  await nav.getByRole('button', { name: 'Лента', exact: true }).click()
+  await expect(page.locator('[data-navigation-surface="feed"]:visible')).toBeVisible()
+  await page.evaluate(() => {
+    const scrollTo = window.scrollTo.bind(window)
+    const albumScrollPositions: number[] = []
+    Object.assign(window, { albumScrollPositions })
+    window.scrollTo = (x?: number | ScrollToOptions, y?: number) => {
+      if (typeof x === 'number') scrollTo(x, y ?? 0)
+      else scrollTo(x)
+      albumScrollPositions.push(window.scrollY)
+    }
+  })
+
+  await nav.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await expect(albums.getByRole('heading', { name: 'Мастерская' })).toBeVisible()
+  const restored = await page.evaluate(() => ({
+    position: window.scrollY,
+    steps: (window as Window & { albumScrollPositions?: number[] }).albumScrollPositions,
+  }))
+  expect(restored).toEqual({ position: 700, steps: [700] })
 })
 
 test('add sheet traps focus and closes with Escape or browser Back', async ({ page }) => {

@@ -1,5 +1,8 @@
-import type { CSSProperties, ImgHTMLAttributes } from 'react'
+import { useContext, type CSSProperties, type ImgHTMLAttributes } from 'react'
 
+import { UiVersionContext } from '@/features/ui-version'
+
+import { resolveAstryxIconMask } from './astryx-icon-manifest'
 import { resolveWebpIconSource } from './webp-icon-manifest'
 import type { WebpIconName, WebpIconState } from './webp-icon-types'
 
@@ -29,9 +32,39 @@ export function WebpIcon({
   style,
   ...props
 }: WebpIconProps) {
+  const uiVersion = useContext(UiVersionContext)
+  const iconStyle = { '--webp-icon-size': `${size}px`, ...style } as CSSProperties
+
+  if (uiVersion === 'v2') {
+    const { maskImage, maskPosition, maskSize } = resolveAstryxIconMask(name)
+    return <span
+      {...props}
+      aria-hidden={decorative ? true : undefined}
+      aria-label={decorative ? undefined : label}
+      data-slot="webp-icon"
+      data-astryx-icon={name}
+      role={decorative ? undefined : 'img'}
+      style={{
+        ...iconStyle,
+        display: 'inline-block',
+        flexShrink: 0,
+        width: size,
+        height: size,
+        backgroundColor: state === 'white' ? '#fff' : 'currentColor',
+        maskImage,
+        maskPosition,
+        maskRepeat: 'no-repeat',
+        maskSize,
+        WebkitMaskImage: maskImage,
+        WebkitMaskPosition: maskPosition,
+        WebkitMaskRepeat: 'no-repeat',
+        WebkitMaskSize: maskSize,
+      }}
+    />
+  }
+
   const source2x = resolveWebpIconSource(name, state, 2)
   const source3x = resolveWebpIconSource(name, state, 3)
-  const iconStyle = { '--webp-icon-size': `${size}px`, ...style } as CSSProperties
   const maskImage = `image-set(url("${source2x.src}") 2x, url("${source3x.src}") 3x)`
 
   if (monochrome) {

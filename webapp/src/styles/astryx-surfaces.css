@@ -1,0 +1,259 @@
+.memoly-app-root[data-ui-version='v2'] [data-slot='avatar-letter'] [data-slot='avatar-fallback'],
+.memoly-app-root[data-ui-version='v2'] .author-avatar:has(.author-initials),
+html[data-ui-version='v2'] .comments-avatar-fallback [data-slot='avatar-fallback'] {
+  color: var(--astryx-text);
+  background: color-mix(in srgb, var(--astryx-avatar-swatch) 16%, var(--astryx-surface));
+}
+.memoly-app-root[data-ui-version='v2'] .family-overview-body {
+  width: min(100%, 720px);
+  padding-top: 20px;
+}
+.astryx-family-title {
+  margin: 0 0 16px;
+  color: var(--astryx-text);
+  font-size: 1.375rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -.025em;
+  overflow-wrap: anywhere;
+}
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-list { gap: 8px; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-section-head { margin: 20px 0 8px; }
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-invite-btn {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--astryx-line);
+  border-radius: var(--astryx-radius-control);
+  color: var(--astryx-accent);
+  background: var(--astryx-surface);
+  box-shadow: none;
+}
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-invite-plus {
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+}
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-member-row:hover,
+.memoly-app-root[data-ui-version='v2'] .family-overview-body .family-invite-btn:hover { border-color: var(--astryx-line-strong); }
+
+.albums-surface {
+  --albums-bg: var(--astryx-canvas);
+  max-width: 1000px;
+}
+.albums-surface .albums-preview, .albums-surface .albums-year-cover { background: var(--astryx-neutral); }
+.albums-composer-host { background: var(--astryx-canvas); }
+.albums-surface[data-albums-route='catalog'] .albums-icon-button {
+  width: auto;
+  padding: 0 12px;
+  border-radius: var(--astryx-radius-control);
+  color: var(--astryx-on-accent);
+  background: var(--astryx-accent);
+  font-size: .8125rem;
+  font-weight: 600;
+}
+.albums-surface .albums-catalog { gap: 12px; }
+.albums-surface .albums-card {
+  overflow: hidden;
+  border: 1px solid var(--astryx-line);
+  border-radius: var(--astryx-radius-panel);
+  background: var(--astryx-surface);
+}
+.albums-surface .albums-card:hover { border-color: var(--astryx-line-strong); }
+.albums-surface .albums-card .albums-cover {
+  aspect-ratio: 4 / 3;
+  border: 0;
+  border-radius: 0;
+  background: var(--astryx-neutral);
+  box-shadow: none;
+}
+.albums-surface .albums-card .albums-cover > span:not(.albums-preview) { font-size: clamp(.6875rem, 2vw, .875rem); }
+.albums-surface .albums-card > strong { margin: 8px 12px 4px; font-size: .9375rem; }
+.albums-surface .albums-card > small { margin: 0 12px 12px; font-size: .75rem; }
+.albums-surface .albums-chips > button { border-radius: var(--astryx-radius-control); }
+.albums-surface .albums-cover :is(.albums-preview, .albums-preview > img) { border-radius: 0; }
+.albums-surface .albums-empty,
+.gifts-page .gifts-state {
+  padding: 24px 16px;
+  border: 1px dashed var(--astryx-line-strong);
+  border-radius: var(--astryx-radius-panel);
+  background: var(--astryx-surface);
+}
+
+.memoly-app-root[data-ui-version='v2'] .gifts-page {
+  width: min(100%, 1000px);
+  max-width: none;
+}
+.gifts-page .gifts-title {
+  font-size: 1.375rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -.025em;
+}
+.gifts-page .gifts-header { align-items: flex-start; padding: 0; }
+.gifts-page .gift-card {
+  gap: 8px;
+  padding: 12px;
+  background: var(--astryx-surface);
+}
+.gifts-page .gift-card-photo { border-radius: var(--astryx-radius-control); background: var(--astryx-neutral); }
+.gifts-page .gift-button, .gift-form .gift-button { border-radius: var(--astryx-radius-control); }
+
+.memoly-app-root[data-ui-version='v2'] main > section.astryx-child-form {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--astryx-line);
+  border-radius: var(--astryx-radius-panel);
+  background: var(--astryx-surface);
+}
+.astryx-child-form > h1 { margin: 0; font-size: 1.375rem; line-height: 1.25; }
+.astryx-child-form .astryx-child-photo {
+  width: fit-content;
+  min-height: 44px;
+  flex-direction: row;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--astryx-line);
+  border-radius: var(--astryx-radius-control);
+}
+.astryx-child-form .astryx-child-photo:focus-within { outline: 2px solid var(--astryx-focus); outline-offset: 2px; }
+.astryx-child-form .astryx-child-photo-preview {
+  width: 32px;
+  height: 32px;
+  background: var(--astryx-neutral);
+}
+.astryx-child-form :is(.mt-6, .mt-5, .mt-7) { margin-top: 16px; }
+.astryx-child-form fieldset button[aria-pressed] { border: 1px solid var(--astryx-line-strong); }
+.astryx-child-form fieldset button[aria-pressed='true'] { border-color: var(--astryx-accent); }
+.memoly-app-root[data-ui-version='v2'] .child-edit-v2-screen .child-edit-v2-save {
+  min-height: 48px;
+  border-radius: var(--astryx-radius-control);
+  background: var(--astryx-accent);
+  box-shadow: none;
+}
+.memoly-app-root[data-ui-version='v2'] :is(.child-edit-v2-screen, .child-photo-saved-v2-screen, .child-profile) {
+  --ink: var(--astryx-text);
+  --muted: var(--astryx-muted);
+  color: var(--astryx-text);
+  background: var(--astryx-canvas);
+}
+
+html[data-ui-version='v2'] [data-memoly-bottom-sheet='true']:has(:is(.ml-settings-sheet, .memoly-add-sheet-panel)) {
+  max-height: calc(100dvh - max(var(--host-inset-top, 0px), env(safe-area-inset-top, 0px)));
+  border-radius: 16px 16px 0 0;
+  color: var(--astryx-text);
+  background: var(--astryx-surface);
+  box-shadow: var(--astryx-shadow);
+}
+html[data-ui-version='v2'] [data-slot='drawer-overlay']:has(+ [data-memoly-bottom-sheet='true']) { backdrop-filter: none; }
+.ml-settings-sheet .astryx-settings-title {
+  padding: 8px 12px 12px;
+  color: var(--astryx-text);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+.ml-settings-sheet .ml-settings-list { gap: 4px; }
+.ml-settings-sheet .ml-sheet-row {
+  min-height: 60px;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--astryx-line);
+  border-radius: var(--astryx-radius-control);
+  color: var(--astryx-text);
+  background: var(--astryx-surface);
+  box-shadow: none;
+}
+.ml-settings-sheet .ml-sheet-row strong { font-size: .875rem; }
+.ml-settings-sheet .ml-sheet-row small { color: var(--astryx-muted); font-size: .75rem; line-height: 1.35; }
+.ml-settings-sheet .ml-sheet-row:hover { border-color: var(--astryx-line-strong); }
+.ml-settings-sheet .ml-sheet-row-chevron { font-size: 1.25rem; }
+.ml-settings-sheet .astryx-theme-choices { padding: 0 8px 8px; }
+.ml-settings-sheet .astryx-theme-choices > p { color: var(--astryx-muted); font-size: .875rem; }
+.ml-settings-sheet .astryx-theme-choices .ml-theme-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.ml-settings-sheet .astryx-theme-choices .ml-theme-choice {
+  min-height: 64px;
+  grid-template-columns: 16px minmax(0, 1fr) 16px;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--astryx-line);
+  border-radius: var(--astryx-radius-control);
+  background: var(--astryx-surface);
+  box-shadow: none;
+}
+.ml-settings-sheet .astryx-theme-choices .ml-theme-choice[aria-pressed='true'] {
+  border-color: var(--astryx-accent);
+  background: var(--astryx-accent-soft);
+}
+.astryx-theme-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--astryx-avatar-swatch) 16%, var(--astryx-surface));
+  border: 1px solid var(--astryx-line-strong);
+}
+.astryx-theme-choices .ml-theme-radio-mark { width: 16px; height: 16px; }
+.astryx-theme-choices [aria-pressed='true'] .ml-theme-radio-mark { border-color: var(--astryx-accent); }
+.astryx-theme-choices [aria-pressed='true'] .ml-theme-radio-mark::after {
+  width: 6px;
+  height: 6px;
+  background: var(--astryx-accent);
+}
+
+.memoly-add-sheet-panel .add-options { grid-template-columns: 1fr; gap: 8px; }
+.memoly-add-sheet-panel .add-option {
+  min-height: 60px;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px 12px;
+  border: 1px solid var(--astryx-line);
+  border-radius: var(--astryx-radius-control);
+  color: var(--astryx-text);
+  background: var(--astryx-surface);
+  text-align: start;
+  box-shadow: none;
+}
+.memoly-add-sheet-panel .add-option:hover { border-color: var(--astryx-line-strong); }
+.memoly-add-sheet-panel .add-option:active { transform: none; box-shadow: inset 0 0 0 2px var(--astryx-pressed); }
+.memoly-add-sheet-panel .add-option-title { font-size: .875rem; font-weight: 650; }
+.memoly-add-sheet-panel .add-option-copy { margin-top: 4px; font-size: .75rem; }
+.memoly-add-sheet-panel .sheet-title { margin: 12px 0 4px; font-size: 1.25rem; text-align: start; }
+.memoly-add-sheet-panel .sheet-subtitle { margin: 0 0 12px; font-size: .8125rem; text-align: start; }
+
+@media (min-width: 768px) {
+  .memoly-app-root[data-ui-version='v2'] .family-overview-host {
+    width: min(100%, 1000px);
+    margin-inline: auto;
+    padding: 24px 24px 0;
+  }
+  .memoly-app-root[data-ui-version='v2'] .family-overview-body {
+    width: 100%;
+    padding-inline: 0;
+  }
+  .astryx-family-title, .gifts-page .gifts-title { font-size: 1.75rem; }
+  .albums-surface { padding: 24px 24px 0; }
+  .albums-surface .albums-main { padding-inline: 0; }
+  .albums-surface .albums-catalog { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .albums-surface[data-albums-route='catalog'] .albums-main > .albums-heading > h1 { font-size: 1.75rem; }
+  .memoly-app-root[data-ui-version='v2'] .gifts-page { padding: calc(24px + var(--host-inset-top, 0px)) 24px 32px; }
+  .gifts-page .gifts-header { flex-direction: row; align-items: center; justify-content: space-between; }
+  .gifts-page .gifts-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .gifts-page .gifts-list .gift-card { height: 100%; }
+}
+
+@media (min-width: 1100px) {
+  .albums-surface .albums-catalog { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .gifts-page .gifts-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.memoly-wordmark {
+  display: block;
+  width: fit-content;
+  color: var(--astryx-text);
+  font-size: 1.375rem;
+  font-weight: 750;
+  line-height: 1.15;
+  letter-spacing: -.04em;
+}

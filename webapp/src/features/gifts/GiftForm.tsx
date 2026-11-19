@@ -1,13 +1,15 @@
-import { useEffect, useId, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent } from 'react'
+import { useContext, useEffect, useId, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent } from 'react'
 import { giftUrlSchema, type CreateGiftRequest, type GiftDto, type GiftMetadataResponse, type UpdateGiftRequest } from '@web-app-demo/contracts'
 
 import { MemolyBottomSheet } from '@/components/MemolyBottomSheet'
 import { Typography } from '@/components/typography'
 import { WebpIcon } from '@/components/WebpIcon'
+import { astryxGiftCover } from '@/components/astryx-icon-manifest'
 import { resolveWebpIconSource } from '@/components/webp-icon-manifest'
 import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { createIdempotencyKey, validateSize, verifyComposerFile } from '@/features/composer'
 import { uploadFamilyPhoto } from '@/features/family'
+import { UiVersionContext, type UiVersion } from '@/features/ui-version'
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { usePrivateImageUrl } from '@/platform/media/use-private-image-url'
 
@@ -25,7 +27,7 @@ type PickedPhoto = {
   key: string
 }
 
-async function fetchGiftFallbackIcon(signal: AbortSignal): Promise<File> {
+async function fetchGiftFallbackIcon(signal: AbortSignal, uiVersion: UiVersion): Promise<File> {
   const controller = new AbortController()
   let timedOut = false
   const abortWithSave = () => controller.abort()
@@ -36,7 +38,7 @@ async function fetchGiftFallbackIcon(signal: AbortSignal): Promise<File> {
     controller.abort()
   }, 10_000)
   try {
-    const iconUrl = resolveWebpIconSource('gift', 'default', 3).src
+    const iconUrl = uiVersion === 'v2' ? astryxGiftCover.url : resolveWebpIconSource('gift', 'default', 3).src
     const response = await fetch(iconUrl, { credentials: 'same-origin', signal: controller.signal })
     if (!response.ok || !response.headers.get('content-type')?.toLowerCase().includes('image/webp')) {
       throw new Error('Не удалось подготовить значок подарка')
@@ -79,6 +81,7 @@ export function GiftFormSheet({ open, onClose, target, ...props }: GiftFormSheet
 }
 
 function GiftFormBody({ accountId, familyId, onBusyChange, onClose, onSaved, onStale, scopeKey, target, transport }: Omit<GiftFormSheetProps, 'open' | 'target'> & { target: GiftFormTarget; onBusyChange: (busy: boolean) => void }) {
+  const uiVersion = useContext(UiVersionContext)
   const editing = target.mode === 'edit' ? target.gift : null
   const ids = { url: useId(), title: useId(), price: useId(), photo: useId() }
   const [url, setUrl] = useState(editing?.url ?? '')
@@ -306,7 +309,7 @@ function GiftFormBody({ accountId, familyId, onBusyChange, onClose, onSaved, onS
         automatic.current.photo = true
       }
       if (!editing && !photoToSave) {
-        const iconFile = await fetchGiftFallbackIcon(abort.signal)
+        const iconFile = await fetchGiftFallbackIcon(abort.signal, uiVersion)
         const media = await verifyComposerFile(iconFile)
         if (!media || media.kind !== 'photo') throw new Error('Не удалось подготовить значок подарка')
         const previewUrl = URL.createObjectURL(iconFile)

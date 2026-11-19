@@ -9,6 +9,7 @@ import type { TelegramInsets } from '@/platform/telegram/host-bridge'
 
 import './memoly-feed.css'
 import './child-pages.css'
+import './astryx-feed.css'
 
 export type FeedFilter = 'all' | 'photo' | 'video' | 'voice' | 'note'
 
@@ -69,9 +70,11 @@ export function FeedPresentation(props: FeedPresentationProps) {
 
   return (
     <div data-memoly-feed="true" style={style}>
-      <main className="app" data-slot="feed-scroll">
-        <Typography as="h1" className="sr-only" variant="memoryChild">Лента воспоминаний</Typography>
+      <main className="app astryx-feed" data-slot="feed-scroll">
+        <Typography as="h1" className="astryx-feed-title" variant="memoryScreen">Лента воспоминаний</Typography>
+        <div className="astryx-feed-identity">
         {props.header ?? <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarStatus={props.childAvatarStatus} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" onAllFamilies={props.onAllFamilies} onOpenChild={props.onOpenChild} onOpenSettings={props.onOpenSettings} theme={theme} />}
+        </div>
         <div className="feed-rest">
         {props.renderSubheader?.()}
         {props.unreadState !== 'not_enabled' && props.onUnreadChange && props.unreadOnly ? (
