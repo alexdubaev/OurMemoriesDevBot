@@ -173,10 +173,19 @@ export function AlbumsPage(props: AlbumsPageProps) {
   useEffect(() => {
     if (!album) return
     const id = album.id; const generation = ++requestGeneration.current
-    void Promise.all([api.entries(id, undefined, category, year, album.kind === 'year'), album.kind === 'workshop' ? api.groups(id) : Promise.resolve(null)]).then(([page, summary]) => {
-      if (generation !== requestGeneration.current || scopeController.isAborted()) return
-      setEntries(page.items); setEntryCursor(page.nextCursor); if (summary) setGroups(summary.groups)
-    }).catch((reason) => { if (generation === requestGeneration.current) fail(reason) }).finally(() => { if (generation === requestGeneration.current && !scopeController.isAborted()) setLoading(false) })
+    const isCurrent = () => generation === requestGeneration.current && !scopeController.isAborted()
+    void api.entries(id, undefined, category, year, album.kind === 'year').then((page) => {
+      if (!isCurrent()) return
+      setEntries(page.items); setEntryCursor(page.nextCursor)
+    }).catch((reason) => { if (isCurrent()) fail(reason) }).finally(() => { if (isCurrent()) setLoading(false) })
+    if (album.kind === 'workshop') {
+      // The year picker is independent of the entries and their thumbnails.
+      const albumGeneration = albumRead.current
+      const isSummaryCurrent = () => isCurrent() && albumGeneration === albumRead.current
+      void api.groups(id).then((summary) => {
+        if (isSummaryCurrent()) setGroups(summary.groups)
+      }).catch((reason) => { if (isSummaryCurrent()) fail(reason) })
+    }
     return () => { requestGeneration.current += 1 }
     // Album version changes do not restart the paginated window; only scope/filter does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -199,7 +208,7 @@ export function AlbumsPage(props: AlbumsPageProps) {
   async function openAlbum(item: AlbumDto) {
     if (pending.current) return
     activeAlbumId.current = item.id; const generation = ++albumRead.current; setLoading(true); setWorkshopLevel(1); setWorkshopFocusId(null); setWorkshopFocusTop(null)
-    setCategory(undefined); setYear(undefined); setEntries([]); setEntryCursor(null); setEntry(null); setAlbum(item); setError(null); setConflict(false); scrolls.current.album = 0; navigate('album')
+    setCategory(undefined); setYear(undefined); setGroups([]); setEntries([]); setEntryCursor(null); setEntry(null); setAlbum(item); setError(null); setConflict(false); scrolls.current.album = 0; navigate('album')
     try { const result = await api.album(item.id); if (!scopeController.isAborted() && generation === albumRead.current && activeAlbumId.current === item.id) setAlbum(result.album) } catch (reason) { if (generation === albumRead.current && activeAlbumId.current === item.id) fail(reason) }
   }
   const openRequestedAlbum = useEffectEvent((albumId: string) => {
