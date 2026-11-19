@@ -617,6 +617,40 @@ test('feed and family navigation expose working controls', async ({ page }) => {
   await expect(page.locator('.family-invite-btn')).toBeVisible()
 })
 
+test('returning to Albums restores the previous scroll without resetting to the top', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 500 })
+  await page.goto('/e2e/selected-family-app.harness.html?channelMemory&albums=80')
+  const nav = page.getByRole('navigation', { name: 'Основная навигация' })
+  const albums = page.locator('[data-navigation-surface="albums"]:visible')
+  await nav.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await albums.getByRole('button', { name: /Мастерская/ }).click()
+  await expect(albums.getByRole('heading', { name: 'Мастерская' })).toBeVisible()
+  await expect(albums.locator('[data-album-tile]').first()).toBeVisible()
+  await page.evaluate(() => window.scrollTo(0, 700))
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(700)
+
+  await nav.getByRole('button', { name: 'Лента', exact: true }).click()
+  await expect(page.locator('[data-navigation-surface="feed"]:visible')).toBeVisible()
+  await page.evaluate(() => {
+    const scrollTo = window.scrollTo.bind(window)
+    const albumScrollPositions: number[] = []
+    Object.assign(window, { albumScrollPositions })
+    window.scrollTo = (x?: number | ScrollToOptions, y?: number) => {
+      if (typeof x === 'number') scrollTo(x, y ?? 0)
+      else scrollTo(x)
+      albumScrollPositions.push(window.scrollY)
+    }
+  })
+
+  await nav.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await expect(albums.getByRole('heading', { name: 'Мастерская' })).toBeVisible()
+  const restored = await page.evaluate(() => ({
+    position: window.scrollY,
+    steps: (window as Window & { albumScrollPositions?: number[] }).albumScrollPositions,
+  }))
+  expect(restored).toEqual({ position: 700, steps: [700] })
+})
+
 test('add sheet traps focus and closes with Escape or browser Back', async ({ page }) => {
   await page.goto('/e2e/memoly-v4.harness.html')
   const opener = page.getByRole('button', { name: 'Добавить' })
