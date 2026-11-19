@@ -13,11 +13,12 @@ type Props = {
   scopeKey: string
   transport: AuthenticatedTransport
   onOpen: (index: number, element: HTMLElement) => void
+  keepWarm?: boolean
   showCoverIcon?: boolean
   label?: string
 }
 
-export function MonthPhotoCollage({ pages, cover, accountId, scopeKey, transport, onOpen, showCoverIcon = true, label = 'Фотографии месяца' }: Props) {
+export function MonthPhotoCollage({ pages, cover, accountId, scopeKey, transport, onOpen, keepWarm = false, showCoverIcon = true, label = 'Фотографии месяца' }: Props) {
   const root = useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = useState({ width: 0, top: 0, height: 0 })
   const layout = useMemo(() => monthCollageLayout(pages, viewport.width, Boolean(cover)), [pages, viewport.width, cover])
@@ -50,7 +51,7 @@ export function MonthPhotoCollage({ pages, cover, accountId, scopeKey, transport
 
   const margin = Math.min(viewport.height / 2, 450)
   const visible = layout.tiles.filter(({ y, height }) => y + height >= viewport.top - margin && y <= viewport.top + viewport.height + margin).slice(0, 84)
-  const preview = (source: AlbumSource) => <SourcePreview accountId={accountId} scopeKey={scopeKey} source={source} transport={transport} />
+  const preview = (source: AlbumSource) => <SourcePreview accountId={accountId} keepWarm={keepWarm} scopeKey={scopeKey} source={source} transport={transport} />
 
   return <div aria-label={label} className="month-collage" role="group">
     {cover ? <div className="month-collage-cover" data-month-cover={cover.id}>

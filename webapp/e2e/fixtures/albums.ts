@@ -46,11 +46,15 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
   let revokeNextAlbumRead = false
   let delayNextEntriesPage = false
   let failNextPickerRead = false
+  let heldRead: Promise<void> | undefined
+  let releaseRead: (() => void) | undefined
   Object.assign(window, {
     __albumsEvidence: { log, albums, entries, published: 0, rawPaths: [] as string[], lateReadStarted: false, lateReadCompleted: false },
     __albumsDelay: false,
     __albumsRevokeOnNextRead: () => { revokeNextAlbumRead = true; delayNextEntriesPage = true; evidence.lateReadStarted = false; evidence.lateReadCompleted = false },
     __albumsFailNextPickerRead: () => { failNextPickerRead = true },
+    __albumsHoldPageReads: () => { heldRead = new Promise((resolve) => { releaseRead = resolve }) },
+    __albumsReleasePageReads: () => { releaseRead?.(); heldRead = undefined; releaseRead = undefined },
   })
   const evidence = (window as unknown as { __albumsEvidence: { published: number; rawPaths: string[]; lateReadStarted: boolean; lateReadCompleted: boolean } }).__albumsEvidence
   const bump = (album: AlbumDto, item: AlbumEntryDto) => { album.version += 1; item.version += 1; item.aggregateVersion = album.version; album.entryCount = album.kind === 'year' ? (entries.get(album.id) ?? []).filter((item) => item.caption || item.sources.some((source) => source.available)).length : entries.get(album.id)!.length }
@@ -116,6 +120,7 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
     if (segments[2] === 'workshop-groups') return done({ groups: [{ year: 2026, month: 10, count: list.length }] })
     if (segments[2] === 'entries:reorder') { const index = list.findIndex((item) => item.id === body!.entryId); const [item] = list.splice(index, 1); const before = body!.beforeEntryId ? list.findIndex((item) => item.id === body!.beforeEntryId) : list.length; list.splice(before, 0, item); bump(album, item); return done({ album }) }
     if (segments.length === 3 && method === 'GET') {
+      await heldRead
       if (delayNextEntriesPage) { delayNextEntriesPage = false; evidence.lateReadStarted = true; await new Promise((resolve) => setTimeout(resolve, 900)); evidence.lateReadCompleted = true }
       const filtered = list.filter((entry) => !parsed.searchParams.get('category') || entry.category === parsed.searchParams.get('category'))
       const start = Number(parsed.searchParams.get('cursor') ?? 0)
@@ -155,13 +160,17 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
     }
     if (method === 'GET' && segments[4] === 'sources' && item.kind === 'month') {
       const kind = parsed.searchParams.get('kind')
+      if (kind === 'photo') await heldRead
       const cover = projectedEntry(item, album, 'month-summary').month?.cover
       const candidates = item.sources.filter((source) => source.available && (kind === 'cover-media' ? source.kind === 'photo' || source.kind === 'video' : kind === 'other' ? source.kind !== 'photo' : source.kind === 'photo' && source.id !== cover?.id))
       const start = Number(parsed.searchParams.get('cursor') ?? 0)
       const limit = Number(parsed.searchParams.get('limit') ?? 24)
       return done({ items: candidates.slice(start, start + limit), nextCursor: start + limit < candidates.length ? String(start + limit) : null })
     }
-    if (method === 'GET') return done({ entry: projectedEntry(item, album, parsed.searchParams.get('view')) })
+    if (method === 'GET') {
+      if (item.kind === 'month') await heldRead
+      return done({ entry: projectedEntry(item, album, parsed.searchParams.get('view')) })
+    }
     if (segments[4] === 'month-cover' && method === 'PUT') {
       if (typeof body?.sourceId === 'string') monthCovers.set(item.id, body.sourceId)
       else monthCovers.delete(item.id)
