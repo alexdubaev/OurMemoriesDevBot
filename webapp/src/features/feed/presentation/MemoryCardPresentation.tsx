@@ -59,6 +59,7 @@ export type MemoryCardPresentationProps = {
   memoryId: string
   mode?: 'feed' | 'delete-preview'
   isDeleteSource?: boolean
+  surfaceActive?: boolean
   reactionScopeKey?: string
   occurredTime: string
   onReaction: (reaction: MemoryReaction | null) => void
@@ -90,6 +91,7 @@ export function MemoryCardPresentation({
   memoryId,
   mode = 'feed',
   isDeleteSource = false,
+  surfaceActive = true,
   reactionScopeKey,
   occurredTime,
   onReaction,
@@ -101,7 +103,7 @@ export function MemoryCardPresentation({
   reactionPickerRequest = 0,
 }: MemoryCardPresentationProps) {
   const hasCaption = body.trim().length > 0
-  const interactive = mode === 'feed'
+  const interactive = mode === 'feed' && surfaceActive
   const articleRef = useRef<HTMLElement>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pointerRef = useRef<{ id: number; x: number; y: number; target: EventTarget | null; pointerType: string } | null>(null)
@@ -111,7 +113,8 @@ export function MemoryCardPresentation({
   const holdResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [pickerState, setPickerState] = useState({ open: false, context: '' })
   const reactionContext = `${memoryId}:${reactionScopeKey ?? ''}`
-  const pickerOpen = pickerState.open && pickerState.context === reactionContext
+  const pickerOpen = interactive && pickerState.open && pickerState.context === reactionContext
+  if (!surfaceActive && pickerState.open) setPickerState({ open: false, context: reactionContext })
   const pickerOpenRef = useRef(pickerOpen)
   const setPickerOpen = useCallback((open: boolean) => {
     pickerOpenRef.current = open
@@ -137,6 +140,11 @@ export function MemoryCardPresentation({
 
   useEffect(() => {
     pickerOpenRef.current = false
+    if (!surfaceActive) {
+      didHoldRef.current = false
+      holdClickTargetRef.current = null
+      return
+    }
     const cancelOnScroll = () => { cancelPending(); setPickerOpen(false) }
     const article = articleRef.current
     const blockNativePublicationMenu = (event: Event) => {
@@ -199,7 +207,7 @@ export function MemoryCardPresentation({
       if (pendingTouch) installRetargetedTouchClickGuard(document, window, pendingTouch.id, pendingTouch.x, pendingTouch.y)
       document.removeEventListener('scroll', cancelOnScroll, true); article?.removeEventListener('selectstart', blockNativePublicationMenu); article?.removeEventListener('contextmenu', blockNativePublicationMenu); document.removeEventListener('pointerdown', clearReleasedHoldLatch, true); document.removeEventListener('pointerdown', cancelOtherPointer, true); document.removeEventListener('pointermove', cancelOnGlobalMove, true); document.removeEventListener('pointerup', cancelReleasedPointer, true); document.removeEventListener('pointercancel', cancelCancelledPointer, true); window.removeEventListener('blur', cancelOnScroll); document.removeEventListener('visibilitychange', cancelOnScroll); window.removeEventListener('pagehide', cancelOnScroll); cancelPending(); recognizedPointerRef.current = null; if (holdResetTimerRef.current) clearTimeout(holdResetTimerRef.current)
     }
-  }, [cancelPending, interactive, kind, memoryId, reactionScopeKey, setPickerOpen])
+  }, [cancelPending, interactive, kind, memoryId, reactionScopeKey, setPickerOpen, surfaceActive])
 
   const eligible = (event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0 || event.isPrimary === false) return false
