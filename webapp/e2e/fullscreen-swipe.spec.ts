@@ -341,3 +341,32 @@ test('mixed fullscreen photo swipe down closes intentionally and ignores guarded
   await expect.poll(() => app.evaluate((element) => element.scrollTop)).toBe(scrollBeforeClose)
   await expect.poll(() => page.evaluate(() => window.history.state?.mixedMediaViewer ?? false)).toBe(false)
 })
+
+test('fullscreen MAX video keeps its preview and play control when selected after a photo', async ({ page }) => {
+  await page.goto('/e2e/fixed-carousel.harness.html?max-mixed')
+
+  const card = page.locator('.memory-card')
+  await card.locator('[data-carousel-dot="2"]').click()
+  await card.getByRole('button', { name: 'Открыть фото' }).click()
+
+  const viewer = page.locator('[data-mixed-viewer]')
+  await expect(viewer.getByText('2 / 2')).toBeVisible()
+  await expect(viewer.locator('[data-carousel-position="1"] img')).toBeVisible()
+  await viewer.getByRole('button', { name: 'Назад' }).click()
+  await expect(viewer.getByText('1 / 2')).toBeVisible()
+  await expectFullscreenSlideSettled(viewer)
+
+  const activeSlide = viewer.locator('[data-carousel-active="true"]')
+  await expect.poll(() => activeSlide.locator('video').evaluate((video) => {
+    const viewport = video.closest('.memoly-mixed-viewer-media')!
+    return video.getBoundingClientRect().height / viewport.getBoundingClientRect().height
+  })).toBeGreaterThan(0.9)
+  await expect(activeSlide.getByAltText('Кадр видео')).toBeVisible()
+  const play = activeSlide.getByRole('button', { name: 'Смотреть видео' })
+  await expect(play).toBeEnabled()
+  await play.click({ trial: true })
+
+  await viewer.getByRole('button', { name: 'Далее' }).click()
+  await expect(viewer.getByText('2 / 2')).toBeVisible()
+  await expect(viewer.locator('[data-carousel-active="true"]').getByAltText('Воспоминание')).toBeVisible()
+})
