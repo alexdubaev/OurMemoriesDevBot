@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { BrandLogo } from '@/components/BrandLogo'
 import { Typography } from '@/components/typography'
+import { WebpIcon } from '@/components/WebpIcon'
 import { AvatarEditor, avatarCropStyle, createAvatarPreview, fullAvatarCrop, resolveAvatarContentType } from '@/features/avatar'
 import type { AvatarCrop } from '@/features/avatar'
 import { ApiRequestError } from '@/platform/api'
@@ -303,13 +304,13 @@ export function FamilyOnboarding({
     <>
     <main hidden={Boolean(cropPreviewUrl)} className={`${cropPreviewUrl ? 'family-screen child-screen child-edit-v2-screen child-photo-v2-screen' : photoSaved ? 'family-screen child-screen child-photo-saved-v2-screen' : isChildEdit ? 'family-screen child-screen child-edit-v2-screen' : ''} mx-auto flex min-h-screen min-h-dvh max-w-[var(--layout-max-width)] flex-col px-[calc(var(--layout-gutter)+var(--host-inset-left))] pb-[calc(var(--layout-gutter)+var(--host-inset-bottom))] pt-[calc(var(--layout-gutter)+var(--host-inset-top))] pr-[calc(var(--layout-gutter)+var(--host-inset-right))]`}>
       {photoSaved ? null : isChildEdit ? <div className="child-titlebar ui-topbar ds-topbar child-edit-v2-titlebar">
-        <button aria-label="Назад к семье" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" disabled={submitting} onClick={requestCancel} type="button"><Typography aria-hidden="true" as="span" variant="memoryScreen">‹</Typography></button>
+        <button aria-label="Назад к семье" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" disabled={submitting} onClick={requestCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
         <Typography className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" variant="memoryScreen">Редактировать профиль</Typography>
         <span aria-hidden="true" className="child-title-action" />
       </div> : <BrandLogo className="w-[148px]" />}
-      <section aria-labelledby={photoSaved || isChildEdit ? 'child-onboarding-title' : undefined} className={photoSaved ? 'child-shell' : isChildEdit ? 'child-edit-v2-shell' : 'astryx-child-form mx-auto mt-6 w-full max-w-md pb-10'} data-slot={isChildEdit && !photoSaved ? 'child-profile-editor' : undefined}>
+      <section aria-labelledby={photoSaved || isChildEdit ? 'child-onboarding-title' : undefined} className={photoSaved ? 'child-shell' : isChildEdit ? 'child-edit-v2-shell' : 'mx-auto mt-6 w-full max-w-md pb-10'} data-slot={isChildEdit && !photoSaved ? 'child-profile-editor' : undefined}>
         {photoSaved ? <div className="child-titlebar ui-topbar ds-topbar">
-          <button aria-label="Вернуться в профиль ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" onClick={requestCancel} type="button"><Typography aria-hidden="true" as="span" variant="memoryScreen">‹</Typography></button>
+          <button aria-label="Вернуться в профиль ребёнка" className="family-round-btn ui-round-btn ds-icon-btn child-back-btn" onClick={requestCancel} type="button"><WebpIcon className="family-back-icon" decorative name="chevron" size={22} /></button>
           <Typography className="child-page-title ui-page-title ds-page-title" id="child-onboarding-title" variant="memoryScreen" />
           <span aria-hidden="true" className="child-title-action" />
         </div> : null}
@@ -319,9 +320,9 @@ export function FamilyOnboarding({
           <Typography as="p" variant="memoryBody">Новое фото профиля сохранено.</Typography>
           <Button className="child-primary ui-btn ui-btn-primary ds-btn ds-btn--primary" onClick={requestCancel} type="button">Перейти в профиль</Button>
         </div> : <>
-        {!isChildEdit ? <Typography as="h1" id="child-onboarding-title" variant="memoryHero">{photoOnly ? 'Сменить фото ребёнка' : addChild ? 'Добавить ребёнка' : 'Расскажите о ребёнке'}</Typography> : null}
+        {!isChildEdit ? <Typography id="child-onboarding-title" variant="memoryHero">{photoOnly ? 'Сменить фото ребёнка' : addChild ? 'Добавить ребёнка' : 'Расскажите о ребёнке'}</Typography> : null}
         {!isChildEdit ? <Typography className="mt-2" tone="muted" variant="memoryBody">
-          {photoOnly ? 'Выберите фотографию, настройте кадрирование и сохраните.' : addChild ? 'Укажите имя, дату рождения и пол ребёнка, затем добавьте фотографию.' : 'Это поможет сделать семейную ленту вашей.'}
+          {photoOnly ? 'Выберите фотографию, настройте кадрирование и сохраните.' : addChild ? 'Имя, дата рождения, пол и фотография — как у первого ребёнка.' : 'Это поможет сделать семейную ленту вашей.'}
         </Typography> : null}
 
         {isChildEdit ? <div className="child-edit-v2-intro">
@@ -352,15 +353,19 @@ export function FamilyOnboarding({
           </label>
           {displayAvatarUrl ? <Button className="child-edit-v2-crop-link" onClick={openDisplayedAvatarCrop} type="button" variant="ghost">Изменить кадрирование</Button> : null}
           <Typography as="p" className="ds-meta" variant="memoryMeta">Изменения увидят только участники вашей семьи.</Typography>
-        </div> : <label className="astryx-child-photo mt-7 flex cursor-pointer flex-col items-center gap-3" htmlFor="child-avatar">
-          {displayAvatarUrl ? <span className="astryx-child-photo-preview relative overflow-hidden rounded-full">
-            <img
-              alt={previewUrl ? 'Предпросмотр аватара ребёнка' : 'Текущий аватар ребёнка'}
-              className="size-full object-cover"
-              src={displayAvatarUrl}
-              style={avatarCropStyle(confirmedCrop)}
-            />
-          </span> : null}
+        </div> : <label className="mt-7 flex cursor-pointer flex-col items-center gap-3" htmlFor="child-avatar">
+          <span className="relative grid size-36 place-items-center overflow-hidden rounded-full bg-accent">
+            {displayAvatarUrl ? (
+              <img
+                alt={previewUrl ? 'Предпросмотр аватара ребёнка' : 'Текущий аватар ребёнка'}
+                className="size-full object-cover"
+                src={displayAvatarUrl}
+                style={avatarCropStyle(confirmedCrop)}
+              />
+            ) : (
+              <Typography variant="memoryChild">Фото</Typography>
+            )}
+          </span>
           <Typography tone="primary" variant="memoryButton">{initialChild ? 'Заменить фотографию' : 'Выбрать фотографию'}</Typography>
           <input
             accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
@@ -379,11 +384,13 @@ export function FamilyOnboarding({
           <section className="child-edit-v2-card surface-raised ds-card ds-card--standard">
             <label className="child-edit-v2-label ds-label" htmlFor="child-name"><Typography as="span" style={{ font: 'inherit' }} variant="label">Имя ребёнка</Typography></label>
             <div className="child-edit-v2-field surface-inset">
+              <WebpIcon decorative name="user" size={19} />
               <input id="child-name" maxLength={60} onChange={(event) => setName(event.target.value)} value={name} />
             </div>
             <FieldError message={formErrors.name} />
             <label className="child-edit-v2-label child-edit-v2-label--spaced ds-label" htmlFor="child-birth-date"><Typography as="span" style={{ font: 'inherit' }} variant="label">Дата рождения</Typography></label>
             <div className="child-edit-v2-field surface-inset">
+              <WebpIcon decorative name="calendar" size={19} />
               <input id="child-birth-date" max={maximumBirthDate} onChange={(event) => setBirthDate(event.target.value)} type="date" value={birthDate} />
             </div>
             {age !== null ? <div className="child-edit-v2-helper ds-meta"><Typography as="span" style={{ font: 'inherit' }} variant="memoryMeta">Сейчас {age}</Typography></div> : null}

@@ -230,6 +230,7 @@ export function GiftsPage({
 
       {gifts === undefined && query.isError ? (
         <div className="gifts-state" role="alert">
+          <WebpIcon decorative name="warning" size={40} />
           <Typography as="h2" variant="memoryEmptyTitle">Не удалось загрузить подарки</Typography>
           <Typography as="p" className="gifts-state-text" variant="memoryCaption">Проверьте соединение и попробуйте ещё раз.</Typography>
           <button className="gift-button gift-button--primary" disabled={query.isFetching} onClick={() => void refresh()} type="button">
@@ -244,6 +245,7 @@ export function GiftsPage({
 
       {isEmpty ? (
         <div className="gifts-state" data-slot="gifts-empty">
+          <WebpIcon decorative name="gift" size={56} />
           {role === 'full' ? <>
             <Typography as="h2" variant="memoryEmptyTitle">Пока нет подарков</Typography>
             <Typography as="p" className="gifts-state-text" variant="memoryCaption">Здесь будут подарки для {child.name}. Добавьте ссылку на товар, название и фото</Typography>

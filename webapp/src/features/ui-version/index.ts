@@ -1,1 +1,1 @@
-export { readUiVersion, resolveUiVersion, UiVersionContext, type UiVersion } from './ui-version'
+export { readUiVersion, resolveUiVersion, type UiVersion } from './ui-version'

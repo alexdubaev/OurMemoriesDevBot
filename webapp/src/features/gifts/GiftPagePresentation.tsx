@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import { BottomNavigation } from '@/components/BottomNavigation'
 import { Typography } from '@/components/typography'
+import { WebpIcon } from '@/components/WebpIcon'
 
 export type GiftPagePresentationProps = {
   afterNavigation?: ReactNode
@@ -20,11 +21,9 @@ export type GiftPagePresentationProps = {
 export function GiftPagePresentation({ afterNavigation, childName, children, onAdd, onAlbums, onCreate, onFamily, onFeed, role, showAddButton }: GiftPagePresentationProps) {
   return <section aria-label="Вишлист" className="gifts-page" data-slot="gifts-page">
     <header className="gifts-header">
-      <div>
-        <Typography as="h1" className="gifts-title" variant="memoryScreen">Вишлист</Typography>
-        <Typography as="p" tone="muted" variant="memoryMeta">{childName}</Typography>
-      </div>
+      <Typography as="h1" className="gifts-title" variant="memoryScreen">Вишлист для {childName}</Typography>
       {role === 'full' && showAddButton ? <button className="gift-button gift-button--primary" onClick={onCreate} type="button">
+        <WebpIcon decorative monochrome name="plus" size={18} />
         <Typography as="span" variant="memoryButton">Добавить подарок</Typography>
       </button> : null}
     </header>

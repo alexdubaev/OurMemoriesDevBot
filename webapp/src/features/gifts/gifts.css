@@ -58,7 +58,7 @@
   display: flex; align-items: stretch; gap: 12px; width: 100%; min-height: 44px; padding: 0;
   border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
-.gifts-page button.gift-card-link:focus-visible, :is(.gifts-page, .gift-form) :is(button, label).gift-button:focus-visible, .gifts-page button.gift-manage-button:focus-visible, .gifts-page button.gifts-bought-toggle:focus-visible,
+.gifts-page button.gift-card-link:focus-visible, :is(.gifts-page, .gift-form) :is(button, label).gift-button:focus-visible, .gifts-page button.gift-icon-button:focus-visible, .gifts-page button.gifts-bought-toggle:focus-visible,
 .gifts-page button.gift-link-button:focus-visible, .gift-field input:focus-visible {
   outline: 2px solid var(--gift-accent); outline-offset: 2px;
 }
@@ -83,13 +83,12 @@
 :is(.gifts-page, .gift-form) :is(button, label).gift-button--primary { border-color: transparent; background: var(--gift-accent); color: #fff; }
 :is(.gifts-page, .gift-form) :is(button, label).gift-button--danger { border-color: transparent; background: var(--gift-danger); color: #fff; }
 :is(.gifts-page, .gift-form) :is(button, label).gift-button--wide { width: 100%; min-height: 48px; }
-:is(.gifts-page, .gift-form) :is(button, label).gift-button:disabled, .gifts-page button.gift-manage-button:disabled, .gifts-page button.gift-link-button:disabled { opacity: .55; cursor: default; }
-.gifts-page button.gift-manage-button {
-  display: inline-flex; min-width: 44px; min-height: 44px; flex-shrink: 0;
-  align-items: center; justify-content: center; padding-inline: 8px;
+:is(.gifts-page, .gift-form) :is(button, label).gift-button:disabled, .gifts-page button.gift-icon-button:disabled, .gifts-page button.gift-link-button:disabled { opacity: .55; cursor: default; }
+.gifts-page button.gift-icon-button {
+  display: inline-grid; width: 44px; height: 44px; place-items: center; margin-left: 0;
   border: 0; border-radius: 12px; background: transparent; color: var(--gift-muted); cursor: pointer;
 }
-.gift-manage-button > [data-slot='typography'] { font-size: .75rem; }
+.gift-card-actions button.gift-icon-button:first-of-type { margin-left: auto; }
 .gifts-page button.gift-link-button { min-height: 44px; padding: 0 10px; border: 0; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
 
 .gifts-bought { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }

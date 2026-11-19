@@ -1,8 +1,4 @@
-import { createContext } from 'react'
-
 export type UiVersion = 'legacy' | 'v2'
-
-export const UiVersionContext = createContext<UiVersion>('legacy')
 
 export function resolveUiVersion(value: string | undefined): UiVersion {
   return value === 'v2' ? 'v2' : 'legacy'

@@ -803,8 +803,8 @@
   box-shadow: none;
 }
 .child-edit-v2-screen .child-edit-v2-field:focus-within {
-  border-color: var(--astryx-focus);
-  outline: 2px solid var(--astryx-focus);
+  border-color: #4f8066;
+  outline: 2px solid #4f8066;
   outline-offset: -2px;
   box-shadow: none;
 }
@@ -834,7 +834,7 @@
   background: transparent !important;
 }
 .child-edit-v2-screen .child-edit-v2-sex label:focus-within {
-  outline-color: var(--astryx-focus);
+  outline-color: #4f8066;
   outline-offset: -2px;
 }
 @media (max-width: 355px) { .child-edit-v2-screen .child-edit-v2-titlebar { width: min(calc(100% - 20px), 432px); } }
