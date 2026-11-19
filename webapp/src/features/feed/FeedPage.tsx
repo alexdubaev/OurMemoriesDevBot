@@ -103,6 +103,7 @@ function pendingVideoQueryKey(familyId: string, accountId: string, membershipEpo
 }
 
 const VideoQueryScope = createContext({ accountId: '', familyId: '', membershipEpoch: 0 })
+const FeedSurfaceActive = createContext(true)
 const MAX_AUTO_PENDING_VIDEOS = 3
 const MAX_AUTO_PENDING_SUCCESSES = 12
 
@@ -402,6 +403,7 @@ export function FeedPage({
 
   return (
     <VideoQueryScope.Provider value={{ accountId, familyId, membershipEpoch: membershipEpoch ?? 0 }}>
+    <FeedSurfaceActive.Provider value={active}>
     <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ id: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.id, path: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
     <MediaPlaybackCoordinator active={active && !commentsOpen}>
     <FeedPresentation activeFilter="all"
@@ -428,11 +430,12 @@ export function FeedPage({
         ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">Все новые воспоминания просмотрены</Typography><Typography as="p" variant="memoryBody">Новых воспоминаний пока нет.</Typography></div>
         : activeChildFilter ? <ChildFeedEmpty childName={selectedChild?.name} onAdd={role === 'full' && selectedChild ? () => setAddSheetOpen(true) : undefined} onShowAll={() => selectChildFilter(null)} />
         : <EmptyState filtered={false} mode={role} onResetFilter={() => onFilterChange('all')} /> : null}
-      {active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0 ? <MemoryList familyTimezone={familyTimezone} items={visibleItems} renderCard={(memory) => {
+      {isAppBootstrapped && !feed.isPending && visibleItems.length > 0 ? <MemoryList familyTimezone={familyTimezone} items={visibleItems} renderCard={(memory) => {
         const primary = memory.attachments[0]
         return <MemoryCardPresentation
           actions={<MemoryActions memory={memory} onOpen={(target, trigger) => { actionTriggerRef.current = trigger; setActionsMemory(target) }} />}
           isDeleteSource={deleteTarget?.id === memory.id}
+          surfaceActive={active}
           authorInitials={initials(memory.publicationAttribution?.name ?? memory.author.name)}
           authorName={memory.publicationAttribution?.name ?? memory.author.name}
           authorUserId={memory.publicationAttribution?.kind === 'channel' ? null : memory.author.id}
@@ -523,6 +526,7 @@ export function FeedPage({
     />
     </MediaPlaybackCoordinator>
     </FeedSharedAuthorAvatars>
+    </FeedSurfaceActive.Provider>
     </VideoQueryScope.Provider>
   )
 }
@@ -642,13 +646,14 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
 
 function MixedSlideMedia({ active, attachment, hostBridge, memory, multi, onOpen, onPhotoUrlChange, transport }: { active: boolean; attachment: MemoryAttachment; hostBridge: HostBridge; memory: MemoryDto; multi: boolean; onOpen: (trigger: HTMLElement, photoUrl?: string) => void; onPhotoUrlChange: (attachmentId: string, url: string | null) => void; transport: AuthenticatedTransport }) {
   const root = useRef<HTMLDivElement | null>(null)
+  const surfaceActive = useContext(FeedSurfaceActive)
   const { accountId, membershipEpoch } = useContext(VideoQueryScope)
   const posterReadinessPath = attachment.source === 'max' && attachment.posterState === 'pending' ? maxVideoPosterReadinessPath(attachment.playbackPath) : null
   const posterReadinessKey = [...feedQueryKeys.all, 'max-video-poster-readiness', accountId, membershipEpoch, posterReadinessPath] as const
   const posterReadiness = useQuery({
     queryKey: posterReadinessKey,
     queryFn: ({ signal }) => withMaxVideoReadinessSlot(signal, () => transport.request(posterReadinessPath!, maxVideoPosterReadinessSchema, { signal })),
-    enabled: multi && Boolean(posterReadinessPath),
+    enabled: surfaceActive && multi && Boolean(posterReadinessPath),
     refetchInterval: (query) => maxVideoPosterReadinessInterval(query.state),
     refetchIntervalInBackground: false,
     retry: false,
@@ -656,7 +661,7 @@ function MixedSlideMedia({ active, attachment, hostBridge, memory, multi, onOpen
     refetchOnWindowFocus: false,
   })
   const videoPoster = multi && attachment.kind === 'video' ? attachment.source === 'private_storage' ? attachment.displayPath ?? attachment.previewPath : attachment.source === 'telegram' ? attachment.thumbnailPath : attachment.posterState === 'ready' ? attachment.posterPath ?? null : attachment.posterState === 'pending' ? posterReadiness.data?.state === 'ready' ? posterReadiness.data.posterPath : null : maxVideoPosterPath(attachment.playbackPath) : null
-  const posterUrl = usePrivateObjectUrl(videoPoster, transport)
+  const posterUrl = usePrivateObjectUrl(videoPoster, transport, surfaceActive)
   useEffect(() => () => { root.current?.querySelectorAll('video').forEach((video) => video.pause()) }, [])
   if (multi && attachment.kind === 'video') {
     if (active && attachment.source !== 'telegram') return <div className="memoly-mixed-slide-media memoly-mixed-slide-inline-video" ref={root}><Attachment attachment={attachment} feedPreview hostBridge={hostBridge} memory={memory} transport={transport} /></div>
@@ -934,6 +939,8 @@ function Attachment({ attachment, autoplay = false, borrowedPhotoUrl, feedPrevie
   photoInteractive?: boolean
   transport: AuthenticatedTransport
 }) {
+  const surfaceActive = useContext(FeedSurfaceActive)
+  if (!surfaceActive && attachment.kind !== 'photo') return null
   if (attachment.source === 'telegram') return <TelegramVideo attachment={attachment} familyId={memory.familyId} hostBridge={hostBridge} memoryId={memory.id} transport={transport} />
   if (attachment.source === 'max') return <MaxVideo attachment={attachment} autoplay={autoplay} feedPreview={feedPreview} fullscreen={fullscreen} hostBridge={hostBridge} transport={transport} />
   if (attachment.kind === 'photo') return <PrivateImage attachment={attachment} borrowedUrl={borrowedPhotoUrl} onOpenPhoto={onOpenPhoto} onUrlChange={onPhotoUrlChange} interactive={photoInteractive} transport={transport} />
@@ -1318,7 +1325,10 @@ function PrivateImage({ attachment, borrowedUrl, onOpenPhoto, onUrlChange, inter
   transport: AuthenticatedTransport
 }) {
   const path = attachment.displayPath ?? attachment.previewPath
-  const ownedUrl = usePrivateObjectUrl(path, transport, !borrowedUrl)
+  const surfaceActive = useContext(FeedSurfaceActive)
+  const { accountId, familyId, membershipEpoch } = useContext(VideoQueryScope)
+  const scopeKey = accountId ? `${accountId}:${familyId}:${membershipEpoch}` : ''
+  const ownedUrl = usePrivateObjectUrl(path, transport, surfaceActive && !borrowedUrl, undefined, scopeKey)
   const url = borrowedUrl ?? ownedUrl
   const [readyUrl, setReadyUrl] = useState<string | null>(null)
   const notifyUrlChange = useEffectEvent((nextUrl: string | null) => onUrlChange?.(attachment.id, nextUrl))
@@ -1479,10 +1489,10 @@ function MemoryDetail({ familyTimezone, hostBridge, memory, onClose, onOpenPhoto
   </DialogPrimitive.Root>
 }
 
-function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTransport, enabled = true, onSettled?: () => void) {
+function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTransport, enabled = true, onSettled?: () => void, scopeKey = '') {
   const auth = useContext(AuthContext)
   const mediaTransport = transport ?? auth?.transport
-  return usePrivateImageUrl(auth?.user?.id ?? '', path, mediaTransport, enabled && Boolean(mediaTransport), onSettled)
+  return usePrivateImageUrl(auth?.user?.id ?? '', path, mediaTransport, enabled && Boolean(mediaTransport), onSettled, scopeKey)
 }
 
 function useFeedVideoPosterUrl(path: string | null, transport: AuthenticatedTransport, nearViewport: boolean, feedPreview: boolean) {
