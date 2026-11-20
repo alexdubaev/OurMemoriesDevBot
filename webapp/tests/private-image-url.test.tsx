@@ -221,6 +221,23 @@ describe('private image loading', () => {
     expect(states.at(-1)).toEqual({ url: null, status: 'error' })
   })
 
+  test('a network failure that arrives before a slow cache read waits for the cached image instead of flashing an error', async () => {
+    let holdReads = false
+    const gate = Promise.withResolvers<void>()
+    database = installFakeIndexedDb((mode) => holdReads && mode === 'readonly' ? gate.promise : undefined)
+    await seedCachedImage('"v1"')
+    holdReads = true
+    const { transport, calls } = controlledTransport()
+    await render(transport)
+    await settle()
+    calls[0]!.reject(new TypeError('Failed to fetch'))
+    await settle(10)
+    gate.resolve()
+    await settle(20)
+    expect(states.some((state) => state.status === 'error')).toBe(false)
+    expect(states.at(-1)?.status).toBe('ready')
+  })
+
   for (const poolMode of [undefined, 'album-preview'] as const) {
     test(`a new transport object for the same user and image starts no new request (${poolMode ?? 'plain'})`, async () => {
       const first = controlledTransport()

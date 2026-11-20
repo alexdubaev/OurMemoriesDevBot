@@ -205,6 +205,8 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       setLoaded({ userId, path, url, identityGeneration, scopeKey, idleBytes, ...(requestFamilyId ? { familyId: requestFamilyId, familyGeneration } : {}) })
       return true
     }
+    // Whether the stored copy reached the screen; a network failure waits for it before showing an error.
+    let storedCopyOutcome: Promise<boolean> = Promise.resolve(false)
     const request = (validator: string | null) => transportRef.current!.raw(path, {
       signal: controller.signal,
       headers: { 'X-Private-Media-Purpose': 'image', ...(validator ? { 'If-None-Match': validator } : {}) },
@@ -227,6 +229,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
         catch { await removePrivateImage(userId, path).catch(() => undefined) }
         return cachedWasShown
       })
+      storedCopyOutcome = shownFromCache.catch(() => false)
       const storedCopyShown = async () => readyUrlAlreadyShown || await shownFromCache || hasPriorReadyUrl()
       let response: Response | null
       try {
@@ -276,8 +279,10 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       }
       if (!isCurrent()) return
       onSettledRef.current?.()
-    })().catch((error: unknown) => {
+    })().catch(async (error: unknown) => {
       if (error instanceof ApiRequestError && [401, 403, 404].includes(error.status)) denied = true
+      // Offline, timeout or 5xx: a stored copy that is still being read is shown instead of an error.
+      else await storedCopyOutcome
       if (!isCurrent()) return
       onSettledRef.current?.()
       if (idleKey && error instanceof ApiRequestError && [401, 403, 404].includes(error.status)) {
