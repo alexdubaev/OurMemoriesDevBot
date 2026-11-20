@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bashExecutable, gitBashPath } from '../tests/bash-runtime.mjs'
-import { classifyChanges, executePlan, frontendPlan, planFor, selectProfile, validateFrontendScope } from './verify-local.mjs'
+import { classifyChanges, executePlan, explainChanges, frontendPlan, planFor, selectProfile, validateFrontendScope } from './verify-local.mjs'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const frontendScopeCli = resolve(repositoryRoot, 'deploy/selectel/frontend-scope.sh')
@@ -307,6 +307,29 @@ describe('risk based verification', () => {
       '.autopilot/2026-11-05-new-run/state.js',
       '.env.example.next',
       'webapp/e2e/telegram-auth-next.playwright.config.ts',
+    ]) {
+      expect(classifyChanges([path])).toBe('review-required')
+      expect(() => selectProfile({ paths: [...paths, path], requested: 'full' })).toThrow('REVIEW_REQUIRED')
+    }
+  })
+
+  test('carousel smoothness exact archive state and harness require FULL while adjacent paths remain unresolved', () => {
+    const paths = [
+      '.autopilot/2026-11-05-memoly-month-photo-collage--wip/state.js',
+      'webapp/e2e/fixed-carousel.harness.tsx',
+    ]
+    for (const path of paths) {
+      expect(explainChanges([path]).reasons).toEqual([expect.objectContaining({ path, profile: 'full', rule: 'reviewed-exact-critical-path' })])
+      expect(selectProfile({ paths: [path] }).profile).toBe('full')
+      for (const requested of ['fast', 'standard']) {
+        expect(() => selectProfile({ paths: [path], requested })).toThrow('Profile downgrade refused')
+      }
+    }
+    for (const path of [
+      '.autopilot/2026-11-05-other--wip/state.js',
+      '.autopilot/2026-11-05-memoly-month-photo-collage--wip/new-state.js',
+      'webapp/e2e/other.harness.tsx',
+      'webapp/e2e/fixed-carousel.harness.next.tsx',
     ]) {
       expect(classifyChanges([path])).toBe('review-required')
       expect(() => selectProfile({ paths: [...paths, path], requested: 'full' })).toThrow('REVIEW_REQUIRED')

@@ -19,12 +19,14 @@ const ACCEPTED_UI_V4_SHA = 'afdb408f8bbf22b564c86bb8d33a83261f55cc48'
 const REVIEWED_FULL_PATHS = new Set([
   '.autopilot/2026-10-23-wishlist/state.js',
   '.autopilot/2026-11-04-memoly-albums-watercolor-social--wip/state.js',
+  '.autopilot/2026-11-05-memoly-month-photo-collage--wip/state.js',
   '.autopilot/dashboard.html',
   '.autopilot/state.js',
   '.env.example',
   'assets/manifest.json',
   'webapp/e2e/album-social.playwright.config.ts',
   'webapp/e2e/telegram-auth-only.playwright.config.ts',
+  'webapp/e2e/fixed-carousel.harness.tsx',
   'webapp/e2e/fixtures/albums.ts',
   'webapp/e2e/selected-family-app.harness.tsx',
 ])
