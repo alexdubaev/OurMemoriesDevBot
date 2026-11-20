@@ -89,3 +89,17 @@ export function visibleTiles(layout: WorkshopLayout, top: number, height: number
   const margin = Math.min(500, height / 2)
   return layout.tiles.filter((tile) => tile.y + tile.height >= top - margin && tile.y <= top + height + margin).slice(0, 320)
 }
+export function visibleHeadings(layout: WorkshopLayout, top: number, height: number) {
+  return layout.headings.filter((heading) => heading.y >= top - 100 && heading.y < top + height + 500)
+}
+export type WorkshopViewport = { top: number; height: number; width: number }
+/** Keeps the current viewport object while a scroll leaves the rendered tiles and headings unchanged. */
+export function nextWorkshopViewport(layout: WorkshopLayout, current: WorkshopViewport, measured: WorkshopViewport) {
+  if (measured.width !== current.width) return measured
+  const rendered = ({ top, height }: WorkshopViewport) => {
+    const tiles = visibleTiles(layout, top, height)
+    const headings = visibleHeadings(layout, top, height)
+    return [tiles.length, tiles[0]?.id, tiles.at(-1)?.id, headings.length, headings[0]?.y, headings.at(-1)?.y].join(':')
+  }
+  return rendered(current) === rendered(measured) ? current : measured
+}

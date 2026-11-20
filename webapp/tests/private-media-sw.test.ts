@@ -12,7 +12,7 @@ type WorkerEvent = {
   respondWith?: (value: Promise<Response>) => void
 }
 
-async function createWorkerHarness() {
+async function createWorkerHarness(respond: (init: RequestInit) => Response = () => new Response('ok', { status: 200 })) {
   const listeners = new Map<string, (event: WorkerEvent) => void>()
   const requests: Array<{ url: string; method?: string; authorization: string | null; cache: RequestCache; range: string | null }> = []
   const source = await readFile(new URL('../public/private-media-sw.js', import.meta.url), 'utf8')
@@ -26,7 +26,7 @@ async function createWorkerHarness() {
     self, URL, Map, Headers, Response,
     fetch: async (url: string, init: RequestInit) => {
       requests.push({ url, method: init.method, authorization: new Headers(init.headers).get('Authorization'), cache: init.cache!, range: new Headers(init.headers).get('Range') })
-      return new Response('ok', { status: 200 })
+      return respond(init)
     },
   })
   const sendCredentials = (clientId: string, userId: string | null, token: string | null) => {
@@ -88,4 +88,17 @@ it('keeps HEAD media requests on the authenticated no-store path', async () => {
   worker.sendCredentials('tab', 'user', 'token')
   await worker.request('tab', `/api/v1/families/${uuid}/media/${uuid}/content?variant=original`, {}, 'HEAD')
   expect(worker.requests).toMatchObject([{ method: 'HEAD', authorization: 'Bearer token', cache: 'no-store' }])
+})
+
+it('forwards the page validator on image revalidation and returns a 304 to the page unchanged', async () => {
+  const forwarded: Array<string | null> = []
+  const worker = await createWorkerHarness((init) => {
+    forwarded.push(new Headers(init.headers).get('If-None-Match'))
+    return new Response(null, { status: 304, headers: { ETag: '"v1"' } })
+  })
+  worker.sendCredentials('tab', 'user', 'token')
+  const response = await worker.request('tab', `/api/v1/families/${uuid}/media/${uuid}/content?variant=preview`, { 'X-Private-Media-Purpose': 'image', 'If-None-Match': '"v1"' })
+  expect(forwarded).toEqual(['"v1"'])
+  expect(response?.status).toBe(304)
+  expect(response?.headers.get('ETag')).toBe('"v1"')
 })
