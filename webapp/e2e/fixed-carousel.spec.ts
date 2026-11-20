@@ -82,10 +82,14 @@ test('production feed carousel selects attachments through drags and opens the s
   const inlineVideo = card.locator('[data-carousel-position="2"] video')
   const playBounds = await inlinePlay.boundingBox()
   expect(playBounds).not.toBeNull()
-  await page.mouse.move(playBounds!.x + playBounds!.width / 2 + 24, playBounds!.y + playBounds!.height / 2)
+  // Свайп, начатый на кнопке запуска, листает карусель и не запускает видео.
+  const playCenter = { x: playBounds!.x + playBounds!.width / 2, y: playBounds!.y + playBounds!.height / 2 }
+  await page.mouse.move(playCenter.x, playCenter.y)
   await page.mouse.down()
-  await page.mouse.move(playBounds!.x + playBounds!.width / 2, playBounds!.y + playBounds!.height / 2, { steps: 5 })
+  await page.mouse.move(playCenter.x - 150, playCenter.y, { steps: 8 })
   await page.mouse.up()
+  await expectSelectedAttachment(3)
+  await swipePrevious()
   await expectSelectedAttachment(2)
   await expect(inlinePlay).toBeVisible()
   await expect.poll(() => inlineVideo.evaluate((video: HTMLVideoElement) => [video.paused, video.getAttribute('src')])).toEqual([true, null])
@@ -188,7 +192,10 @@ test('production feed carousel selects attachments through drags and opens the s
     await single.locator('[data-carousel-position="1"] button[aria-label="Открыть фото"]').click()
     const singleViewer = page.locator('[data-mixed-viewer]')
     await expect(singleViewer).toBeVisible()
-    await expect(singleViewer.locator('.memoly-viewer-caption, .memoly-viewer-thumbnails, .memoly-mixed-viewer-nav')).toHaveCount(0)
+    // Место миниатюр и навигации зарезервировано, но они не видны и недоступны.
+    await expect(singleViewer.locator('.memoly-viewer-caption')).toHaveCount(0)
+    await expect(singleViewer.locator('.memoly-viewer-thumbnails, .memoly-mixed-viewer-nav').filter({ visible: true })).toHaveCount(0)
+    await expect(singleViewer.getByRole('button', { name: /^(Назад|Далее)$/ })).toHaveCount(0)
     const image = singleViewer.locator('.memoly-mixed-viewer-media img')
     await expect(image).toBeVisible()
     await expect(image).toHaveCSS('object-fit', 'contain')
