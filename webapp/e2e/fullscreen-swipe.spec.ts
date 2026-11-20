@@ -2,14 +2,16 @@ import { expect, test } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
-async function touchSwipe(page: import('@playwright/test').Page, selector: string, direction: 'left' | 'right', origin = { x: 0.5, y: 0.5 }) {
+async function touchSwipe(page: import('@playwright/test').Page, selector: string, direction: 'left' | 'right', origin = { x: 0.5, y: 0.5 }, startOnTarget = false) {
   const target = page.locator(selector)
   const box = await target.boundingBox()
   if (!box) throw new Error(`Missing swipe target: ${selector}`)
   const x = box.x + box.width * origin.x
   const y = box.y + box.height * origin.y
-  const fromX = direction === 'left' ? x + Math.min(145, box.width * 0.38) : x - Math.min(145, box.width * 0.38)
-  const toX = direction === 'left' ? x - Math.min(145, box.width * 0.38) : x + Math.min(145, box.width * 0.38)
+  // startOnTarget: палец ставится в центр небольшой цели (кнопки запуска) и проходит обычную длину свайпа.
+  const span = startOnTarget ? 145 : Math.min(145, box.width * 0.38)
+  const fromX = startOnTarget ? x : direction === 'left' ? x + span : x - span
+  const toX = direction === 'left' ? fromX - span * 2 : fromX + span * 2
   if (page.context().browser()?.browserType().name() !== 'chromium') {
     await target.evaluate(async (element, { fromX, toX, y }) => {
       const dispatch = (type: string, points: Array<{ identifier: number; clientX: number; clientY: number }>, changed = points) => {
@@ -416,4 +418,190 @@ test('fullscreen photos stay centered and fully visible in a short viewport', as
   await viewer.getByRole('button', { name: 'Назад' }).click()
   await expect(viewer.getByText('1 / 3')).toBeVisible()
   await expectPhotoFits()
+})
+
+async function routeSyntheticVideos(page: import('@playwright/test').Page) {
+  const videoFixture = await readFile(fileURLToPath(new URL('./fixtures/portrait-edges.mp4', import.meta.url)))
+  await page.route('**/api/v1/families/*/media/playback-session', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }))
+  await page.route(/\/media\/(max-)?videos\/[^/]+\/content/, (route) => route.fulfill({ status: 200, contentType: 'video/mp4', body: videoFixture, headers: { 'Access-Control-Allow-Origin': '*' } }))
+}
+
+const viewerPlay = {
+  max: '.memoly-mixed-viewer-media [data-carousel-active="true"] [data-slot="max-video-play"]',
+  storage: '.memoly-mixed-viewer-media [data-carousel-active="true"] .memoly-private-video-v2-play',
+  photo: '.memoly-mixed-viewer-media [data-carousel-active="true"] img',
+}
+
+async function expectViewerAt(viewer: import('@playwright/test').Locator, position: number, total: number) {
+  await expect(viewer.locator('.memoly-viewer-count')).toHaveText(`${position} / ${total}`)
+  await expect(viewer.locator('.memoly-mixed-viewer-media [data-carousel-active="true"]')).toHaveAttribute('data-carousel-position', String(position))
+  await expectFullscreenSlideSettled(viewer)
+}
+
+async function expectVideoIdle(slide: import('@playwright/test').Locator) {
+  await expect(slide.locator('video')).not.toHaveAttribute('src', /.+/)
+}
+
+test('fullscreen MAX video swipes from its unstarted play button in the max-mixed carousel', async ({ page }) => {
+  await routeSyntheticVideos(page)
+  await page.goto('/e2e/fixed-carousel.harness.html?max-mixed')
+  const card = page.locator('.memory-card')
+  await card.locator('[data-carousel-dot="2"]').click()
+  await card.getByRole('button', { name: 'Открыть фото' }).click()
+  const viewer = page.locator('[data-mixed-viewer]')
+  await expectViewerAt(viewer, 2, 2)
+
+  await touchSwipe(page, viewerPlay.photo, 'right')
+  await expectViewerAt(viewer, 1, 2)
+  await expect(page.locator(viewerPlay.max)).toBeEnabled()
+  await touchSwipe(page, viewerPlay.max, 'left')
+  await expectViewerAt(viewer, 2, 2)
+  await touchSwipe(page, viewerPlay.photo, 'right')
+  await expectViewerAt(viewer, 1, 2)
+  await expectVideoIdle(viewer.locator('[data-carousel-active="true"]'))
+  await touchSwipe(page, viewerPlay.max, 'left')
+  await expectViewerAt(viewer, 2, 2)
+})
+
+test('fullscreen photo-video chain swipes both ways from unstarted MAX and storage play buttons, and a tap still plays', async ({ page }) => {
+  await routeSyntheticVideos(page)
+  await page.goto('/e2e/fixed-carousel.harness.html?video-chain')
+  const card = page.locator('.memory-card')
+  await card.locator('[data-carousel-position="1"]').getByRole('button', { name: 'Открыть фото' }).click()
+  const viewer = page.locator('[data-mixed-viewer]')
+  const active = viewer.locator('.memoly-mixed-viewer-media [data-carousel-active="true"]')
+  await expectViewerAt(viewer, 1, 5)
+
+  await touchSwipe(page, viewerPlay.photo, 'left')
+  await expectViewerAt(viewer, 2, 5)
+  await touchSwipe(page, viewerPlay.max, 'left')
+  await expectViewerAt(viewer, 3, 5)
+  await touchSwipe(page, viewerPlay.photo, 'right')
+  await expectViewerAt(viewer, 2, 5)
+  await expectVideoIdle(active)
+  await touchSwipe(page, viewerPlay.max, 'right')
+  await expectViewerAt(viewer, 1, 5)
+  await touchSwipe(page, viewerPlay.photo, 'left')
+  await expectViewerAt(viewer, 2, 5)
+  await touchSwipe(page, viewerPlay.max, 'left')
+  await expectViewerAt(viewer, 3, 5)
+  await touchSwipe(page, viewerPlay.photo, 'left')
+  await expectViewerAt(viewer, 4, 5)
+  await touchSwipe(page, viewerPlay.storage, 'left', undefined, true)
+  await expectViewerAt(viewer, 5, 5)
+  await touchSwipe(page, viewerPlay.photo, 'right')
+  await expectViewerAt(viewer, 4, 5)
+  await expectVideoIdle(active)
+  await touchSwipe(page, viewerPlay.storage, 'right', undefined, true)
+  await expectViewerAt(viewer, 3, 5)
+
+  await touchSwipe(page, viewerPlay.photo, 'left')
+  await expectViewerAt(viewer, 4, 5)
+  await page.locator(viewerPlay.storage).tap()
+  await expect(active.locator('video')).toHaveAttribute('src', /\/media\/videos\/.+\/content/)
+  await viewer.getByRole('button', { name: 'Назад' }).click()
+  await expectViewerAt(viewer, 3, 5)
+  await viewer.getByRole('button', { name: 'Назад' }).click()
+  await expectViewerAt(viewer, 2, 5)
+  await page.locator(viewerPlay.max).tap()
+  await expect(active.locator('video')).toHaveAttribute('src', /\/media\/max-videos\/.+\/content/)
+})
+
+test('feed carousel photo-video chain swipes from unstarted MAX and storage play buttons', async ({ page }) => {
+  await routeSyntheticVideos(page)
+  await page.goto('/e2e/fixed-carousel.harness.html?video-chain')
+  const card = page.locator('.memory-card')
+  const viewport = card.locator('.memoly-mixed-viewport')
+  const activeSlide = card.locator('.memoly-mixed-slide[data-carousel-active="true"]')
+  const slideSelector = '.memory-card .memoly-mixed-slide[data-carousel-active="true"]'
+  const expectInlineAt = async (position: number) => {
+    await expect(card.locator('.memoly-mixed-count')).toHaveText(`${position} / 5`)
+    await expect(card.locator(`[data-carousel-dot="${position}"]`)).toHaveAttribute('aria-pressed', 'true')
+    await expect(activeSlide).toHaveAttribute('data-carousel-position', String(position))
+    await expect.poll(() => viewport.evaluate((element) => {
+      const slide = element.querySelector('[data-carousel-active="true"]')
+      return slide ? Math.abs(slide.getBoundingClientRect().left - element.getBoundingClientRect().left) : Number.POSITIVE_INFINITY
+    })).toBeLessThan(2)
+  }
+  await expectInlineAt(1)
+  await touchSwipe(page, `${slideSelector} img`, 'left')
+  await expectInlineAt(2)
+  await touchSwipe(page, `${slideSelector} [data-slot="max-video-play"]`, 'left')
+  await expectInlineAt(3)
+  await touchSwipe(page, `${slideSelector} img`, 'right')
+  await expectInlineAt(2)
+  await touchSwipe(page, `${slideSelector} [data-slot="max-video-play"]`, 'right')
+  await expectInlineAt(1)
+  await touchSwipe(page, `${slideSelector} img`, 'left')
+  await expectInlineAt(2)
+  await touchSwipe(page, `${slideSelector} [data-slot="max-video-play"]`, 'left')
+  await expectInlineAt(3)
+  await touchSwipe(page, `${slideSelector} img`, 'left')
+  await expectInlineAt(4)
+  await touchSwipe(page, `${slideSelector} .memoly-private-video-v2-play`, 'left', undefined, true)
+  await expectInlineAt(5)
+  await touchSwipe(page, `${slideSelector} img`, 'right')
+  await expectInlineAt(4)
+  await expectVideoIdle(activeSlide)
+  await touchSwipe(page, `${slideSelector} .memoly-private-video-v2-play`, 'right', undefined, true)
+  await expectInlineAt(3)
+  await expect(page.locator('[data-mixed-viewer]')).toHaveCount(0)
+})
+
+async function viewerPhotoRect(viewer: import('@playwright/test').Locator) {
+  await expectFullscreenSlideSettled(viewer)
+  const photo = viewer.locator('.memoly-mixed-viewer-media [data-carousel-active="true"] img')
+  await expect.poll(() => photo.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
+  return photo.evaluate((image) => {
+    const rect = image.getBoundingClientRect()
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+  })
+}
+
+for (const size of [{ width: 390, height: 844 }, { width: 1440, height: 900 }]) {
+  test(`single photo opens the same fullscreen viewer geometry as a multi-photo carousel at ${size.width}x${size.height}`, async ({ page }) => {
+    await page.setViewportSize(size)
+    await page.goto('/e2e/fixed-carousel.harness.html?viewer-geometry')
+    const single = page.locator('.memory-card').nth(0)
+    const album = page.locator('.memory-card').nth(1)
+    const viewer = page.locator('[data-mixed-viewer]')
+
+    await album.locator('[data-carousel-position="1"]').getByRole('button', { name: 'Открыть фото' }).click()
+    await expect(viewer.locator('.memoly-viewer-count')).toHaveText('1 / 2')
+    const multiRect = await viewerPhotoRect(viewer)
+    await viewer.getByRole('button', { name: 'Закрыть просмотр' }).click()
+    await expect(viewer).toHaveCount(0)
+
+    await single.getByRole('button', { name: /^Открыть воспоминание/ }).click()
+    await expect(page.getByRole('heading', { name: 'Воспоминание' })).toHaveCount(0)
+    await expect(viewer).toBeVisible()
+    const singleRect = await viewerPhotoRect(viewer)
+    for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(singleRect[key] - multiRect[key]), JSON.stringify({ key, singleRect, multiRect })).toBeLessThanOrEqual(2)
+    await expect(viewer.locator('.memoly-viewer-thumbnails')).toBeHidden()
+    await expect(viewer.getByRole('button', { name: 'Далее' })).toHaveCount(0)
+    await expect(viewer.getByRole('button', { name: 'Назад' })).toHaveCount(0)
+    await expect(viewer.getByRole('button', { name: /^Перейти к вложению/ })).toHaveCount(0)
+    await viewer.getByRole('button', { name: 'Закрыть просмотр' }).click()
+    await expect(viewer).toHaveCount(0)
+
+    await single.getByRole('button', { name: 'Открыть фото' }).click()
+    await expect(viewer).toBeVisible()
+    expect(await viewerPhotoRect(viewer)).toEqual(singleRect)
+    const center = { x: singleRect.x + singleRect.width / 2, y: singleRect.y + singleRect.height / 2 }
+    await syntheticTouchPath(page, '.memoly-mixed-viewer-media [data-carousel-active="true"] img', [[{ x: center.x - 40, y: center.y }, { x: center.x + 40, y: center.y }], [{ x: center.x - 90, y: center.y }, { x: center.x + 90, y: center.y }]])
+    await expect.poll(() => viewer.locator('.memoly-mixed-viewer-media [data-carousel-active="true"] > div').evaluate((element) => new DOMMatrixReadOnly(getComputedStyle(element).transform).a)).toBeGreaterThan(1)
+    await page.keyboard.press('Escape')
+    await expect(viewer).toHaveCount(0)
+    await single.getByRole('button', { name: 'Открыть фото' }).click()
+    await expectFullscreenSlideSettled(viewer)
+    await touchSwipeDown(page, '.memoly-mixed-viewer-media [data-carousel-active="true"] img')
+    await expect(viewer).toHaveCount(0)
+  })
+}
+
+test('voice caption still opens the memory sheet', async ({ page }) => {
+  await page.goto('/e2e/fixed-carousel.harness.html?voice')
+  await page.getByRole('button', { name: 'Открыть воспоминание Synthetic voice recording' }).first().click()
+  await expect(page.getByRole('heading', { name: 'Воспоминание' })).toBeVisible()
+  await expect(page.locator('[data-mixed-viewer]')).toHaveCount(0)
 })

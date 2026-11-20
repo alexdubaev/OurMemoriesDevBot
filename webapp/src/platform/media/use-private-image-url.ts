@@ -3,8 +3,15 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { AvatarResourcePool, isImmutableMemberAvatarPath } from './avatar-resource-pool'
 import { idleAlbumPreviews, idleFeedPosters } from './feed-poster-cache'
-import { cachePrivateImageResponse, eligiblePrivateImage, privateFamilyCacheGeneration, privateCacheIdentityGeneration, isActivePrivateCacheIdentity, readPrivateImage, removePrivateImage, clearPrivateUserCache, privateFamilyAccessRevokedEvent, subscribePrivateCacheInvalidation } from '@/platform/persistence/private-cache'
+import { cachePrivateImageResponse, eligiblePrivateImage, markPrivateImageFresh, privateFamilyCacheGeneration, privateCacheIdentityGeneration, privateImageValidator, isActivePrivateCacheIdentity, readPrivateImage, readPrivateImageEntry, removePrivateImage, clearPrivateUserCache, privateFamilyAccessRevokedEvent, subscribePrivateCacheInvalidation } from '@/platform/persistence/private-cache'
 
+// Idle pools hand a decoded image to the next tile of the same user, identity generation,
+// family generation and scope (all in the pool key). The transport object is replaced on
+// every access-token refresh, so it is not part of that identity.
+const idlePoolOwner: AuthenticatedTransport = {
+  request: () => Promise.reject(new Error('Idle image pool owner does not send requests')),
+  raw: () => Promise.reject(new Error('Idle image pool owner does not send requests')),
+}
 const memberAvatarPool = new AvatarResourcePool<{ url: string; size: number }>((resource) => URL.revokeObjectURL(resource.url))
 subscribePrivateCacheInvalidation((invalidation) => {
   const matches = (key: string) => {
@@ -45,7 +52,12 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
   const idleKey = idlePool && scopeKey && familyId && !usesAvatarPool
     ? JSON.stringify([userId, familyId, identityGeneration, familyGeneration, scopeKey, path])
     : null
-  const idleTransport = idleKey ? transport : undefined
+  const hasTransport = Boolean(transport)
+  // The effects read the current transport from this ref: a refreshed token replaces the
+  // transport object but must not restart image loading.
+  const transportRef = useRef(transport)
+  useLayoutEffect(() => { transportRef.current = transport }, [transport])
+  const idleTransport = idleKey && hasTransport ? idlePoolOwner : undefined
   const pooledSnapshot = useSyncExternalStore(
     useCallback((listener) => poolKey ? memberAvatarPool.subscribe(poolKey, listener) : () => undefined, [poolKey]),
     useCallback(() => poolKey ? memberAvatarPool.getSnapshot(poolKey) : memberAvatarPool.getSnapshot(''), [poolKey]),
@@ -54,7 +66,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
   const [invalidationRevision, setInvalidationRevision] = useState(0)
   const [loaded, setLoaded] = useState<{ userId: string; path: string; url: string | null; identityGeneration: number; scopeKey: string; familyId?: string; familyGeneration?: number; poolKey?: string; idleBytes?: number } | null>(null)
   const loadedRef = useRef(loaded)
-  const lastRequest = useRef<{ userId: string; path: string; transport: AuthenticatedTransport; scopeKey: string } | null>(null)
+  const lastRequest = useRef<{ userId: string; path: string; scopeKey: string } | null>(null)
   const requestController = useRef<AbortController | null>(null)
   const ownedUrls = useRef(new Set<string>())
   const [ownedUrlSet, setOwnedUrlSet] = useState<Set<string>>(() => new Set())
@@ -113,7 +125,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
     }
   }, [familyGeneration, familyId, forgetUrl, identityGeneration, path, idleKey, idlePool, idleTransport, releaseUrl, scopeKey, userId])
   useEffect(() => {
-    if (!userId || !path || !enabled || !transport) return
+    if (!userId || !path || !enabled || !hasTransport) return
     if (usesAvatarPool && poolKey) {
       if (!familyId) return
       const poolFamilyId = familyId
@@ -141,7 +153,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
           catch { await removePrivateImage(userId, path).catch(() => undefined) }
         }
         if (!isCurrent()) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
-        const response = await transport.raw(path, { signal, headers: { 'X-Private-Media-Purpose': 'image' } })
+        const response = await transportRef.current!.raw(path, { signal, headers: { 'X-Private-Media-Purpose': 'image' } })
         const blob = await response.clone().blob()
         if (!isCurrent()) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
         const resource = await decode(blob)
@@ -158,17 +170,21 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       })
       return release
     }
-    if (hasOwnedReadyUrl(loadedRef.current, ownedUrls.current, userId, path, identityGeneration, scopeKey) && lastRequest.current?.userId === userId && lastRequest.current.path === path && lastRequest.current.transport === transport && lastRequest.current.scopeKey === scopeKey) return
-    lastRequest.current = { userId, path, transport, scopeKey }
+    if (hasOwnedReadyUrl(loadedRef.current, ownedUrls.current, userId, path, identityGeneration, scopeKey) && lastRequest.current?.userId === userId && lastRequest.current.path === path && lastRequest.current.scopeKey === scopeKey) return
+    lastRequest.current = { userId, path, scopeKey }
     const controller = new AbortController()
     requestController.current = controller
     const requestFamilyId = eligiblePrivateImage(path)?.familyId
     const familyGeneration = requestFamilyId ? privateFamilyCacheGeneration(userId, requestFamilyId) : undefined
     let cachedWasShown = false
+    // Set once the server refuses access: a stored copy that is still being read must not appear.
+    let denied = false
+    // The cache and the network may both decode a copy; the first one to finish is shown.
+    let shown: 'cache' | 'network' | null = null
     const isCurrent = () => !controller.signal.aborted && isActivePrivateCacheIdentity(userId, identityGeneration) &&
       (!requestFamilyId || privateFamilyCacheGeneration(userId, requestFamilyId) === familyGeneration)
     const hasPriorReadyUrl = () => hasOwnedReadyUrl(loadedRef.current, ownedUrls.current, userId, path, identityGeneration, scopeKey)
-    const showBlob = async (blob: Blob) => {
+    const showBlob = async (blob: Blob, source: 'cache' | 'network') => {
       const url = URL.createObjectURL(blob)
       ownUrl(url)
       let idleBytes: number | undefined
@@ -177,7 +193,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
         image.src = url
         await image.decode()
         if (idleKey) idleBytes = blob.size + image.naturalWidth * image.naturalHeight * 4
-        if (!isCurrent()) {
+        if (!isCurrent() || denied || shown) {
           releaseUrl(url)
           return false
         }
@@ -185,31 +201,88 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
         releaseUrl(url)
         throw error
       }
+      shown = source
       setLoaded({ userId, path, url, identityGeneration, scopeKey, idleBytes, ...(requestFamilyId ? { familyId: requestFamilyId, familyGeneration } : {}) })
       return true
     }
+    // Whether the stored copy reached the screen; a network failure waits for it before showing an error.
+    let storedCopyOutcome: Promise<boolean> = Promise.resolve(false)
+    const request = (validator: string | null) => transportRef.current!.raw(path, {
+      signal: controller.signal,
+      headers: { 'X-Private-Media-Purpose': 'image', ...(validator ? { 'If-None-Match': validator } : {}) },
+    })
     void (async () => {
       const readyUrlAlreadyShown = hasOwnedReadyUrl(loadedRef.current, ownedUrls.current, userId, path, identityGeneration, scopeKey)
-      if (eligiblePrivateImage(path) && !readyUrlAlreadyShown) {
-        const cached = await readPrivateImage(userId, path).catch(() => null)
-        if (isCurrent() && cached) {
-          try { cachedWasShown = await showBlob(cached) }
-          catch { await removePrivateImage(userId, path).catch(() => undefined) }
+      const cacheable = Boolean(eligiblePrivateImage(path))
+      // `undefined` until this tab has indexed the stored images; then it says whether a copy
+      // exists and which ETag the server can confirm with a 304.
+      const validator = cacheable ? privateImageValidator(userId, path) : undefined
+      const validatorEtag = validator?.etag ?? null
+      // The stored copy and the network check start together: a cached tile does not wait for
+      // the network, and a tile without a copy does not wait for IndexedDB.
+      const stored = cacheable && !readyUrlAlreadyShown && validator?.cached !== false
+        ? readPrivateImageEntry(userId, path).catch(() => null)
+        : Promise.resolve(null)
+      const shownFromCache = stored.then(async (entry) => {
+        if (!entry || !isCurrent() || denied || shown || hasPriorReadyUrl()) return false
+        try { cachedWasShown = await showBlob(entry.blob, 'cache') }
+        catch { await removePrivateImage(userId, path).catch(() => undefined) }
+        return cachedWasShown
+      })
+      storedCopyOutcome = shownFromCache.catch(() => false)
+      const storedCopyShown = async () => readyUrlAlreadyShown || await shownFromCache || hasPriorReadyUrl()
+      let response: Response | null
+      try {
+        response = await request(validatorEtag)
+      } catch (error) {
+        if (!(error instanceof ApiRequestError && error.status === 304)) throw error
+        response = null
+      }
+      if (!isCurrent()) return
+      if (!response) {
+        if (await storedCopyShown()) {
+          // 304: the stored copy is current. Only its recency changes; the bytes stay as they are.
+          void markPrivateImageFresh(userId, path, validatorEtag).catch(() => undefined)
+          if (isCurrent()) onSettledRef.current?.()
+          return
+        }
+        if (!isCurrent()) return
+        // The copy the validator described is gone: fetch the body once without a validator.
+        response = await request(null)
+        if (!isCurrent()) return
+      }
+      const responseEtag = response.headers.get('etag')
+      if (cacheable && responseEtag && responseEtag === validatorEtag && await storedCopyShown()) {
+        // Same ETag as the stored copy: skip the body instead of downloading and rewriting it.
+        void response.body?.cancel().catch(() => undefined)
+        void markPrivateImageFresh(userId, path, responseEtag).catch(() => undefined)
+        if (isCurrent()) onSettledRef.current?.()
+        return
+      }
+      if (!isCurrent()) return
+      // A viewer may already be using the ready URL, or the stored copy is already on screen:
+      // then only the stored bytes are refreshed, without a URL the UI would discard.
+      if (!readyUrlAlreadyShown && !shown && !hasPriorReadyUrl()) {
+        const blob = await response.clone().blob()
+        if (!isCurrent()) return
+        await showBlob(blob, 'network')
+        if (!isCurrent()) return
+      }
+      if (cacheable) {
+        const storedEtag = (await stored)?.etag ?? null
+        if (responseEtag && storedEtag === responseEtag) {
+          void response.body?.cancel().catch(() => undefined)
+          void markPrivateImageFresh(userId, path, responseEtag).catch(() => undefined)
+        } else {
+          await cachePrivateImageResponse(userId, path, response, identityGeneration, familyGeneration).catch(() => false)
         }
       }
       if (!isCurrent()) return
-      const response = await transport.raw(path, { signal: controller.signal, headers: { 'X-Private-Media-Purpose': 'image' } })
-      if (!isCurrent()) return
-      // A viewer may already be using the ready URL. Refresh the stored bytes
-      // without making another decoded URL that the UI would immediately discard.
-      if (!readyUrlAlreadyShown && !cachedWasShown && !hasPriorReadyUrl()) {
-        const blob = await response.clone().blob()
-        if (!isCurrent() || !await showBlob(blob)) return
-      }
-      if (eligiblePrivateImage(path)) await cachePrivateImageResponse(userId, path, response, identityGeneration, familyGeneration).catch(() => false)
-      if (!isCurrent()) return
       onSettledRef.current?.()
-    })().catch((error: unknown) => {
+    })().catch(async (error: unknown) => {
+      if (error instanceof ApiRequestError && [401, 403, 404].includes(error.status)) denied = true
+      // Offline, timeout or 5xx: a stored copy that is still being read is shown instead of an error.
+      else await storedCopyOutcome
       if (!isCurrent()) return
       onSettledRef.current?.()
       if (idleKey && error instanceof ApiRequestError && [401, 403, 404].includes(error.status)) {
@@ -232,7 +305,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       controller.abort()
       if (requestController.current === controller) requestController.current = null
     }
-  }, [enabled, familyGeneration, familyId, identityGeneration, invalidationRevision, ownUrl, path, poolKey, idleKey, idlePool, releaseUrl, scopeKey, transport, userId, usesAvatarPool])
+  }, [enabled, familyGeneration, familyId, hasTransport, identityGeneration, invalidationRevision, ownUrl, path, poolKey, idleKey, idlePool, releaseUrl, scopeKey, userId, usesAvatarPool])
   if (usesAvatarPool) {
     const current = Boolean(enabled && userId && transport && poolKey && familyId &&
       isActivePrivateCacheIdentity(userId, identityGeneration) &&

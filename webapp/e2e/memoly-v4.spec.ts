@@ -857,3 +857,83 @@ test('nonowner family child card stays static and its family alias remains visib
   await expect(page.getByRole('heading', { name: 'Имя в семье' })).toBeVisible()
   await expect(page.getByRole('textbox', { name: 'Имя в семье' })).toHaveValue('Дедушка')
 })
+
+async function visibleTextCount(page: import('@playwright/test').Page, text: string) {
+  return page.evaluate((text) => {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+    let visible = 0
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.textContent?.includes(text)) continue
+      const element = node.parentElement
+      if (!element) continue
+      const rect = element.getBoundingClientRect()
+      const style = getComputedStyle(element)
+      const clipped = rect.width <= 1 || rect.height <= 1 || style.visibility === 'hidden' || element.closest('.sr-only')
+      const onScreen = rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth
+      if (!clipped && onScreen && element.checkVisibility()) visible += 1
+    }
+    return visible
+  }, text)
+}
+
+for (const source of ['feed', 'family']) {
+  test(`add sheet opened from the ${source} shows its title once on a phone and keeps the dialog name`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/e2e/selected-family-app.harness.html?albums=6&feedPhotos&channelMemory')
+    const navigation = page.locator('[data-testid="bottom-navigation"]')
+    await expect(navigation).toBeVisible()
+    const install = page.getByRole('button', { name: 'Продолжить без установки' })
+    if (await install.isVisible().catch(() => false)) await install.click()
+    if (source === 'family') await navigation.getByRole('button', { name: 'Семья', exact: true }).click()
+    await navigation.getByRole('button', { name: 'Добавить', exact: true }).click()
+    await expect(page.getByRole('dialog', { name: 'Добавить воспоминание' })).toBeVisible()
+    await page.waitForTimeout(700)
+    expect(await visibleTextCount(page, 'Добавить воспоминание')).toBe(1)
+  })
+}
+
+async function expectSheetTransparentSoonAfterClose(page: import('@playwright/test').Page) {
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(120)
+  // Лист ещё анимируется и смонтирован, но точки, где были оверлей и лист, уже отдают нажатие тому, что под ними.
+  expect(await page.evaluate(() => {
+    const drawer = document.querySelector('[data-vaul-drawer]')
+    if (!drawer || drawer.getAttribute('data-state') !== 'closed') return 'drawer is not in its closing animation'
+    const points = [[innerWidth / 2, innerHeight / 3], [innerWidth / 2, innerHeight - 30], [24, innerHeight - 80]]
+    const blocked = points.map(([x, y]) => document.elementFromPoint(x, y)).filter((hit) => hit?.closest('[data-vaul-overlay], [data-vaul-drawer]'))
+    return blocked.length ? `blocked by ${blocked[0]!.outerHTML.slice(0, 80)}` : 'clear'
+  })).toBe('clear')
+}
+
+test('a closing bottom sheet does not swallow the next tap', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/e2e/selected-family-app.harness.html?albums=6&feedPhotos')
+  const navigation = page.locator('[data-testid="bottom-navigation"]').filter({ visible: true })
+  await expect(navigation).toBeVisible()
+  const install = page.getByRole('button', { name: 'Продолжить без установки' })
+  if (await install.isVisible().catch(() => false)) await install.click()
+  const feed = page.locator('[data-navigation-surface="feed"]')
+  await expect(feed.locator('.memory-card').first()).toBeVisible()
+
+  await navigation.getByRole('button', { name: 'Добавить', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Добавить воспоминание' })).toBeVisible()
+  const albumsButton = navigation.locator('[data-nav-position="archive-box"]')
+  const albumsBox = await albumsButton.boundingBox()
+  if (!albumsBox) throw new Error('missing albums navigation')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(120)
+  await page.mouse.click(albumsBox.x + albumsBox.width / 2, albumsBox.y + albumsBox.height / 2)
+  await expect(page.locator('[data-navigation-surface="albums"]')).toBeVisible()
+  await navigation.getByRole('button', { name: 'Лента', exact: true }).click()
+  await expect(feed.locator('.memory-card').first()).toBeVisible()
+
+  await feed.getByRole('button', { name: 'Действия с воспоминанием' }).first().click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await expectSheetTransparentSoonAfterClose(page)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Настройки', exact: true }).filter({ visible: true }).first().click()
+  await expect(page.locator('.ml-settings-sheet')).toBeVisible()
+  await expectSheetTransparentSoonAfterClose(page)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})

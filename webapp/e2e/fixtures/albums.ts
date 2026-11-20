@@ -186,13 +186,16 @@ export function albumFixture(familyId: string, childId: string, userId: string, 
   async function raw(path: string) {
     if (!path.includes('/media/a1000000-')) return null
     evidence.rawPaths.push(path)
+    // `rawDelay` simulates a network round trip so cache-versus-network timing is measurable.
+    const rawDelay = Number(params.get('rawDelay') ?? 0)
+    if (rawDelay > 0) await new Promise((resolve) => setTimeout(resolve, rawDelay))
     const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 160
     const ctx = canvas.getContext('2d')!
     const number = Number(/(\d{12})\/content/.exec(path)?.[1] ?? 0)
     ctx.fillStyle = ['#f4ead5', '#e1e9e1', '#f0e1df', '#dde6eb'][number % 4]; ctx.fillRect(0, 0, 160, 160)
     ctx.fillStyle = ['#d69b74', '#668c70', '#d6ba5c', '#b395b2'][number % 4]; ctx.beginPath(); ctx.arc(80, 80, 43, 0, Math.PI * 2); ctx.fill()
     ctx.fillStyle = '#f7f4e9'; ctx.fillRect(42, 69, 76, 23)
-    return new Response(await new Promise<Blob>((resolve) => canvas.toBlob((blob) => resolve(blob!), 'image/png')), { headers: { 'Content-Type': 'image/png' } })
+    return new Response(await new Promise<Blob>((resolve) => canvas.toBlob((blob) => resolve(blob!), 'image/png')), { headers: { 'Content-Type': 'image/png', ETag: `"fixture-${number}"` } })
   }
   return { request, raw, feedMemories: photos.slice(0, 6) }
 }

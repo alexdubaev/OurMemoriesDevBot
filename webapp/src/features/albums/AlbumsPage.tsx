@@ -24,6 +24,7 @@ import { ComposerHost } from './ComposerHost'
 import { entryCover, dateLabel, filled, kindNames, categories, suggestions, monthAgeLabel, type AlbumSource } from './model'
 import { AlbumCatalogPresentation } from './AlbumCatalogPresentation'
 import { createAlbumOpenState } from './album-open-state'
+import { useLatestTransport } from './latest-transport'
 import { SourcePreview } from './SourcePreview'
 import './albums.css'
 
@@ -51,7 +52,10 @@ function countLabel(count: number, words: readonly [string, string, string]) {
 }
 function Loading() { return <div aria-label="Загрузка альбомов" className="albums-loading" role="status"><span /><span /><span /><span /></div> }
 export function AlbumsPage(props: AlbumsPageProps) {
-  const { accountId, familyId, membershipEpoch, active, role, transport, hostBridge } = props
+  const { accountId, familyId, membershipEpoch, active, role, hostBridge } = props
+  // A token refresh must not rebuild the albums API: that would reload the open album and
+  // abort the gallery's next page. Identity and scope changes still arrive through scopeKey.
+  const transport = useLatestTransport(props.transport)
   const scopeKey = `${accountId}:${familyId}:${membershipEpoch}`
   const { theme } = useMemolyTheme()
   const scopeController = useMemo(() => createAlbumRequestScope(), [])

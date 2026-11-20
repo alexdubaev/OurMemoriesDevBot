@@ -57,6 +57,13 @@ const fourMaxVideoAttachments = ['99999999-9999-4999-8999-999999999901', '999999
   posterPath: `/api/v1/families/${familyId}/media/max-videos/${id}/poster`,
 }))
 const fourMaxVideosMemory = { ...memory, id: '22222222-2222-4222-8222-222222222231', kind: 'media', body: 'Four ordered MAX videos', attachments: fourMaxVideoAttachments }
+const chainPhotoId = '44444444-4444-4444-8444-444444444449'
+const videoChainMemory = { ...memory, id: '22222222-2222-4222-8222-222222222232', kind: 'media', body: 'Synthetic video chain', attachments: [attachments[3], maxVideoMemory.attachments[0], attachments[2], attachments[0], { ...attachments[3], id: chainPhotoId, previewPath: mediaPath(chainPhotoId, 'photos'), displayPath: mediaPath(chainPhotoId, 'photos'), originalDownloadPath: mediaPath(chainPhotoId, 'original') }] }
+const videoChainMode = new URLSearchParams(window.location.search).has('video-chain')
+const geometryPhotoId = '44444444-4444-4444-8444-444444444450'
+const geometrySingleMemory = { ...singlePhotoMemory, id: '22222222-2222-4222-8222-222222222233', body: 'Synthetic caption' }
+const geometryAlbumMemory = { ...photoAlbumMemory, id: '22222222-2222-4222-8222-222222222234', body: 'Synthetic caption', attachments: [{ ...attachments[3], id: geometryPhotoId, previewPath: mediaPath(geometryPhotoId, 'photos'), displayPath: mediaPath(geometryPhotoId, 'photos'), originalDownloadPath: mediaPath(geometryPhotoId, 'original') }, attachments[2]] }
+const viewerGeometryMode = new URLSearchParams(window.location.search).has('viewer-geometry')
 const lifecycleMode = new URLSearchParams(window.location.search).has('lifecycle')
 const voiceMode = new URLSearchParams(window.location.search).has('voice')
 const maxMixedMode = new URLSearchParams(window.location.search).has('max-mixed')
@@ -68,7 +75,7 @@ const maxVoiceId = '88888888-8888-4888-8888-888888888887'
 const maxVoicePath = mediaPath(maxVoiceId, 'voices') + '/content'
 const missingWaveformVoice = { ...voiceMemory, id: '22222222-2222-4222-8222-222222222227', body: 'Synthetic MAX voice', attachments: [{ ...voiceMemory.attachments[0], id: maxVoiceId, playbackPath: maxVoicePath, waveform: null }] }
 const transport = {
-  request: async (path: string) => path.includes('/readiness') ? { state: 'ready', recheckable: false } : ({ items: fourMaxMode ? [fourMaxVideosMemory] : maxMixedMode ? [maxMixedMemory] : swipeMode ? [swipeMixedMemory, swipePhotoAlbum] : [memory, singlePhotoMemory, photoAlbumMemory, ...(lifecycleMode || voiceMode ? [] : [landscapePhotoMemory]), ...(voiceMode ? [voiceMemory, { ...voiceMemory, id: '22222222-2222-4222-8222-222222222226' }, missingWaveformVoice] : []), ...(lifecycleMode ? lifecycleMemories : []), ...(lifecycleMode ? [maxVideoMemory] : [])], nextCursor: null }),
+  request: async (path: string) => path.includes('/readiness') ? { state: 'ready', recheckable: false } : ({ items: viewerGeometryMode ? [geometrySingleMemory, geometryAlbumMemory] : videoChainMode ? [videoChainMemory] : fourMaxMode ? [fourMaxVideosMemory] : maxMixedMode ? [maxMixedMemory] : swipeMode ? [swipeMixedMemory, swipePhotoAlbum] : [memory, singlePhotoMemory, photoAlbumMemory, ...(lifecycleMode || voiceMode ? [] : [landscapePhotoMemory]), ...(voiceMode ? [voiceMemory, { ...voiceMemory, id: '22222222-2222-4222-8222-222222222226' }, missingWaveformVoice] : []), ...(lifecycleMode ? lifecycleMemories : []), ...(lifecycleMode ? [maxVideoMemory] : [])], nextCursor: null }),
   raw: async (path: string, options?: { signal?: AbortSignal }) => {
     if (options?.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     if (path.includes('/max-videos/')) window.__fixedCarouselProbe?.posterRequests.push(path)

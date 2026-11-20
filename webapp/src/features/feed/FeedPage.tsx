@@ -51,6 +51,7 @@ import { VideoPlaybackControls } from './video-presentation'
 import { FeedAuthorAvatar, FeedSharedAuthorAvatars } from './shared-author-avatars'
 import { releaseVideoSource, useVideoViewportLifecycle } from './video-lifecycle'
 import { getMediaFrameRatio, useMediaFrameRatio } from './media-ratio'
+import { isSwipeBlockingTarget } from './swipe-target'
 import { CommentsPanel, useCommentSummaries } from '@/features/comments'
 
 type Props = {
@@ -474,7 +475,7 @@ export function FeedPage({
           occurredTime={timeLabel(memory.occurredAt, familyTimezone)}
           onReaction={(next) => reaction.setReaction(memory.id, next)}
           onReactionFeedback={(style) => requestReactionHaptic(hostBridge, style)}
-          onOpen={() => { detailReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; if (memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 1)) { const index = mixedIndexes.current.get(memory.id) ?? 0; setMixedViewer({ memory, index, photoUrl: mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) } else setDetail(memory) }}
+          onOpen={() => { detailReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; if (memory.kind === 'media' || (memory.kind === 'photo' && memory.attachments.length > 0)) { const index = mixedIndexes.current.get(memory.id) ?? 0; setMixedViewer({ memory, index, photoUrl: mixedPhotoUrls.current.get(memory.attachments[index]?.id) }) } else setDetail(memory) }}
         />
       }} /> : null}
       <div aria-hidden="true" data-testid="feed-load-more-sentinel" ref={sentinel} />
@@ -577,7 +578,7 @@ function MixedMediaCarousel({ hostBridge, initialIndex, memory, onIndexChange, o
     align: 'start',
     containScroll: 'trimSnaps',
     startIndex,
-    watchDrag: (_api, event) => !(event.target instanceof Element && event.target.closest('input, select, textarea, a, [role="slider"], [data-slot="video-playback-controls"], .memoly-private-video-v2-play, .memoly-video-viewer-v2-open')),
+    watchDrag: (_api, event) => !isSwipeBlockingTarget(event.target),
     watchResize: (_api, entries) => entries.every((entry) => {
       const element = entry.target
       return element.getClientRects().length > 0 && element.getBoundingClientRect().width > 0 && element.getBoundingClientRect().height > 0
@@ -710,14 +711,14 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
   const photoZoomRef = useRef(1)
   const pinchStart = useRef<{ distance: number; zoom: number } | null>(null)
   const swipeStart = useRef<{ id: number; x: number; y: number; axis: 'undecided' | 'horizontal' | 'vertical' | 'cancelled'; direction: -1 | 1 | null } | null>(null)
+  const pointerGesture = useRef<{ pointerId: number; x: number; y: number; moved: boolean } | null>(null)
   const onCloseRef = useRef(onClose)
   const historyMarkerId = useId()
   const historyCleanupTimerRef = useRef<number | null>(null)
   const [viewportRef, embla] = useEmblaCarousel({ align: 'center', containScroll: 'keepSnaps', duration: 25, startIndex, watchSlides: !pageWindow, watchDrag: (_api, event) => {
     if (photoZoomRef.current > 1 || pinchStart.current) return false
     if ('touches' in event && event.touches.length !== 1) return false
-    const target = event.target
-    return !(target instanceof Element && target.closest('button, input, select, textarea, a, [role="slider"], video[controls]'))
+    return !isSwipeBlockingTarget(event.target)
   } })
   useLayoutEffect(() => {
     if (!embla || !pageWindow) return
@@ -777,7 +778,7 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
       swipeStart.current = { id: touch.identifier, x: touch.clientX, y: touch.clientY, axis: 'cancelled', direction: null }
       return
     }
-    if (event.touches.length !== 1 || (window.visualViewport?.scale ?? 1) > 1 || !(target instanceof Element) || target.closest('button, input, select, textarea, a, [role="slider"]') || target.closest('video[controls]')) {
+    if (event.touches.length !== 1 || (window.visualViewport?.scale ?? 1) > 1 || !(target instanceof Element) || isSwipeBlockingTarget(target)) {
       swipeStart.current = null
       return
     }
@@ -903,7 +904,17 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
             <Typography as="span" aria-hidden="true" className="memoly-viewer-close-glyph" variant="memoryMeta">×</Typography>
           </button>
         </div>
-        <div aria-label={`${offset + index + 1} из ${total}`} className="memoly-mixed-viewer-media" data-media-kind={media.kind} data-seen-active-index={index} onTouchCancel={() => { swipeStart.current = null; pinchStart.current = null }} onTouchCancelCapture={() => { if (swipeStart.current) swipeStart.current.axis = 'cancelled'; embla?.scrollTo(indexRef.current, true) }} onTouchEnd={onMediaTouchEnd} onTouchMoveCapture={onMediaTouchMove} onTouchStart={onMediaTouchStart} role="group" ref={viewerViewportRef}>
+        <div aria-label={`${offset + index + 1} из ${total}`} className="memoly-mixed-viewer-media" data-media-kind={media.kind} data-seen-active-index={index} onClickCapture={(event) => {
+          // Клик после перетаскивания (мышь или касание) не запускает видео и не открывает медиа.
+          const wasDrag = pointerGesture.current?.moved ?? false
+          pointerGesture.current = null
+          if (event.detail === 0 || !wasDrag) return
+          event.stopPropagation()
+          if (!(event.target instanceof HTMLInputElement && event.target.type === 'range')) event.preventDefault()
+        }} onScroll={(event) => {
+          // Положение слайдов задаёт Embla через transform. Прокрутка самого контейнера (фокус или scrollIntoView в WebKit) сдвигает кадр, поэтому сбрасываем её.
+          if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0
+        }} onPointerCancelCapture={(event) => { if (pointerGesture.current?.pointerId === event.pointerId) pointerGesture.current = null }} onPointerDownCapture={(event) => { pointerGesture.current = event.button === 0 && event.isPrimary !== false ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false } : null }} onPointerMoveCapture={(event) => { const gesture = pointerGesture.current; if (gesture?.pointerId === event.pointerId && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 10) gesture.moved = true }} onTouchCancel={() => { swipeStart.current = null; pinchStart.current = null }} onTouchCancelCapture={() => { if (swipeStart.current) swipeStart.current.axis = 'cancelled'; embla?.scrollTo(indexRef.current, true) }} onTouchEnd={onMediaTouchEnd} onTouchMoveCapture={onMediaTouchMove} onTouchStart={onMediaTouchStart} role="group" ref={viewerViewportRef}>
           <div className="memoly-mixed-viewer-track">
             {memory.attachments.map((attachment, position) => {
               const active = position === index
@@ -919,8 +930,11 @@ export function MixedMediaViewer({ childAvatarCrop, childAvatarStatus, childAvat
           </div>
         </div>
         {activeMemory.body.trim() ? <Typography className="memoly-viewer-caption" variant="memoryMeta">{activeMemory.body}</Typography> : null}
-        {windowLength > 1 ? <div aria-label="Вложения воспоминания" className="memoly-viewer-thumbnails">{memory.attachments.map((attachment, thumbnailIndex) => <ViewerThumbnail attachment={attachment} index={offset + thumbnailIndex + 1} total={total} key={attachment.id} active={thumbnailIndex === index} onSelect={() => navigate(thumbnailIndex)} transport={transport} />)}</div> : null}
-        {total > 1 ? <div className="memoly-mixed-viewer-nav"><button disabled={offset + index === 0} onClick={() => navigate(index - 1)} type="button"><Typography as="span" variant="memoryMeta">Назад</Typography></button><button disabled={offset + index === total - 1} onClick={() => navigate(index + 1)} type="button"><Typography as="span" variant="memoryMeta">Далее</Typography></button></div> : null}
+        {windowLength > 1 ? <div aria-label="Вложения воспоминания" className="memoly-viewer-thumbnails">{memory.attachments.map((attachment, thumbnailIndex) => <ViewerThumbnail attachment={attachment} index={offset + thumbnailIndex + 1} total={total} key={attachment.id} active={thumbnailIndex === index} onSelect={() => navigate(thumbnailIndex)} transport={transport} />)}</div>
+          // Одиночное фото: место миниатюр и навигации зарезервировано, чтобы кадр стоял так же, как в карусели.
+          : <div aria-hidden="true" className="memoly-viewer-thumbnails memoly-viewer-reserved" inert />}
+        {total > 1 ? <div className="memoly-mixed-viewer-nav"><button disabled={offset + index === 0} onClick={() => navigate(index - 1)} type="button"><Typography as="span" variant="memoryMeta">Назад</Typography></button><button disabled={offset + index === total - 1} onClick={() => navigate(index + 1)} type="button"><Typography as="span" variant="memoryMeta">Далее</Typography></button></div>
+          : <div aria-hidden="true" className="memoly-mixed-viewer-nav memoly-viewer-reserved" inert><button disabled tabIndex={-1} type="button"><Typography as="span" variant="memoryMeta">Назад</Typography></button><button disabled tabIndex={-1} type="button"><Typography as="span" variant="memoryMeta">Далее</Typography></button></div>}
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   </DialogPrimitive.Root>
