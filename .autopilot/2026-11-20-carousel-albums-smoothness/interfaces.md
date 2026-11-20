@@ -63,4 +63,19 @@
 
 ## Что построили законченные тикеты
 
-(заполняется по ходу)
+### T01 (b64787b)
+- `features/feed/swipe-target.ts`: `isSwipeBlockingTarget(target: EventTarget | null): boolean` — общий фильтр для инлайн-карусели и просмотрщика; кнопки кадра (запуск видео, постер, «Открыть фото» `button.ml-media-button`) не блокируют свайп.
+- Харнесс `e2e/fixed-carousel.harness.tsx`: режимы `?video-chain`, `?viewer-geometry`.
+- `components/ui/drawer.tsx`: закрытый лист `pointer-events-none` (с `!`).
+- `features/albums/ComposerHost.tsx`: запасной блок «Добавить воспоминание» не рисуется при открытом листе.
+
+### T03 (5946fc3)
+- `private-cache.ts`: чтения кэша в одном кадре объединяются в одну readonly-транзакцию; публичные сигнатуры прежние. Фейк IndexedDB: `log.transactions`, хук `beforeGet`.
+
+### T02 (коммит после плана, «T02: альбомы показывают фото из кэша сразу…»)
+- `private-cache.ts`: `readPrivateImageEntry(userId, path): Promise<{ blob: Blob; etag: string | null } | null>` · `markPrivateImageFresh(userId, path, etag: string | null): Promise<void>` · `privateImageValidator(userId, path): { cached: boolean; etag: string | null } | undefined`. IndexedDB версии 2: байты в отдельном хранилище `imageBytes`, индекс `imageUserId`; одно переиспользуемое соединение; метаданные без перезаписи байтов; лимиты 500 записей / 40 МБ / 2 МБ.
+- `use-private-image-url.ts`: не-аватарная ветка — кэш и сеть параллельно, `If-None-Match`, 304 / тот же ETag → `markPrivateImageFresh`; транспорт через ref.
+- `features/albums/latest-transport.ts`: `useLatestTransport(transport): AuthenticatedTransport` — стабильный объект, который делегирует к последнему транспорту.
+- `features/albums/WorkshopGallery.tsx`: `nextWorkshopViewport(layout, current, measured)`, `visibleHeadings(layout, top, height)`, тип `WorkshopViewport`.
+- `tests/indexeddb-fake.ts`: несколько хранилищ, именованные индексы, upgrade, журнал открытий, записей, транзакций и курсоров (обратно совместим).
+- Замер: `webapp/e2e/album-timing.local.spec.ts` + `album-timing.local.playwright.config.ts` (порт 5231), `album-timing.local.albums.playwright.config.ts` (5232); не закоммичены, вспомогательные. Фикстура `e2e/fixtures/albums.ts`: параметр `rawDelay`, заголовок ETag.

@@ -21,4 +21,4 @@
 | 2026-11-04 | `2026-11-04-memoly-albums-watercolor-social--wip` | в работе | — |
 | 2026-11-04 | `2026-11-04-memoly-telegram-launch-restore--wip` | в работе | — |
 | 2026-11-05 | `2026-11-05-memoly-month-photo-collage--wip` | в работе | — |
-| 2026-11-20 | `2026-11-20-carousel-albums-smoothness--wip` | в работе | — |
+| 2026-11-20 | `2026-11-20-carousel-albums-smoothness` | сдан | Карусель листается с видео, одиночное фото — в том же просмотре, кэш фото альбомов переписан и не тормозит; ждёт FULL и выпуска |
