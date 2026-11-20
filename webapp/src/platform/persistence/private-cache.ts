@@ -38,6 +38,9 @@ const imageValidators = new Map<string, ValidatorIndex>()
 let pendingTouches = new Map<string, { userId: string; accessedAt: number; etag: string | null; isCurrent: () => boolean }>()
 let touchFlush: Promise<void> | null = null
 const pendingEvictions = new Map<string, Promise<void>>()
+type StoredImage = { entry: CacheEntry; bytes: ArrayBuffer | null }
+type ImageRead = { id: string; userId: string; resolve: (image: StoredImage | null) => void; reject: (error: unknown) => void }
+let queuedImageReads: ImageRead[] = []
 
 export function subscribePrivateCacheInvalidation(listener: (invalidation: PrivateCacheInvalidation) => void) {
   privateCacheInvalidationListeners.add(listener)
@@ -545,16 +548,82 @@ async function readEntry<T>(userId: string, kind: CacheEntry['kind'], key: strin
   })
 }
 
-async function readImage(userId: string, key: string): Promise<{ entry: CacheEntry; bytes: ArrayBuffer | null } | null> {
-  return withDatabase(async (db) => {
-    const id = entryId(userId, 'image', key)
-    const transaction = db.transaction(CACHE_STORES, 'readonly')
-    const [entry, stored] = await Promise.all([
-      requestDone(transaction.objectStore(STORE_NAME).get(id)) as Promise<CacheEntry | undefined>,
-      requestDone(transaction.objectStore(BYTES_STORE_NAME).get(id)) as Promise<ImageBytes | undefined>,
-    ])
-    if (entry?.schema !== PRIVATE_CACHE_SCHEMA || entry.userId !== userId || entry.kind !== 'image') return null
-    return { entry, bytes: stored?.bytes instanceof ArrayBuffer ? stored.bytes : null }
+/**
+ * Image reads requested before the next macrotask (one effect pass, one IntersectionObserver
+ * delivery) share one readonly transaction: WebKit spends 100-600 ms per transaction while an
+ * album opens, not per request.
+ */
+function readImage(userId: string, key: string): Promise<StoredImage | null> {
+  return new Promise((resolve, reject) => {
+    queuedImageReads.push({ id: entryId(userId, 'image', key), userId, resolve, reject })
+    if (queuedImageReads.length === 1) setTimeout(flushImageReads, 0)
+  })
+}
+
+function flushImageReads() {
+  const reads = queuedImageReads
+  queuedImageReads = []
+  void withDatabase((db) => readImagesTogether(db, reads))
+    .catch((error: unknown) => { for (const read of reads) read.reject(error) })
+}
+
+/**
+ * Each read settles as soon as its own two requests answer. A failed request misses only its
+ * image (the error is handled, so the transaction goes on), and whatever is still unanswered at
+ * the deadline fails then, the same bound a single read had.
+ */
+function readImagesTogether(db: IDBDatabase, reads: ImageRead[]) {
+  // A closed connection throws here, before any read settles, so `withDatabase` may retry.
+  const transaction = db.transaction(CACHE_STORES, 'readonly')
+  const metadata = transaction.objectStore(STORE_NAME)
+  const bytes = transaction.objectStore(BYTES_STORE_NAME)
+  return new Promise<void>((done) => {
+    let open = reads.length
+    const failers: Array<(error: Error) => void> = []
+    const finish = () => {
+      clearTimeout(timer)
+      done()
+    }
+    const timer = setTimeout(() => {
+      for (const fail of failers) fail(new Error('Private cache operation timed out'))
+      try { transaction.abort() } catch { /* a finished transaction cannot be aborted */ }
+      done()
+    }, IDB_OPERATION_DEADLINE_MS)
+    transaction.onabort = () => {
+      for (const fail of failers) fail(transaction.error ?? new Error('Private cache transaction aborted'))
+    }
+    for (const read of reads) {
+      let settled = false
+      let entry: CacheEntry | undefined
+      let stored: ImageBytes | undefined
+      let answered = 0
+      const settle = (result: { image: StoredImage | null } | { error: Error }) => {
+        if (settled) return
+        settled = true
+        if ('error' in result) read.reject(result.error)
+        else read.resolve(result.image)
+        open -= 1
+        if (open === 0) finish()
+      }
+      failers.push((error) => settle({ error }))
+      const answer = () => {
+        answered += 1
+        if (answered < 2) return
+        settle({ image: entry?.schema === PRIVATE_CACHE_SCHEMA && entry.userId === read.userId && entry.kind === 'image'
+          ? { entry, bytes: stored?.bytes instanceof ArrayBuffer ? stored.bytes : null }
+          : null })
+      }
+      const onError = (request: IDBRequest) => (event: Event) => {
+        event.preventDefault()
+        settle({ error: request.error ?? new Error('Private cache request failed') })
+      }
+      const metadataRequest = metadata.get(read.id)
+      metadataRequest.onsuccess = () => { entry = metadataRequest.result as CacheEntry | undefined; answer() }
+      metadataRequest.onerror = onError(metadataRequest)
+      const bytesRequest = bytes.get(read.id)
+      bytesRequest.onsuccess = () => { stored = bytesRequest.result as ImageBytes | undefined; answer() }
+      bytesRequest.onerror = onError(bytesRequest)
+    }
   })
 }
 

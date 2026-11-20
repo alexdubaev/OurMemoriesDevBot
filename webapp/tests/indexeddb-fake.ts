@@ -2,8 +2,10 @@
  * Minimal in-memory IndexedDB for the private cache: named object stores keyed by `id`,
  * named indexes on one field, version upgrades and long-lived connections — all that
  * `private-cache.ts` touches. Requests answer on a microtask and a transaction completes on
- * the macrotask after its last request. The returned handle also records opens, writes and
- * cursor reads so tests can prove what a cache operation did or did not touch.
+ * the macrotask after its last request. The returned handle also records opens, transactions,
+ * writes and cursor reads so tests can prove what a cache operation did or did not touch.
+ * A `get` can be held or failed by the hook passed to `installFakeIndexedDb`; a failed request
+ * aborts its transaction unless its error handler calls `preventDefault`, as in IndexedDB.
  */
 type Row = { id: string; userId?: string } & Record<string, unknown>
 type Handler = ((event?: unknown) => void) | null
@@ -11,6 +13,7 @@ type StoreState = { rows: Map<string, Row>; indexes: Map<string, string> }
 type Stores = Map<string, StoreState>
 export type FakeIndexedDbLog = {
   opens: number
+  transactions: Array<{ mode: IDBTransactionMode | 'versionchange'; stores: string[] }>
   puts: Array<{ store: string; value: Row }>
   cursorValues: Array<{ store: string; index: string | null; value: Row }>
 }
@@ -35,7 +38,7 @@ class FakeTransaction {
     private readonly stores: Stores,
     private readonly log: FakeIndexedDbLog,
     readonly mode: IDBTransactionMode | 'versionchange',
-    readonly beforeGet?: () => Promise<void> | undefined,
+    readonly beforeGet?: (store: string, id: string) => Promise<void> | undefined,
   ) {
     // IndexedDB commits a transaction that never receives a request.
     setTimeout(() => { if (this.pending === 0) this.complete() }, 0)
@@ -81,13 +84,20 @@ class FakeStore {
       request.onsuccess?.()
       this.transaction.end()
     }
-    if (beforeRequest) void beforeRequest.then(complete)
+    const fail = (reason: unknown) => {
+      let prevented = false
+      request.error = reason instanceof Error ? reason : new Error(String(reason))
+      request.onerror?.({ preventDefault: () => { prevented = true } })
+      if (!prevented) this.transaction.abort()
+      this.transaction.end()
+    }
+    if (beforeRequest) void beforeRequest.then(complete, fail)
     else queueMicrotask(complete)
     return request
   }
 
   createIndex(index: string, keyPath: string) { this.state.indexes.set(index, keyPath) }
-  get(id: string) { return this.run(() => this.state.rows.get(id), this.transaction.beforeGet?.()) }
+  get(id: string) { return this.run(() => this.state.rows.get(id), this.transaction.beforeGet?.(this.name, id)) }
   put(value: Row) {
     this.log.puts.push({ store: this.name, value })
     return this.run(() => { this.state.rows.set(value.id, structuredClone(value)); return value.id })
@@ -135,9 +145,9 @@ class FakeStore {
  * Installs the fake. It starts as an existing version-1 database with the `entries` store and
  * its `userId` index, so rows seeded before the first open model data from the previous app.
  */
-export function installFakeIndexedDb(beforeGet?: (mode: IDBTransactionMode) => Promise<void> | undefined) {
+export function installFakeIndexedDb(beforeGet?: (mode: IDBTransactionMode, request: { store: string; id: string }) => Promise<void> | undefined) {
   const stores: Stores = new Map([['entries', { rows: new Map(), indexes: new Map([['userId', 'userId']]) }]])
-  const log: FakeIndexedDbLog = { opens: 0, puts: [], cursorValues: [] }
+  const log: FakeIndexedDbLog = { opens: 0, transactions: [], puts: [], cursorValues: [] }
   let version = 1
   const connections = new Set<{ closed: boolean; onclose: Handler; onversionchange: Handler }>()
   const connect = () => {
@@ -151,9 +161,10 @@ export function installFakeIndexedDb(beforeGet?: (mode: IDBTransactionMode) => P
         stores.set(name, state)
         return new FakeStore(name, state, new FakeTransaction(stores, log, 'versionchange'), log)
       },
-      transaction: (_names: string | string[], mode: IDBTransactionMode = 'readonly') => {
+      transaction: (names: string | string[], mode: IDBTransactionMode = 'readonly') => {
         if (connection.closed) throw new DOMException('The database connection is closing.', 'InvalidStateError')
-        return new FakeTransaction(stores, log, mode, beforeGet && (() => beforeGet(mode)))
+        log.transactions.push({ mode, stores: typeof names === 'string' ? [names] : [...names] })
+        return new FakeTransaction(stores, log, mode, beforeGet && ((store, id) => beforeGet(mode, { store, id })))
       },
       close: () => { connection.closed = true; connections.delete(connection) },
     }
