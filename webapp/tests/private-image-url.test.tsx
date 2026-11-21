@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
+import { QueryClient } from '@tanstack/react-query'
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 
@@ -14,6 +15,7 @@ import {
   privateFamilyCacheGeneration,
   privateImageValidator,
   readPrivateImageEntry,
+  restorePrivateQueryCache,
 } from '../src/platform/persistence/private-cache'
 import { installFakeIndexedDb } from './indexeddb-fake'
 
@@ -143,6 +145,18 @@ describe('private image loading', () => {
     await render(transport)
     await settle()
     expect(states.at(-1)?.status).toBe('ready')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.headers.get('If-None-Match')).toBe('"v1"')
+  })
+
+  test('the first request after the launch restore carries If-None-Match', async () => {
+    await seedCachedImage('"v1"')
+    const generation = activatePrivateCacheIdentity(userId)
+    allowPrivateFamilyCache(userId, familyId, 1)
+    expect(await restorePrivateQueryCache(new QueryClient(), userId, generation)).toBe(true)
+    const { transport, calls } = controlledTransport()
+    await render(transport)
+    await settle()
     expect(calls).toHaveLength(1)
     expect(calls[0]!.headers.get('If-None-Match')).toBe('"v1"')
   })

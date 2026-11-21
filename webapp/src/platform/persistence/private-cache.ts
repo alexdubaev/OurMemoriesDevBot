@@ -137,7 +137,7 @@ export function privateFamilyCacheGeneration(userId: string, familyId: string) {
 export async function restorePrivateQueryCache(queryClient: QueryClient, userId: string, generation: number, shouldContinue: () => boolean = () => true) {
   const state = await readEntry<PersistedState>(userId, 'queries', 'state')
   if (!shouldContinue() || !isActivePrivateCacheIdentity(userId, generation)) return false
-  await discardOtherSchemas(userId)
+  await discardOtherSchemas(userId, generation)
   if (!shouldContinue() || !isActivePrivateCacheIdentity(userId, generation)) return false
   if (!state || estimateSize(state) > PRIVATE_QUERY_LIMIT_BYTES || !validatePersistedState(state, userId)) {
     if (state) await removeEntry(userId, 'queries', 'state')
@@ -422,7 +422,13 @@ function currentFamilyCheck(userId: string, familyId: string) {
     !revokedFamilyCache.has(familyScopeKey) && privateFamilyCacheGeneration(userId, familyId) === familyGeneration
 }
 
-async function discardOtherSchemas(userId: string) {
+/**
+ * Drops rows of other schemas and, in the same pass over this user's rows, fills the validator
+ * index: the first tiles after launch then revalidate with If-None-Match instead of downloading.
+ */
+async function discardOtherSchemas(userId: string, generation: number) {
+  const index = isActivePrivateCacheIdentity(userId, generation) ? validatorIndex(userId) : null
+  const etags = new Map<string, string | null>()
   await enqueue(() => withDatabase(async (db) => {
     const transaction = db.transaction(CACHE_STORES, 'readwrite')
     const bytes = transaction.objectStore(BYTES_STORE_NAME)
@@ -434,10 +440,16 @@ async function discardOtherSchemas(userId: string) {
       if (entry.schema !== PRIVATE_CACHE_SCHEMA) {
         cursor.delete()
         if (entry.kind === 'image') bytes.delete(entry.id)
+      } else if (entry.kind === 'image' && entry.userId === userId) {
+        etags.set(entry.key, entry.etag ?? null)
       }
       cursor.continue()
     }
     await transactionDone(transaction)
+    // Only the index of the identity that started the scan, and only while it is still current.
+    if (!index || index.ready || !isActivePrivateCacheIdentity(userId, generation) || imageValidators.get(userId) !== index) return
+    for (const [key, etag] of etags) if (!index.etags.has(key)) index.etags.set(key, etag)
+    index.ready = true
   }))
 }
 
