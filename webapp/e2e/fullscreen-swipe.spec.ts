@@ -2,6 +2,9 @@ import { expect, test } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
+// Окно, в котором Embla считает скорость флика при отпускании (`logInterval` в DragTracker embla-carousel 8).
+const EMBLA_FLICK_WINDOW_MS = 170
+
 async function touchSwipe(page: import('@playwright/test').Page, selector: string, direction: 'left' | 'right', origin = { x: 0.5, y: 0.5 }, startOnTarget = false) {
   const target = page.locator(selector)
   const box = await target.boundingBox()
@@ -123,6 +126,7 @@ test('fullscreen mixed viewer follows the finger and keeps the adjacent photo vi
     await syntheticTouchStep(page, '.memoly-mixed-viewer-media', mapped, [{ identifier: 1, x: nextX, y }])
   }
   await touch('touchStart', x)
+  const heldSince = await page.evaluate(() => performance.now())
   await touch('touchMove', x - bounds!.width * 0.45)
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   if (chromium) await page.screenshot({ path: testInfo.outputPath('mid-drag.png') })
@@ -146,6 +150,12 @@ test('fullscreen mixed viewer follows the finger and keeps the adjacent photo vi
   const offset = await viewport.locator('.memoly-mixed-viewer-track').evaluate((element) => new DOMMatrixReadOnly(getComputedStyle(element).transform).m41)
   expect(offset).toBeLessThan(-bounds!.width * 0.1)
 
+  // Палец задерживается в перетаскивании дольше окна флика Embla, затем возвращается и отпускается без флика.
+  // Без задержки исход зависел от скорости проверок выше: быстрый проход укладывал весь жест в окно, и Embla листала вперёд.
+  await page.evaluate(({ since, holdMs }) => new Promise<void>((resolve) => {
+    const wait = () => performance.now() - since > holdMs ? resolve() : requestAnimationFrame(wait)
+    wait()
+  }), { since: heldSince, holdMs: EMBLA_FLICK_WINDOW_MS + 30 })
   await touch('touchMove', x - bounds!.width * 0.14)
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   const reversedOffset = await viewport.locator('.memoly-mixed-viewer-track').evaluate((element) => new DOMMatrixReadOnly(getComputedStyle(element).transform).m41)
