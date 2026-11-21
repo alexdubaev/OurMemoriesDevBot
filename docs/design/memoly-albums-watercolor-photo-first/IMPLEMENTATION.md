@@ -1,0 +1,8 @@
+# IMPLEMENTATION — короткий безопасный маршрут
+
+1. Прочитать актуальные AGENTS.md, teamlead skill, docs/development/SMALL_CHANGE_WORKFLOW.md и Selectel runbook при выпуске. Сверить актуальный main и работающие backend/frontend SHA. Изолированный worktree; не затрагивать параллельные задачи.
+2. Изучить текущие webapp/src/features/albums/AlbumsPage.tsx, albums.css, WorkshopGallery.tsx, AlbumCatalogPresentation.tsx, AlbumEntryDetail.tsx и реальные tests. Каталог остаётся без визуального изменения. Стили внутренних экранов локализовать по album kind/route. Найти и сохранить обработчики, не создавать второй renderer.
+3. Применить дизайн к внутренней шапке, меню, фильтрам, годам, плотной мастерской, временной линии Первого года, Первым открытиям и свободному альбому. Новые изображения — только нейтральные и небольшие, без публикации приватных скриншотов и без использования целого мокапа как UI.
+4. Узкие тесты + browser screenshots до/после: 320/390/430px, 200% text, каталог без изменений, 3/2000 работ, фильтры/годы/масштаб, 0/12/12/12 месяцев, текстовые события, произвольная галерея, Viewer/MAX Back/смена семьи.
+5. Release mode по фактическому accumulated diff. Доказанное presentation-only обычно FRONTEND с нужным независимым semantic review для TSX и receipt. Если protected/code, API/private media или неразрешённый runtime drift требуют FULL, сначала объяснить владельцу причину, последствия и затраты. Не ослаблять scope gates/guards, не выполнять повторные общие аудиты.
+6. По актуальному AGENTS.md автономно довести до feature PR, необходимых checks/review, squash merge, разрешённого guarded deploy, smoke. Сохранять recovery и не заявлять проверку физического iPhone по desktop.
