@@ -157,6 +157,71 @@ describe('private image validators', () => {
   })
 })
 
+describe('private image validators at launch', () => {
+  test('restoring the saved screens also indexes stored ETags, so lookups answer at once without another scan', async () => {
+    await store(preview(1), 512, '"v1"')
+    await store(preview(2), 512, '"v2"')
+    await drain()
+    generation = activatePrivateCacheIdentity(userId)
+    allowPrivateFamilyCache(userId, familyId, 1)
+
+    expect(await restorePrivateQueryCache(new QueryClient(), userId, generation)).toBe(true)
+    database.log.cursorValues.length = 0
+
+    expect(privateImageValidator(userId, preview(1))).toEqual({ cached: true, etag: '"v1"' })
+    expect(privateImageValidator(userId, preview(2))).toEqual({ cached: true, etag: '"v2"' })
+    expect(privateImageValidator(userId, preview(3))).toEqual({ cached: false, etag: null })
+    await drain()
+    await Bun.sleep(0)
+    expect(database.log.cursorValues).toEqual([])
+  })
+
+  test('an identity switch during the restore scan leaves the next identity without a ready index or keys of the first user', async () => {
+    await store(preview(1), 512, '"v1"')
+    await drain()
+    generation = activatePrivateCacheIdentity(userId)
+    const otherUserId = 'storage-other-user'
+    const log = database.log.cursorValues
+    let switched = false
+    log.push = (...values) => {
+      if (!switched) {
+        switched = true
+        activatePrivateCacheIdentity(otherUserId)
+      }
+      return Array.prototype.push.apply(log, values)
+    }
+
+    expect(await restorePrivateQueryCache(new QueryClient(), userId, generation)).toBe(false)
+    expect(switched).toBe(true)
+    expect(privateImageValidator(otherUserId, preview(1))).toBeUndefined()
+
+    activatePrivateCacheIdentity(userId)
+    expect(privateImageValidator(userId, preview(1))).toBeUndefined()
+  })
+})
+
+describe('private image validators removed during the launch scan', () => {
+  test('an image removed while the restore scan runs does not come back as a validator', async () => {
+    await store(preview(1), 512, '"v1"')
+    await store(preview(2), 512, '"v2"')
+    await drain()
+    generation = activatePrivateCacheIdentity(userId)
+    allowPrivateFamilyCache(userId, familyId, 1)
+    const log = database.log.cursorValues
+    let removal: Promise<void> | null = null
+    log.push = (...values) => {
+      removal ??= removePrivateImage(userId, preview(1))
+      return Array.prototype.push.apply(log, values)
+    }
+
+    expect(await restorePrivateQueryCache(new QueryClient(), userId, generation)).toBe(true)
+    await removal
+    expect(removal).not.toBeNull()
+    expect(privateImageValidator(userId, preview(1))).toEqual({ cached: false, etag: null })
+    expect(privateImageValidator(userId, preview(2))).toEqual({ cached: true, etag: '"v2"' })
+  })
+})
+
 describe('private image removal keeps no bytes behind', () => {
   test('removing one image, a family or the user deletes the stored bytes too', async () => {
     await store(preview(1))

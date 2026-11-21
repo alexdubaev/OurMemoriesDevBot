@@ -57,3 +57,29 @@ export async function withMaxVideoReadinessSlot<T>(signal: AbortSignal, check: (
     else activeChecks -= 1
   }
 }
+
+/** A final answer does not change again; it is kept this long after its last slide leaves. */
+export const MAX_VIDEO_FINAL_READINESS_GC_MS = 30 * 60_000
+const DEFAULT_READINESS_GC_MS = 5 * 60_000
+// Only a ready poster is final: a failed one may still be produced by a later server retry.
+const posterReadinessFinal = (data: MaxVideoPosterReadiness | undefined) => data?.state === 'ready'
+const readinessFinal = (data: MaxVideoReadiness | undefined) => Boolean(data && !data.recheckable)
+
+/**
+ * Cache policy for a poster readiness query. A pending answer stays stale, so every activation
+ * of the slide checks again; a ready answer is never refetched by a swipe.
+ */
+export function maxVideoPosterReadinessCache(cached: MaxVideoPosterReadiness | undefined) {
+  return {
+    staleTime: (query: { state: { data?: MaxVideoPosterReadiness } }) => posterReadinessFinal(query.state.data) ? Infinity : 0,
+    gcTime: posterReadinessFinal(cached) ? MAX_VIDEO_FINAL_READINESS_GC_MS : DEFAULT_READINESS_GC_MS,
+  }
+}
+
+/** Cache policy for a video readiness query: recheckable answers stay stale, final ones are kept. */
+export function maxVideoReadinessCache(cached: MaxVideoReadiness | undefined) {
+  return {
+    staleTime: (query: { state: { data?: MaxVideoReadiness } }) => readinessFinal(query.state.data) ? Infinity : 0,
+    gcTime: readinessFinal(cached) ? MAX_VIDEO_FINAL_READINESS_GC_MS : DEFAULT_READINESS_GC_MS,
+  }
+}

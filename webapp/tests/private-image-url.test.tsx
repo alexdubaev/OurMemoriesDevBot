@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
+import { QueryClient } from '@tanstack/react-query'
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 
@@ -14,7 +15,9 @@ import {
   privateFamilyCacheGeneration,
   privateImageValidator,
   readPrivateImageEntry,
+  restorePrivateQueryCache,
 } from '../src/platform/persistence/private-cache'
+import { withControlledTimers } from './controlled-timers'
 import { installFakeIndexedDb } from './indexeddb-fake'
 
 const userId = 'image-hook-user'
@@ -52,16 +55,39 @@ const events: Event[] = []
 const saved = new Map<string, PropertyDescriptor | undefined>()
 const globals = ['indexedDB', 'IDBKeyRange', 'window', 'Image', 'IS_REACT_ACT_ENVIRONMENT'] as const
 
-function Probe({ transport, poolMode }: { transport: AuthenticatedTransport; poolMode?: 'album-preview' }) {
+type PoolMode = 'album-preview' | 'feed-photo'
+function Probe({ transport, poolMode }: { transport: AuthenticatedTransport; poolMode?: PoolMode }) {
   states.push(usePrivateImageResource(userId, path, transport, true, undefined, 'scope', poolMode))
   return null
 }
 
-async function render(transport: AuthenticatedTransport, poolMode?: 'album-preview') {
+async function render(transport: AuthenticatedTransport, poolMode?: PoolMode) {
   await act(async () => {
     root ??= createRoot(detachedContainer())
     root.render(createElement(Probe, { transport, poolMode }))
   })
+}
+
+async function unmount() {
+  if (root) await act(async () => root!.unmount())
+  root = null
+}
+
+const imageByteReads = () => database.log.transactions.filter(({ mode, stores }) => mode === 'readonly' && stores.includes('imageBytes'))
+
+/** Loads the image from the network in the feed photo mode, then leaves the screen. */
+async function showAndLeaveFeedPhoto(etag: string) {
+  const first = controlledTransport()
+  await render(first.transport, 'feed-photo')
+  await settle()
+  first.calls[0]!.resolve(trackedImage(etag).response)
+  await settle(20)
+  const shown = states.at(-1)!
+  expect(shown.status).toBe('ready')
+  privateImageValidator(userId, path)
+  await settle()
+  await unmount()
+  return shown.url!
 }
 
 async function settle(rounds = 8) {
@@ -120,6 +146,18 @@ describe('private image loading', () => {
     await render(transport)
     await settle()
     expect(states.at(-1)?.status).toBe('ready')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.headers.get('If-None-Match')).toBe('"v1"')
+  })
+
+  test('the first request after the launch restore carries If-None-Match', async () => {
+    await seedCachedImage('"v1"')
+    const generation = activatePrivateCacheIdentity(userId)
+    allowPrivateFamilyCache(userId, familyId, 1)
+    expect(await restorePrivateQueryCache(new QueryClient(), userId, generation)).toBe(true)
+    const { transport, calls } = controlledTransport()
+    await render(transport)
+    await settle()
     expect(calls).toHaveLength(1)
     expect(calls[0]!.headers.get('If-None-Match')).toBe('"v1"')
   })
@@ -204,6 +242,33 @@ describe('private image loading', () => {
     expect((await readPrivateImageEntry(userId, path))?.etag).toBe('"v1"')
   })
 
+  test('a 304 after the stored read timed out reads the cache again instead of downloading', async () => {
+    let stallNextRead = false
+    database = installFakeIndexedDb((mode, request) => {
+      if (!stallNextRead || mode !== 'readonly' || request.store !== 'imageBytes') return undefined
+      stallNextRead = false
+      return new Promise<void>(() => undefined)
+    })
+    await seedCachedImage('"v1"')
+    expect(privateImageValidator(userId, path)).toEqual({ cached: true, etag: '"v1"' })
+    stallNextRead = true
+    database.log.transactions.length = 0
+    const { transport, calls } = controlledTransport()
+
+    await withControlledTimers(async (clock) => {
+      await render(transport)
+      expect(calls).toHaveLength(1)
+      expect(calls[0]!.headers.get('If-None-Match')).toBe('"v1"')
+      calls[0]!.reject(new ApiRequestError(304, 'INTERNAL_ERROR', 'Request failed with status 304'))
+      await act(async () => { await clock.runAll() })
+    })
+    await settle(20)
+
+    expect(calls).toHaveLength(1)
+    expect(imageByteReads()).toHaveLength(2)
+    expect(states.at(-1)?.status).toBe('ready')
+  })
+
   test('a denial that arrives before a slow cache read keeps the image hidden', async () => {
     let holdReads = false
     const gate = Promise.withResolvers<void>()
@@ -236,6 +301,43 @@ describe('private image loading', () => {
     await settle(20)
     expect(states.some((state) => state.status === 'error')).toBe(false)
     expect(states.at(-1)?.status).toBe('ready')
+  })
+
+  test('a remounted feed photo in the same scope shows its URL in the first layout commit without reading IndexedDB', async () => {
+    const url = await showAndLeaveFeedPhoto('"v1"')
+    database.log.transactions.length = 0
+    states = []
+
+    const second = controlledTransport()
+    // A synchronous act runs render and layout effects but no timers, so an IndexedDB read cannot finish here.
+    act(() => {
+      root = createRoot(detachedContainer())
+      root.render(createElement(Probe, { transport: second.transport, poolMode: 'feed-photo' }))
+    })
+    expect(states.at(-1)).toEqual({ url, status: 'ready' })
+    await settle(20)
+
+    expect(imageByteReads()).toEqual([])
+    expect(second.calls).toHaveLength(1)
+    expect(second.calls[0]!.headers.get('If-None-Match')).toBe('"v1"')
+    expect(states.every((state) => state.url === url || state.url === null)).toBe(true)
+  })
+
+  test('a 403 during revalidation of a pooled feed photo hides it and revokes the URL', async () => {
+    const url = await showAndLeaveFeedPhoto('"v1"')
+    const revoke = spyOn(URL, 'revokeObjectURL')
+    try {
+      const second = controlledTransport()
+      await render(second.transport, 'feed-photo')
+      expect(states.at(-1)).toEqual({ url, status: 'ready' })
+      second.calls[0]!.reject(new ApiRequestError(403, 'FORBIDDEN', 'Synthetic denial'))
+      await settle(20)
+      expect(states.at(-1)).toEqual({ url: null, status: 'error' })
+      expect(revoke.mock.calls.map(([revoked]) => revoked)).toContain(url)
+      expect(events.map((event) => [event.type, (event as CustomEvent).detail])).toEqual([[privateFamilyAccessRevokedEvent, { userId, familyId }]])
+    } finally {
+      revoke.mockRestore()
+    }
   })
 
   for (const poolMode of [undefined, 'album-preview'] as const) {
