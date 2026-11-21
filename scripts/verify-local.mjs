@@ -1,11 +1,29 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { relative, resolve } from 'node:path'
+import { posix, relative, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { performance } from 'node:perf_hooks'
 
-const CRITICAL = /(^|\/)(backend\/src\/(?:db\.ts|env\.ts|app\.ts|storage\/|outbox\/|modules\/(?:auth|families|media|uploads|users|memories|max)(?:\/|$))|backend\/prisma\/|backend\/scripts\/|packages\/|scripts\/|tests\/|infra\/|deploy\/|\.github\/|\.githooks\/)|(^|\/)(package\.json|bun\.lock|bun\.lockb|Dockerfile[^/]*|.*\.ya?ml|verify-local[^/]*\.mjs|(?:vite|playwright|tsconfig|eslint)[^/]*(?:\.config\.[cm]?[jt]s|\.json))$/i
+// The root tests/ directory holds repository and Selectel release-guard suites.
+// Package-local tests (webapp/tests, website/tests) follow their package profile.
+const CRITICAL = /^tests\/|(^|\/)(backend\/src\/(?:db\.ts|env\.ts|app\.ts|storage\/|outbox\/|modules\/(?:auth|families|media|uploads|users|memories|max)(?:\/|$))|backend\/prisma\/|backend\/scripts\/|packages\/|scripts\/|infra\/|deploy\/|\.github\/|\.githooks\/)|(^|\/)(package\.json|bun\.lock|bun\.lockb|Dockerfile[^/]*|.*\.ya?ml|verify-local[^/]*\.mjs|(?:vite|playwright|tsconfig|eslint)[^/]*(?:\.config\.[cm]?[jt]s|\.json))$/i
+// Autopilot run records: Markdown/text notes and the state.js data files (a single
+// window.STATE assignment) that only the local autopilot dashboard loads. Nothing in the build, tests or release tooling reads them.
+// Executable autopilot tooling (ap.py, dashboard/index pages, anything else) keeps its
+// own classification.
+const AUTOPILOT_METADATA = /^\.autopilot\/(?:[^/]+\/)*(?:[^/]+\.(?:md|txt)|state\.js)$/
+// Browser-test support files: page harnesses, their variants, fixtures and helpers.
+// They never ship; a change is verified by the journeys that load them.
+const E2E_SUPPORT = /^webapp\/e2e\/(?:[^/]+\.harness\.(?:tsx|html)|[^/]+\.no-[^/]+\.tsx?|(?:fixtures|helpers)\/[^/]+\.tsx?)$/
+const E2E_ROOT_CONFIG = /^webapp\/playwright[^/]*\.config\.ts$/
+const E2E_DEDICATED_CONFIG = /^webapp\/e2e\/([^/]+)\.(?:playwright|vite)\.config\.ts$/
+const E2E_SPEC = /^webapp\/e2e\/[^/]+\.(?:spec|max-e2e)\.ts$/
+// Web app unit tests and their helpers. A test that guards an always-FULL (D) source, or a
+// helper such a test relies on, keeps FULL: weakening it would weaken that protection.
+const WEBAPP_TEST_SOURCE = /^webapp\/tests\/.+\.[cm]?[jt]sx?$/
+const WEBAPP_TEST_FILE = /\.test\.[cm]?[jt]sx?$/
+const SENSITIVE_TEST_NAME = /(?:auth|session|invite|private|cache|access|permission|service-worker)/i
 const STANDARD = /(^|\/)(backend\/|webapp\/|website\/)/i
 const DOCS = /(^|\/)(docs\/|references\/|templates\/)|(^|\/)(AGENTS\.md|README[^/]*|CHANGELOG[^/]*)$/i
 const FAST_SAFE = /\.(css|scss|sass|less|md|mdx|txt)$/i
@@ -17,18 +35,11 @@ const ACCEPTED_UI_V4_SHA = 'afdb408f8bbf22b564c86bb8d33a83261f55cc48'
 // Reviewed individual executable metadata and browser infrastructure inputs.
 // Keep exact identities: adjacent/new files still require their own classification.
 const REVIEWED_FULL_PATHS = new Set([
-  '.autopilot/2026-10-23-wishlist/state.js',
-  '.autopilot/2026-11-04-memoly-albums-watercolor-social--wip/state.js',
-  '.autopilot/2026-11-05-memoly-month-photo-collage--wip/state.js',
   '.autopilot/dashboard.html',
-  '.autopilot/state.js',
   '.env.example',
   'assets/manifest.json',
   'webapp/e2e/album-social.playwright.config.ts',
   'webapp/e2e/telegram-auth-only.playwright.config.ts',
-  'webapp/e2e/fixed-carousel.harness.tsx',
-  'webapp/e2e/fixtures/albums.ts',
-  'webapp/e2e/selected-family-app.harness.tsx',
 ])
 
 function isFastSafe(path) {
@@ -243,6 +254,9 @@ export function explainChanges(paths, { repositoryRoot = process.cwd() } = {}) {
     if (!path || /[\\\r\n\t]/.test(path) || path.startsWith('/') || path.split('/').some((part) => !part || part === '.' || part === '..')) {
       return result('review-required', 'invalid-path', 'Ambiguous changed path; establish its repository-relative identity.')
     }
+    if (AUTOPILOT_METADATA.test(path)) {
+      return result('fast', 'autopilot-metadata', 'Autopilot run record; not read by the build, tests or release tooling.')
+    }
     if (REVIEWED_FULL_PATHS.has(path)) {
       return result('full', 'reviewed-exact-critical-path', 'Reviewed executable metadata or browser infrastructure; retain FULL verification.')
     }
@@ -256,6 +270,19 @@ export function explainChanges(paths, { repositoryRoot = process.cwd() } = {}) {
         return result('review-required', 'unresolved-frontend-path', 'Frontend policy did not classify this path; inspect the path and policy before running checks.')
       }
       if (classification[1] === 'D') return result('full', 'sensitive-frontend-path', 'Frontend policy marks this boundary sensitive (D).')
+      if (WEBAPP_TEST_SOURCE.test(path)) {
+        const sensitive = webappTestSensitivity(path, repositoryRoot)
+        if (sensitive) return result('full', 'sensitive-test-dependency', sensitive)
+      }
+      if (E2E_SUPPORT.test(path)) {
+        const { specs, shared } = browserSupportDependents(path, repositoryRoot)
+        if (shared) return result('full', 'shared-browser-test-input', `Reaches shared browser-test input ${shared}; run the complete portfolio.`)
+        const unmapped = specs.find((spec) => !browserJourneyConfig(spec, repositoryRoot))
+        if (unmapped) return result('full', 'shared-browser-test-input', `Dependent journey ${unmapped} has no supported configuration; run the complete portfolio.`)
+        if (specs.length) return result('standard', 'browser-test-support', `Verified by the journeys that load it: ${specs.join(', ')}.`)
+        if (!existsSync(resolve(repositoryRoot, path))) return result('standard', 'removed-browser-support', 'Removed support file with no remaining consumer.')
+        return result('review-required', 'unused-browser-support', 'No browser journey loads this support file; establish its consumer first.')
+      }
     }
     if (DOCS.test(path) || isFastSafe(path)) return result('fast', 'documentation-or-cosmetic', 'Documentation, stylesheet or recognized raster asset.')
     if (STANDARD.test(path)) return result('standard', 'scoped-package-source', 'Scoped package source/test; run affected checks and independent review.')
@@ -322,7 +349,11 @@ export function selectProfile({ paths, requested, reason }) {
 export function planFor(profile, paths = [], base = 'refs/remotes/origin/main', repositoryRoot = process.cwd()) {
   if (profile === 'review-required') throw new Error('REVIEW_REQUIRED: resolve the changed-path scope before planning checks.')
   assertProfile(profile)
-  const browserJourneys = profile === 'fast' ? [] : changedBrowserJourneys(paths, repositoryRoot)
+  // STANDARD runs the journeys behind a changed support file; FULL already runs the portfolio.
+  const journeyPaths = profile === 'fast' ? [] : profile === 'standard'
+    ? [...paths, ...paths.filter((path) => E2E_SUPPORT.test(path)).flatMap((path) => browserSupportDependents(path, repositoryRoot).specs)]
+    : paths
+  const browserJourneys = changedBrowserJourneys(journeyPaths, repositoryRoot)
   const commands = [['Git whitespace and patch validation', ['git', ['diff', '--check', `${base}...HEAD`]]], ['Working tree whitespace validation', ['git', ['diff', '--check', 'HEAD']]]]
   if (profile === 'fast') {
     if (paths.some((path) => /^(webapp\/(?:public\/assets|src\/assets)\/|assets\/)/i.test(path) && RASTER_ASSET.test(path))) {
@@ -357,6 +388,10 @@ export function planFor(profile, paths = [], base = 'refs/remotes/origin/main', 
     const tests = relatedWebappTests(paths, repositoryRoot)
     if (tests.length) commands.push(['Changed web app unit tests', ['bun', ['test', ...tests]]])
     else console.log('No targeted Web app unit test maps to these paths; typecheck, lint, and production build remain required.')
+    // A shared test helper or fake can change any suite's outcome; the whole suite takes seconds.
+    if (paths.some((path) => /^webapp\/tests\//.test(path) && !/\.test\.[cm]?[jt]sx?$/i.test(path))) {
+      commands.push(['Web app unit tests', ['bun', ['run', 'test:webapp']]])
+    }
     if (profile === 'standard') commands.push(...browserJourneys)
   }
   if (paths.some((path) => path.startsWith('website/'))) {
@@ -433,17 +468,185 @@ const MAX_BROWSER_SPECS = new Set([
   'video-lifecycle.spec.ts', 'shared-author-avatar.spec.ts',
 ])
 
+function browserJourneyConfig(path, repositoryRoot) {
+  const dedicated = path.replace(/\.(?:spec|max-e2e)\.ts$/, '.playwright.config.ts')
+  const config = existsSync(resolve(repositoryRoot, dedicated)) ? dedicated
+    : path === 'webapp/e2e/control-browser-link.spec.ts' ? 'webapp/playwright.control.config.ts'
+      : MAX_BROWSER_SPECS.has(path.split('/').at(-1)) ? 'webapp/playwright.max.config.ts' : null
+  return config && existsSync(resolve(repositoryRoot, config)) ? config : null
+}
+
 function changedBrowserJourneys(paths, repositoryRoot) {
-  return [...new Set(paths)].sort().filter((path) => /^webapp\/e2e\/[^/]+\.(?:spec|max-e2e)\.ts$/.test(path) && existsSync(resolve(repositoryRoot, path))).map((path) => {
-    const dedicated = path.replace(/\.(?:spec|max-e2e)\.ts$/, '.playwright.config.ts')
-    const config = existsSync(resolve(repositoryRoot, dedicated)) ? dedicated
-      : path === 'webapp/e2e/control-browser-link.spec.ts' ? 'webapp/playwright.control.config.ts'
-        : MAX_BROWSER_SPECS.has(path.split('/').at(-1)) ? 'webapp/playwright.max.config.ts' : null
-    if (!config || !existsSync(resolve(repositoryRoot, config))) {
+  return [...new Set(paths)].sort().filter((path) => E2E_SPEC.test(path) && existsSync(resolve(repositoryRoot, path))).map((path) => {
+    const config = browserJourneyConfig(path, repositoryRoot)
+    if (!config) {
       throw new Error(`REVIEW_REQUIRED: no supported Playwright config for changed spec ${path}. Add a dedicated config or a tested route before running verification.`)
     }
     return [`Browser journey ${path}`, ['bun', ['run', '--cwd', 'webapp', 'e2e', `--config=${config.replace(/^webapp\//, '')}`, path.replace(/^webapp\//, '')]]]
   })
+}
+
+function isRepositoryFile(path, repositoryRoot) {
+  try { return statSync(resolve(repositoryRoot, path)).isFile() } catch { return false }
+}
+
+// Local module references of a web app test file: quoted './', '../' or '@/' specifiers
+// (static imports, dynamic imports and module mocks), resolved to repository paths.
+// A specifier that cannot be resolved (including a template literal with \${...}) is
+// reported as unresolved so the caller can fail closed.
+function localModuleReferences(file, repositoryRoot) {
+  let text
+  try { text = readFileSync(resolve(repositoryRoot, file), 'utf8') } catch { return { found: [], unresolved: [] } }
+  const directory = posix.dirname(file)
+  const found = new Set()
+  const unresolved = new Set()
+  for (const [specifier] of text.matchAll(/(?<=['"`])(?:\.{1,2}\/|@\/)[^'"`\s]*\$\{[^'"`]*(?=['"`])/g)) unresolved.add(specifier)
+  for (const [, specifier] of text.matchAll(/['"`]((?:\.{1,2}\/|@\/)[^'"`\s$]+)['"`]/g)) {
+    const base = specifier.startsWith('@/') ? `webapp/src/${specifier.slice(2)}` : posix.normalize(posix.join(directory, specifier))
+    const target = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '/index.ts', '/index.tsx'].map((suffix) => `${base}${suffix}`)
+      .find((candidate) => isRepositoryFile(candidate, repositoryRoot))
+    if (target) found.add(target)
+    else unresolved.add(specifier)
+  }
+  return { found: [...found], unresolved: [...unresolved] }
+}
+
+function listWebappTestSources(repositoryRoot) {
+  const files = []
+  const walk = (directory) => {
+    let entries
+    try { entries = readdirSync(resolve(repositoryRoot, directory), { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      const path = `${directory}/${entry.name}`
+      if (entry.isDirectory()) walk(path)
+      else if (entry.isFile() && WEBAPP_TEST_SOURCE.test(path)) files.push(path)
+    }
+  }
+  walk('webapp/tests')
+  return files.sort()
+}
+
+// Returns a reason when a changed web app test file must keep FULL, otherwise null.
+// A test is sensitive when its name covers a protected area or when it reaches an
+// always-FULL (D) web app source or browser-test infrastructure through its own imports
+// or its test helpers. A helper
+// is sensitive when it reaches such a source itself or any sensitive test uses it.
+// A removed test file cannot be inspected and keeps FULL.
+export function webappTestSensitivity(path, repositoryRoot = process.cwd()) {
+  if (!isRepositoryFile(path, repositoryRoot)) return 'Removed web app test file; its guarded subject cannot be inspected.'
+  const files = listWebappTestSources(repositoryRoot)
+  const references = new Map()
+  /** @returns {{ found: string[], unresolved: string[] }} */
+  const referencesOf = (file) => {
+    if (!references.has(file)) references.set(file, localModuleReferences(file, repositoryRoot))
+    return references.get(file)
+  }
+  const reach = (start) => {
+    const helpers = new Set([start])
+    const sources = new Set()
+    const infrastructure = new Set()
+    const unresolved = new Set()
+    const queue = [start]
+    while (queue.length) {
+      const current = queue.shift()
+      const { found, unresolved: missing } = referencesOf(current)
+      for (const specifier of missing) unresolved.add(`${current}: ${specifier}`)
+      for (const target of found) {
+        if (target.startsWith('webapp/tests/')) {
+          if (WEBAPP_TEST_SOURCE.test(target) && !helpers.has(target)) { helpers.add(target); queue.push(target) }
+        } else if (target.startsWith('webapp/e2e/') || target.startsWith('webapp/scripts/')) infrastructure.add(target)
+        else sources.add(target)
+      }
+    }
+    return { helpers, sources, infrastructure, unresolved }
+  }
+  const subjects = [path]
+  if (!WEBAPP_TEST_FILE.test(path)) {
+    for (const file of files) if (WEBAPP_TEST_FILE.test(file) && file !== path && reach(file).helpers.has(path)) subjects.push(file)
+  }
+  const named = subjects.find((file) => SENSITIVE_TEST_NAME.test(file.split('/').at(-1)))
+  if (named) return named === path ? `Test name covers a protected area: ${path}.` : `Helper used by protected test ${named}.`
+  for (const subject of subjects) {
+    const { infrastructure: [infrastructure], unresolved: [missing] } = reach(subject)
+    if (infrastructure) return `Test guards browser-test infrastructure ${infrastructure}.`
+    if (missing) return `Unresolved local reference ${missing}; its subject cannot be classified.`
+  }
+  const reached = new Map()
+  for (const subject of subjects) for (const source of reach(subject).sources) if (!reached.has(source)) reached.set(source, subject)
+  // Every reached file outside webapp/tests goes through the frontend policy; D or an
+  // unclassified path (for example a shipped worker in webapp/public) keeps FULL.
+  const targets = [...reached.keys()]
+  if (!targets.length) return null
+  const scoped = spawnSync(BASH_EXECUTABLE, [resolve(repositoryRoot, FRONTEND_SCOPE_CLI), 'classify', ...targets], { encoding: 'utf8', cwd: repositoryRoot })
+  if (scoped.status !== 0) return `Could not classify the sources this test reaches; keep FULL. ${scoped.stderr?.trim() ?? ''}`.trim()
+  for (const line of scoped.stdout.split(/\r?\n/)) {
+    const [source, kind] = line.split('\t')
+    if (kind === 'D') {
+      const subject = reached.get(source)
+      return subject === path ? `Test reaches always-FULL source ${source}.` : `Helper used by ${subject}, which reaches always-FULL source ${source}.`
+    }
+  }
+  return null
+}
+
+function listBrowserTestSources(repositoryRoot) {
+  const files = []
+  const walk = (directory) => {
+    let entries
+    try { entries = readdirSync(resolve(repositoryRoot, directory), { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      const path = `${directory}/${entry.name}`
+      if (entry.isDirectory()) walk(path)
+      else if (entry.isFile() && /\.(?:[cm]?[jt]sx?|html|json)$/.test(entry.name)) files.push(path)
+    }
+  }
+  walk('webapp/e2e')
+  try {
+    for (const name of readdirSync(resolve(repositoryRoot, 'webapp'))) if (E2E_ROOT_CONFIG.test(`webapp/${name}`)) files.push(`webapp/${name}`)
+  } catch { /* no web app directory */ }
+  return files.sort()
+}
+
+// Follows textual references (relative path without extension) from a support file
+// through other support files to the journeys that load it. Any reference from a
+// shared input (root config, global setup, env/ports/url, an orphan config) means
+// every journey can be affected, which the caller turns into FULL.
+export function browserSupportDependents(path, repositoryRoot = process.cwd()) {
+  const sources = listBrowserTestSources(repositoryRoot).map((file) => {
+    let text = ''
+    try { text = readFileSync(resolve(repositoryRoot, file), 'utf8') } catch { /* unreadable source stays unmatched */ }
+    return { file, text }
+  })
+  const specs = new Set()
+  let shared = null
+  const queue = [path]
+  const seen = new Set(queue)
+  while (queue.length) {
+    const current = queue.shift()
+    const stem = current.replace(/^webapp\/e2e\//, '').replace(/\.[^./]+$/, '')
+    const directory = current.slice(0, current.lastIndexOf('/'))
+    const sibling = `./${stem.split('/').at(-1)}`
+    for (const { file, text } of sources) {
+      if (file === current) continue
+      const sameDirectory = file.slice(0, file.lastIndexOf('/')) === directory
+      if (!text.includes(stem) && !(sameDirectory && text.includes(sibling))) continue
+      if (E2E_SPEC.test(file)) { specs.add(file); continue }
+      const dedicated = file.match(E2E_DEDICATED_CONFIG)
+      if (dedicated) {
+        const owner = ['spec.ts', 'max-e2e.ts'].map((suffix) => `webapp/e2e/${dedicated[1]}.${suffix}`)
+          .find((spec) => existsSync(resolve(repositoryRoot, spec)))
+        if (owner) specs.add(owner)
+        else shared ??= file
+        continue
+      }
+      if (E2E_SUPPORT.test(file)) {
+        if (!seen.has(file)) { seen.add(file); queue.push(file) }
+        continue
+      }
+      shared ??= file
+    }
+  }
+  return { specs: [...specs].sort(), shared }
 }
 
 function relatedWebappTests(paths, repositoryRoot) {

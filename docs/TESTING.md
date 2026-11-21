@@ -47,8 +47,24 @@ Unknown paths, unavailable classification and an empty comparison scope return `
 before any verification stage starts. Even an explicit FULL cannot bypass this state. Review the
 file's role and risk, then add a narrow tested classification rule; for an empty scope choose the
 intended comparison base. Unresolved scope remains a blocker. Do not whitelist a whole directory.
-The progress journal `.autopilot/PROGRESS.md` is already FAST metadata; adding it to an ordinary
-UI change does not raise STANDARD to FULL.
+Three directory rules replace per-file entries:
+
+- Autopilot run records under `.autopilot/` (`*.md`, `*.txt` and the JSON-only `state.js` data
+  files) are FAST metadata. Nothing in the build, tests or release tooling reads them. The short
+  frontend lane treats them as A. Executable autopilot tooling (`ap.py`, `index.html`, the
+  dashboard page) keeps its own classification.
+- Package-local tests (`webapp/tests/`, `website/tests/`) follow their package profile. Only the
+  root `tests/` directory (repository and Selectel release-guard suites) is critical. A web app test
+  stays FULL when its name covers auth, session, invite, private data, cache, access, permission or
+  the service worker, when its imports (directly or through test helpers) reach an always-FULL (D)
+  web app source, or when it imports browser-test infrastructure. A helper stays FULL when it
+  reaches such a source or a FULL test uses it. A removed test file stays FULL. Otherwise a test is
+  STANDARD, and a changed non-test helper adds the whole web app unit suite.
+- Browser-test support files (`webapp/e2e/*.harness.{tsx,html}`, `*.no-*.ts(x)`, `fixtures/`,
+  `helpers/`) are STANDARD and run every journey that loads them, found by following references
+  through other support files. A reference from a shared input (root Playwright config, global
+  setup, `env`/`ports`/`url`, a config without its own spec) or a dependent journey without a
+  supported config selects FULL. A support file that no journey loads stays `REVIEW_REQUIRED`.
 
  FULL runs architecture/dependency
 checks, typechecks, lint, production builds, repository/Selectel tools, MAX/neutral contracts and
