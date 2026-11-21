@@ -10,13 +10,14 @@ export function SourcePreview({ source, accountId, scopeKey, transport, active =
   const [visible, setVisible] = useState(false)
   useEffect(() => {
     if (!active || !root.current) return
-    const observer = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) { setVisible(true); observer.disconnect() } }, { rootMargin: '150px' })
+    // Wider than the gallery render margin (up to 450 px), so a tile starts loading before it is laid out on screen.
+    const observer = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) { setVisible(true); observer.disconnect() } }, { rootMargin: '600px' })
     observer.observe(root.current)
     return () => observer.disconnect()
   }, [active])
   const image = usePrivateImageResource(accountId, previewPath(source), transport, active && visible, undefined, scopeKey, keepWarm ? 'album-preview' : undefined)
   return <span className="albums-preview" data-preview-kind={source?.kind ?? 'empty'} ref={root}>
-    {image.url ? <img alt="" decoding="async" height={source?.attachment?.height ?? 240} loading="lazy" src={image.url} width={source?.attachment?.width ?? 240} /> : <WebpIcon decorative name={!source?.available && source ? 'warning' : source?.kind === 'voice' ? 'voice' : source?.kind === 'note' ? 'note' : source?.kind === 'video' ? 'video' : 'photo'} size={28} />}
+    {image.url ? <img alt="" decoding="async" height={source?.attachment?.height ?? 240} src={image.url} width={source?.attachment?.width ?? 240} /> : <WebpIcon decorative name={!source?.available && source ? 'warning' : source?.kind === 'voice' ? 'voice' : source?.kind === 'note' ? 'note' : source?.kind === 'video' ? 'video' : 'photo'} size={28} />}
     {source && !source.available ? <Typography as="span" className="albums-unavailable" variant="memoryMeta">Оригинал недоступен</Typography> : null}
     {image.status === 'error' ? <Typography as="span" className="albums-unavailable" variant="memoryMeta">Нет миниатюры</Typography> : null}
     {source?.kind === 'video' && source.available ? <span className="albums-video-mark"><WebpIcon decorative name="play" size={18} /></span> : null}

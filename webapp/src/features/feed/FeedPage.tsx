@@ -1378,7 +1378,7 @@ export function PhotoImage({ alt, height, onError, onLoad, src, width }: {
   src: string
   width: number | null
 }) {
-  return <img alt={alt} className="block h-auto w-full" height={height ?? undefined} onError={onError} onLoad={onLoad} src={src} width={width ?? undefined} />
+  return <img alt={alt} className="block h-auto w-full" decoding="async" height={height ?? undefined} onError={onError} onLoad={onLoad} src={src} width={width ?? undefined} />
 }
 
 const VOICE_FALLBACK_WAVEFORM = Array.from({ length: 48 }, (_, index) => 0.18 + ((index * 7) % 11) / 20)
