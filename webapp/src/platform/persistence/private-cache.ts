@@ -13,6 +13,7 @@ const privateCacheInvalidationListeners = new Set<(invalidation: PrivateCacheInv
 const PRIVATE_QUERY_LIMIT_ENTRIES = 100
 const PRIVATE_QUERY_LIMIT_BYTES = 2 * 1024 * 1024
 const IDB_OPERATION_DEADLINE_MS = 3000
+const IMAGE_READS_PER_TRANSACTION = 48
 
 const DATABASE_NAME = 'memoly-private-cache'
 // Version 2 keeps image bytes apart from their metadata, so recency updates, revalidation
@@ -33,7 +34,8 @@ const activeFamilyEpochByUser = new Map<string, number | null>()
 const familyCacheScopeKey = (userId: string, familyId: string) => `${userId}:${familyId}`
 type Connection = { factory: IDBFactory; database: Promise<IDBDatabase> }
 let connection: Connection | null = null
-type ValidatorIndex = { generation: number; etags: Map<string, string | null>; ready: boolean; loading: Promise<void> | null }
+// `removed` holds keys forgotten before the index was ready, so a running scan cannot bring them back.
+type ValidatorIndex = { generation: number; etags: Map<string, string | null>; ready: boolean; loading: Promise<void> | null; removed: Set<string> }
 const imageValidators = new Map<string, ValidatorIndex>()
 let pendingTouches = new Map<string, { userId: string; accessedAt: number; etag: string | null; isCurrent: () => boolean }>()
 let touchFlush: Promise<void> | null = null
@@ -137,7 +139,7 @@ export function privateFamilyCacheGeneration(userId: string, familyId: string) {
 export async function restorePrivateQueryCache(queryClient: QueryClient, userId: string, generation: number, shouldContinue: () => boolean = () => true) {
   const state = await readEntry<PersistedState>(userId, 'queries', 'state')
   if (!shouldContinue() || !isActivePrivateCacheIdentity(userId, generation)) return false
-  await discardOtherSchemas(userId)
+  await discardOtherSchemas(userId, generation)
   if (!shouldContinue() || !isActivePrivateCacheIdentity(userId, generation)) return false
   if (!state || estimateSize(state) > PRIVATE_QUERY_LIMIT_BYTES || !validatePersistedState(state, userId)) {
     if (state) await removeEntry(userId, 'queries', 'state')
@@ -422,7 +424,14 @@ function currentFamilyCheck(userId: string, familyId: string) {
     !revokedFamilyCache.has(familyScopeKey) && privateFamilyCacheGeneration(userId, familyId) === familyGeneration
 }
 
-async function discardOtherSchemas(userId: string) {
+/**
+ * Drops rows of other schemas and, in the same pass over this user's rows, fills the validator
+ * index: the first tiles after launch then revalidate with If-None-Match instead of downloading.
+ */
+async function discardOtherSchemas(userId: string, generation: number) {
+  const index = isActivePrivateCacheIdentity(userId, generation) ? validatorIndex(userId) : null
+  const etags = new Map<string, string | null>()
+  const scannedAt = Date.now()
   await enqueue(() => withDatabase(async (db) => {
     const transaction = db.transaction(CACHE_STORES, 'readwrite')
     const bytes = transaction.objectStore(BYTES_STORE_NAME)
@@ -434,10 +443,17 @@ async function discardOtherSchemas(userId: string) {
       if (entry.schema !== PRIVATE_CACHE_SCHEMA) {
         cursor.delete()
         if (entry.kind === 'image') bytes.delete(entry.id)
+      } else if (entry.kind === 'image' && entry.userId === userId && scannedAt - entry.lastAccess <= PRIVATE_CACHE_MAX_AGE_MS) {
+        etags.set(entry.key, entry.etag ?? null)
       }
       cursor.continue()
     }
     await transactionDone(transaction)
+    // Only the index of the identity that started the scan, and only while it is still current.
+    if (!index || index.ready || !isActivePrivateCacheIdentity(userId, generation) || imageValidators.get(userId) !== index) return
+    for (const [key, etag] of etags) if (!index.etags.has(key) && !index.removed.has(key)) index.etags.set(key, etag)
+    index.ready = true
+    index.removed.clear()
   }))
 }
 
@@ -550,8 +566,8 @@ async function readEntry<T>(userId: string, kind: CacheEntry['kind'], key: strin
 
 /**
  * Image reads requested before the next macrotask (one effect pass, one IntersectionObserver
- * delivery) share one readonly transaction: WebKit spends 100-600 ms per transaction while an
- * album opens, not per request.
+ * delivery) share readonly transactions of at most IMAGE_READS_PER_TRANSACTION reads: WebKit
+ * spends 100-600 ms per transaction while an album opens, not per request.
  */
 function readImage(userId: string, key: string): Promise<StoredImage | null> {
   return new Promise((resolve, reject) => {
@@ -563,16 +579,59 @@ function readImage(userId: string, key: string): Promise<StoredImage | null> {
 function flushImageReads() {
   const reads = queuedImageReads
   queuedImageReads = []
-  void withDatabase((db) => readImagesTogether(db, reads))
-    .catch((error: unknown) => { for (const read of reads) read.reject(error) })
+  // The chunks start together and share one deadline.
+  const deadline = imageReadDeadline()
+  for (let start = 0; start < reads.length; start += IMAGE_READS_PER_TRANSACTION) {
+    const chunk = reads.slice(start, start + IMAGE_READS_PER_TRANSACTION)
+    void withDatabase((db) => readImagesTogether(db, chunk, deadline))
+      .catch((error: unknown) => { for (const read of chunk) read.reject(error) })
+  }
+}
+
+type ImageReadDeadline = {
+  /** Watches one transaction until the returned function is called. */
+  watch(expire: () => void): () => void
+  /** A request of the flush answered: the deadline starts again. */
+  progress(): void
+}
+
+/**
+ * A large album answers its reads one after another for longer than one deadline. A flush
+ * fails what is still unanswered only after IDB_OPERATION_DEADLINE_MS without any answer,
+ * the bound a single read had.
+ */
+function imageReadDeadline(): ImageReadDeadline {
+  const watched = new Set<() => void>()
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const arm = () => {
+    if (timer !== null) clearTimeout(timer)
+    timer = null
+    if (!watched.size) return
+    timer = setTimeout(() => {
+      timer = null
+      const expired = [...watched]
+      watched.clear()
+      for (const expire of expired) expire()
+    }, IDB_OPERATION_DEADLINE_MS)
+  }
+  return {
+    watch(expire) {
+      watched.add(expire)
+      if (timer === null) arm()
+      return () => {
+        if (watched.delete(expire) && !watched.size) arm()
+      }
+    },
+    progress: arm,
+  }
 }
 
 /**
  * Each read settles as soon as its own two requests answer. A failed request misses only its
- * image (the error is handled, so the transaction goes on), and whatever is still unanswered at
- * the deadline fails then, the same bound a single read had.
+ * image (the error is handled, so the transaction goes on), and whatever is still unanswered
+ * when the shared deadline passes fails then.
  */
-function readImagesTogether(db: IDBDatabase, reads: ImageRead[]) {
+function readImagesTogether(db: IDBDatabase, reads: ImageRead[], deadline: ImageReadDeadline) {
   // A closed connection throws here, before any read settles, so `withDatabase` may retry.
   const transaction = db.transaction(CACHE_STORES, 'readonly')
   const metadata = transaction.objectStore(STORE_NAME)
@@ -580,15 +639,15 @@ function readImagesTogether(db: IDBDatabase, reads: ImageRead[]) {
   return new Promise<void>((done) => {
     let open = reads.length
     const failers: Array<(error: Error) => void> = []
-    const finish = () => {
-      clearTimeout(timer)
-      done()
-    }
-    const timer = setTimeout(() => {
+    const unwatch = deadline.watch(() => {
       for (const fail of failers) fail(new Error('Private cache operation timed out'))
       try { transaction.abort() } catch { /* a finished transaction cannot be aborted */ }
       done()
-    }, IDB_OPERATION_DEADLINE_MS)
+    })
+    const finish = () => {
+      unwatch()
+      done()
+    }
     transaction.onabort = () => {
       for (const fail of failers) fail(transaction.error ?? new Error('Private cache transaction aborted'))
     }
@@ -607,6 +666,7 @@ function readImagesTogether(db: IDBDatabase, reads: ImageRead[]) {
       }
       failers.push((error) => settle({ error }))
       const answer = () => {
+        deadline.progress()
         answered += 1
         if (answered < 2) return
         settle({ image: entry?.schema === PRIVATE_CACHE_SCHEMA && entry.userId === read.userId && entry.kind === 'image'
@@ -615,6 +675,7 @@ function readImagesTogether(db: IDBDatabase, reads: ImageRead[]) {
       }
       const onError = (request: IDBRequest) => (event: Event) => {
         event.preventDefault()
+        deadline.progress()
         settle({ error: request.error ?? new Error('Private cache request failed') })
       }
       const metadataRequest = metadata.get(read.id)
@@ -673,7 +734,7 @@ function entryId(userId: string, kind: CacheEntry['kind'], key: string) {
 function validatorIndex(userId: string) {
   let index = imageValidators.get(userId)
   if (!index || index.generation !== identityGeneration) {
-    index = { generation: identityGeneration, etags: new Map(), ready: false, loading: null }
+    index = { generation: identityGeneration, etags: new Map(), ready: false, loading: null, removed: new Set() }
     imageValidators.set(userId, index)
   }
   return index
@@ -684,7 +745,10 @@ function rememberValidator(userId: string, key: string, etag: string | null) {
 }
 
 function forgetValidator(userId: string, key: string) {
-  imageValidators.get(userId)?.etags.delete(key)
+  const index = imageValidators.get(userId)
+  if (!index) return
+  index.etags.delete(key)
+  if (!index.ready) index.removed.add(key)
 }
 
 async function loadValidators(userId: string, index: ValidatorIndex) {
@@ -692,9 +756,10 @@ async function loadValidators(userId: string, index: ValidatorIndex) {
     const entries = await withDatabase((db) => readImageMetadata(db, userId))
     if (imageValidators.get(userId) !== index) return
     for (const entry of entries) {
-      if (entry.schema === PRIVATE_CACHE_SCHEMA && entry.userId === userId && !index.etags.has(entry.key)) index.etags.set(entry.key, entry.etag ?? null)
+      if (entry.schema === PRIVATE_CACHE_SCHEMA && entry.userId === userId && !index.etags.has(entry.key) && !index.removed.has(entry.key)) index.etags.set(entry.key, entry.etag ?? null)
     }
     index.ready = true
+    index.removed.clear()
   } catch {
     // Without the index an image is revalidated without a validator; a later lookup retries.
     index.loading = null

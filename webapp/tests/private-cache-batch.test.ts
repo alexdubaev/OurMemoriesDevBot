@@ -131,6 +131,32 @@ describe('reads that arrive together share one IndexedDB transaction', () => {
   })
 })
 
+describe('large batches of reads', () => {
+  test('200 reads answered one every 20 ms all resolve with their bytes, at most 48 reads per transaction', async () => {
+    let pacing = false
+    let paced = 0
+    install((mode, request) => pacing && mode === 'readonly' && request.store === 'imageBytes'
+      ? new Promise<void>((resolve) => { paced += 1; setTimeout(resolve, 20 * paced) })
+      : undefined)
+    for (let index = 1; index <= 200; index += 1) await store(index)
+    await drain()
+    database.log.transactions.length = 0
+
+    await withControlledTimers(async (clock) => {
+      pacing = true
+      const reads = Array.from({ length: 200 }, (_, offset) => readPrivateImageEntry(userId, preview(offset + 1)).catch(() => 'failed' as const))
+      await clock.runAll()
+      const results = await Promise.all(reads)
+      pacing = false
+
+      // The last answer arrives after 4 s: only a deadline without progress may fail a read.
+      expect(paced).toBe(200)
+      expect(await Promise.all(results.map(firstByte))).toEqual(Array.from({ length: 200 }, (_, offset) => offset + 1))
+      expect(imageReads().length).toBeLessThanOrEqual(Math.ceil(200 / 48))
+    })
+  })
+})
+
 describe('choosing the same family again', () => {
   test('keeps the cache generation and stored images; a switch, revocation or new identity still invalidates', async () => {
     await store(1)

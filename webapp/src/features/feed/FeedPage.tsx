@@ -1,4 +1,4 @@
-import { maxVideoPosterReadinessSchema, maxVideoReadinessSchema, type AlbumDto, type ChildDto, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
+import { maxVideoPosterReadinessSchema, maxVideoReadinessSchema, type AlbumDto, type ChildDto, type MaxVideoPosterReadiness, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode, RefObject, TouchEvent as ReactTouchEvent } from 'react'
@@ -17,7 +17,7 @@ import { ChildHeader } from '@/components/ChildHeader'
 import { FamilyHeaderV2 } from '@/components/ui-v2/FamilyHeaderV2'
 import { useMemolyTheme } from '@/features/theme'
 import { privateMediaSource } from '@/platform/media/private-media-access'
-import { usePrivateImageResource, usePrivateImageUrl } from '@/platform/media/use-private-image-url'
+import { usePrivateImageResource } from '@/platform/media/use-private-image-url'
 import { toggleAudioPlayback } from './audio-playback'
 import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { requestReactionHaptic } from '@/platform/reaction-haptics'
@@ -42,7 +42,7 @@ import { AddSheetPresentation } from '@/features/memoly-ui'
 import { VideoComposer } from '@/features/max-video-upload'
 import { composerModeForAdd, type ComposerMode } from './composer-routing'
 import { loadMaxVideoSourceOnce } from './max-video-source'
-import { maxVideoPosterPath, maxVideoPosterReadinessInterval, maxVideoPosterReadinessPath, maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from './max-video-readiness'
+import { maxVideoPosterPath, maxVideoPosterReadinessCache, maxVideoPosterReadinessInterval, maxVideoPosterReadinessPath, maxVideoReadinessCache, maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from './max-video-readiness'
 import { hasPendingPrivateVideo, selectPendingPrivateVideoIds } from './pending-video-selection'
 import { MemoryDeleteSpotlight } from './MemoryDeleteSpotlight'
 import { useMemorySeenObserver } from './use-memory-seen-observer'
@@ -660,10 +660,12 @@ function MixedSlideMedia({ active, attachment, hostBridge, memory, multi, onOpen
   const { accountId, membershipEpoch } = useContext(VideoQueryScope)
   const posterReadinessPath = attachment.source === 'max' && attachment.posterState === 'pending' ? maxVideoPosterReadinessPath(attachment.playbackPath) : null
   const posterReadinessKey = [...feedQueryKeys.all, 'max-video-poster-readiness', accountId, membershipEpoch, posterReadinessPath] as const
+  const queryClient = useQueryClient()
   const posterReadiness = useQuery({
     queryKey: posterReadinessKey,
     queryFn: ({ signal }) => withMaxVideoReadinessSlot(signal, () => transport.request(posterReadinessPath!, maxVideoPosterReadinessSchema, { signal })),
     enabled: surfaceActive && multi && Boolean(posterReadinessPath),
+    ...maxVideoPosterReadinessCache(queryClient.getQueryData<MaxVideoPosterReadiness>(posterReadinessKey)),
     refetchInterval: (query) => maxVideoPosterReadinessInterval(query.state),
     refetchIntervalInBackground: false,
     retry: false,
@@ -1137,6 +1139,7 @@ function MaxVideo({ attachment, autoplay = false, feedPreview, fullscreen, hostB
     queryKey: posterReadinessKey,
     queryFn: ({ signal }) => withMaxVideoReadinessSlot(signal, () => transport.request(posterReadinessPath!, maxVideoPosterReadinessSchema, { signal })),
     enabled: nearViewport && Boolean(posterReadinessPath) && attachment.posterState === 'pending',
+    ...maxVideoPosterReadinessCache(queryClient.getQueryData<MaxVideoPosterReadiness>(posterReadinessKey)),
     refetchInterval: (query) => maxVideoPosterReadinessInterval(query.state),
     refetchIntervalInBackground: false,
     retry: false,
@@ -1168,6 +1171,7 @@ function MaxVideo({ attachment, autoplay = false, feedPreview, fullscreen, hostB
     queryKey: readinessKey,
     queryFn: ({ signal }) => withMaxVideoReadinessSlot(signal, () => transport.request(readinessPath!, maxVideoReadinessSchema, { signal })),
     enabled: nearViewport && Boolean(readinessPath) && nextCheckAt !== null && nextCheckAt <= readinessClock,
+    ...maxVideoReadinessCache(cachedReadiness?.data),
     retry: false,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
@@ -1351,7 +1355,8 @@ function PrivateImage({ attachment, borrowedUrl, onOpenPhoto, onUrlChange, inter
   const surfaceActive = useContext(FeedSurfaceActive)
   const { accountId, familyId, membershipEpoch } = useContext(VideoQueryScope)
   const scopeKey = accountId ? `${accountId}:${familyId}:${membershipEpoch}` : ''
-  const ownedUrl = usePrivateObjectUrl(path, transport, surfaceActive && !borrowedUrl, undefined, scopeKey)
+  // A photo that leaves the screen stays decoded in the idle pool of its scope and returns without a reload.
+  const ownedUrl = usePrivateObjectUrl(path, transport, surfaceActive && !borrowedUrl, undefined, scopeKey, scopeKey ? 'feed-photo' : undefined)
   const url = borrowedUrl ?? ownedUrl
   const [readyUrl, setReadyUrl] = useState<string | null>(null)
   const notifyUrlChange = useEffectEvent((nextUrl: string | null) => onUrlChange?.(attachment.id, nextUrl))
@@ -1373,7 +1378,7 @@ export function PhotoImage({ alt, height, onError, onLoad, src, width }: {
   src: string
   width: number | null
 }) {
-  return <img alt={alt} className="block h-auto w-full" height={height ?? undefined} onError={onError} onLoad={onLoad} src={src} width={width ?? undefined} />
+  return <img alt={alt} className="block h-auto w-full" decoding="async" height={height ?? undefined} onError={onError} onLoad={onLoad} src={src} width={width ?? undefined} />
 }
 
 const VOICE_FALLBACK_WAVEFORM = Array.from({ length: 48 }, (_, index) => 0.18 + ((index * 7) % 11) / 20)
@@ -1512,10 +1517,10 @@ function MemoryDetail({ familyTimezone, hostBridge, memory, onClose, onOpenPhoto
   </DialogPrimitive.Root>
 }
 
-function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTransport, enabled = true, onSettled?: () => void, scopeKey = '') {
+function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTransport, enabled = true, onSettled?: () => void, scopeKey = '', poolMode?: 'feed-photo') {
   const auth = useContext(AuthContext)
   const mediaTransport = transport ?? auth?.transport
-  return usePrivateImageUrl(auth?.user?.id ?? '', path, mediaTransport, enabled && Boolean(mediaTransport), onSettled, scopeKey)
+  return usePrivateImageResource(auth?.user?.id ?? '', path, mediaTransport, enabled && Boolean(mediaTransport), onSettled, scopeKey, poolMode).url
 }
 
 function useFeedVideoPosterUrl(path: string | null, transport: AuthenticatedTransport, nearViewport: boolean, feedPreview: boolean) {

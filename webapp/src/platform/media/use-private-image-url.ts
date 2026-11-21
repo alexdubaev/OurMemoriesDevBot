@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { AvatarResourcePool, isImmutableMemberAvatarPath } from './avatar-resource-pool'
-import { idleAlbumPreviews, idleFeedPosters } from './feed-poster-cache'
+import { idleAlbumPreviews, idleFeedPhotos, idleFeedPosters } from './feed-poster-cache'
 import { cachePrivateImageResponse, eligiblePrivateImage, markPrivateImageFresh, privateFamilyCacheGeneration, privateCacheIdentityGeneration, privateImageValidator, isActivePrivateCacheIdentity, readPrivateImage, readPrivateImageEntry, removePrivateImage, clearPrivateUserCache, privateFamilyAccessRevokedEvent, subscribePrivateCacheInvalidation } from '@/platform/persistence/private-cache'
 
 // Idle pools hand a decoded image to the next tile of the same user, identity generation,
@@ -22,6 +22,7 @@ subscribePrivateCacheInvalidation((invalidation) => {
   }
   memberAvatarPool.invalidate(matches)
   idleFeedPosters.clear(matches)
+  idleFeedPhotos.clear(matches)
   idleAlbumPreviews.clear(matches)
 })
 
@@ -39,7 +40,7 @@ export function usePrivateImageUrl(userId: string, path: string | null, transpor
   return usePrivateImageResource(userId, path, transport, enabled, onSettled, scopeKey).url
 }
 
-export function usePrivateImageResource(userId: string, path: string | null, transport: AuthenticatedTransport | undefined, enabled = true, onSettled?: () => void, scopeKey = '', poolMode?: 'child-avatar' | 'feed-poster' | 'album-preview'): PrivateImageResourceState {
+export function usePrivateImageResource(userId: string, path: string | null, transport: AuthenticatedTransport | undefined, enabled = true, onSettled?: () => void, scopeKey = '', poolMode?: 'child-avatar' | 'feed-poster' | 'feed-photo' | 'album-preview'): PrivateImageResourceState {
   const identityGeneration = privateCacheIdentityGeneration()
   const eligible = path ? eligiblePrivateImage(path) : null
   const familyId = eligible?.familyId
@@ -48,7 +49,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
   const poolKey = usesAvatarPool && familyId
     ? JSON.stringify([userId, familyId, identityGeneration, familyGeneration, scopeKey, path])
     : null
-  const idlePool = poolMode === 'album-preview' ? idleAlbumPreviews : poolMode === 'feed-poster' ? idleFeedPosters : null
+  const idlePool = poolMode === 'album-preview' ? idleAlbumPreviews : poolMode === 'feed-poster' ? idleFeedPosters : poolMode === 'feed-photo' ? idleFeedPhotos : null
   const idleKey = idlePool && scopeKey && familyId && !usesAvatarPool
     ? JSON.stringify([userId, familyId, identityGeneration, familyGeneration, scopeKey, path])
     : null
@@ -192,7 +193,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
         const image = new Image()
         image.src = url
         await image.decode()
-        if (idleKey) idleBytes = blob.size + image.naturalWidth * image.naturalHeight * 4
+        if (idleKey) idleBytes = blob.size
         if (!isCurrent() || denied || shown) {
           releaseUrl(url)
           return false
@@ -220,8 +221,10 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       const validatorEtag = validator?.etag ?? null
       // The stored copy and the network check start together: a cached tile does not wait for
       // the network, and a tile without a copy does not wait for IndexedDB.
+      // A rejected read (timeout, IndexedDB error) says nothing about the stored copy, unlike a clean miss.
+      let storedReadFailed = false
       const stored = cacheable && !readyUrlAlreadyShown && validator?.cached !== false
-        ? readPrivateImageEntry(userId, path).catch(() => null)
+        ? readPrivateImageEntry(userId, path).catch(() => { storedReadFailed = true; return null })
         : Promise.resolve(null)
       const shownFromCache = stored.then(async (entry) => {
         if (!entry || !isCurrent() || denied || shown || hasPriorReadyUrl()) return false
@@ -247,6 +250,24 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
           return
         }
         if (!isCurrent()) return
+        if (storedReadFailed && !denied && !shown && !hasPriorReadyUrl()) {
+          // The first read gave up while IndexedDB was busy: the confirmed copy is read once more.
+          const retry = await readPrivateImageEntry(userId, path).catch(() => null)
+          if (!isCurrent()) return
+          if (retry && !denied && !shown && !hasPriorReadyUrl()) {
+            let retryShown = false
+            try { retryShown = await showBlob(retry.blob, 'cache') }
+            catch { await removePrivateImage(userId, path).catch(() => undefined) }
+            if (!isCurrent()) return
+            if (retryShown) {
+              cachedWasShown = true
+              void markPrivateImageFresh(userId, path, validatorEtag).catch(() => undefined)
+              onSettledRef.current?.()
+              return
+            }
+          }
+          if (hasPriorReadyUrl()) return
+        }
         // The copy the validator described is gone: fetch the body once without a validator.
         response = await request(null)
         if (!isCurrent()) return
