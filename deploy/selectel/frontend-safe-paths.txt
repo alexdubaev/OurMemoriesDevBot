@@ -21,7 +21,7 @@ D	^(deploy/|scripts/|backend/|packages/|website/|infra/|\.github/|\.githooks/)
 A	^webapp/src/.+\.(css|scss|sass|less)$
 A	^webapp/(src|public)/assets/.+\.(webp|png|jpe?g|avif|ico)$
 R	^webapp/src/.+\.[cm]?[jt]sx?$
-D	^webapp/tests/[^/]*(auth|session|invite|private|cache|access|permission|service-worker)[^/]*$
+D	^webapp/tests/(.+/)?[^/]*(auth|session|invite|private|cache|access|permission|service-worker)[^/]*$
 R	^webapp/tests/.+\.[cm]?[jt]sx?$
 R	^webapp/e2e/[^/]+\.(spec|max-e2e)\.ts$
 R	^webapp/e2e/([^/]+\.harness\.(tsx|html)|[^/]+\.no-[^/]+\.tsx?|(fixtures|helpers)/[^/]+\.tsx?)$

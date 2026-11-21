@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { relative, resolve } from 'node:path'
+import { posix, relative, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { performance } from 'node:perf_hooks'
 
 // The root tests/ directory holds repository and Selectel release-guard suites.
 // Package-local tests (webapp/tests, website/tests) follow their package profile.
 const CRITICAL = /^tests\/|(^|\/)(backend\/src\/(?:db\.ts|env\.ts|app\.ts|storage\/|outbox\/|modules\/(?:auth|families|media|uploads|users|memories|max)(?:\/|$))|backend\/prisma\/|backend\/scripts\/|packages\/|scripts\/|infra\/|deploy\/|\.github\/|\.githooks\/)|(^|\/)(package\.json|bun\.lock|bun\.lockb|Dockerfile[^/]*|.*\.ya?ml|verify-local[^/]*\.mjs|(?:vite|playwright|tsconfig|eslint)[^/]*(?:\.config\.[cm]?[jt]s|\.json))$/i
-// Autopilot run records: Markdown/text notes and the JSON-only state.js data files the
-// local dashboard reads. Nothing in the build, tests or release tooling reads them.
+// Autopilot run records: Markdown/text notes and the state.js data files (a single
+// window.STATE assignment) that only the local autopilot dashboard loads. Nothing in the build, tests or release tooling reads them.
 // Executable autopilot tooling (ap.py, dashboard/index pages, anything else) keeps its
 // own classification.
 const AUTOPILOT_METADATA = /^\.autopilot\/(?:[^/]+\/)*(?:[^/]+\.(?:md|txt)|state\.js)$/
@@ -19,6 +19,11 @@ const E2E_SUPPORT = /^webapp\/e2e\/(?:[^/]+\.harness\.(?:tsx|html)|[^/]+\.no-[^/
 const E2E_ROOT_CONFIG = /^webapp\/playwright[^/]*\.config\.ts$/
 const E2E_DEDICATED_CONFIG = /^webapp\/e2e\/([^/]+)\.(?:playwright|vite)\.config\.ts$/
 const E2E_SPEC = /^webapp\/e2e\/[^/]+\.(?:spec|max-e2e)\.ts$/
+// Web app unit tests and their helpers. A test that guards an always-FULL (D) source, or a
+// helper such a test relies on, keeps FULL: weakening it would weaken that protection.
+const WEBAPP_TEST_SOURCE = /^webapp\/tests\/.+\.[cm]?[jt]sx?$/
+const WEBAPP_TEST_FILE = /\.test\.[cm]?[jt]sx?$/
+const SENSITIVE_TEST_NAME = /(?:auth|session|invite|private|cache|access|permission|service-worker)/i
 const STANDARD = /(^|\/)(backend\/|webapp\/|website\/)/i
 const DOCS = /(^|\/)(docs\/|references\/|templates\/)|(^|\/)(AGENTS\.md|README[^/]*|CHANGELOG[^/]*)$/i
 const FAST_SAFE = /\.(css|scss|sass|less|md|mdx|txt)$/i
@@ -265,6 +270,10 @@ export function explainChanges(paths, { repositoryRoot = process.cwd() } = {}) {
         return result('review-required', 'unresolved-frontend-path', 'Frontend policy did not classify this path; inspect the path and policy before running checks.')
       }
       if (classification[1] === 'D') return result('full', 'sensitive-frontend-path', 'Frontend policy marks this boundary sensitive (D).')
+      if (WEBAPP_TEST_SOURCE.test(path)) {
+        const sensitive = webappTestSensitivity(path, repositoryRoot)
+        if (sensitive) return result('full', 'sensitive-test-dependency', sensitive)
+      }
       if (E2E_SUPPORT.test(path)) {
         const { specs, shared } = browserSupportDependents(path, repositoryRoot)
         if (shared) return result('full', 'shared-browser-test-input', `Reaches shared browser-test input ${shared}; run the complete portfolio.`)
@@ -475,6 +484,95 @@ function changedBrowserJourneys(paths, repositoryRoot) {
     }
     return [`Browser journey ${path}`, ['bun', ['run', '--cwd', 'webapp', 'e2e', `--config=${config.replace(/^webapp\//, '')}`, path.replace(/^webapp\//, '')]]]
   })
+}
+
+function isRepositoryFile(path, repositoryRoot) {
+  try { return statSync(resolve(repositoryRoot, path)).isFile() } catch { return false }
+}
+
+// Local module references of a web app test file: quoted './', '../' or '@/' specifiers
+// (static imports, dynamic imports and module mocks), resolved to repository paths.
+function localModuleReferences(file, repositoryRoot) {
+  let text
+  try { text = readFileSync(resolve(repositoryRoot, file), 'utf8') } catch { return [] }
+  const directory = posix.dirname(file)
+  const found = new Set()
+  for (const [, specifier] of text.matchAll(/['"`]((?:\.{1,2}\/|@\/)[^'"`\s$]+)['"`]/g)) {
+    const base = specifier.startsWith('@/') ? `webapp/src/${specifier.slice(2)}` : posix.normalize(posix.join(directory, specifier))
+    const target = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '/index.ts', '/index.tsx'].map((suffix) => `${base}${suffix}`)
+      .find((candidate) => isRepositoryFile(candidate, repositoryRoot))
+    if (target) found.add(target)
+  }
+  return [...found]
+}
+
+function listWebappTestSources(repositoryRoot) {
+  const files = []
+  const walk = (directory) => {
+    let entries
+    try { entries = readdirSync(resolve(repositoryRoot, directory), { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      const path = `${directory}/${entry.name}`
+      if (entry.isDirectory()) walk(path)
+      else if (entry.isFile() && WEBAPP_TEST_SOURCE.test(path)) files.push(path)
+    }
+  }
+  walk('webapp/tests')
+  return files.sort()
+}
+
+// Returns a reason when a changed web app test file must keep FULL, otherwise null.
+// A test is sensitive when its name covers a protected area or when it reaches an
+// always-FULL (D) web app source or browser-test infrastructure through its own imports
+// or its test helpers. A helper
+// is sensitive when it reaches such a source itself or any sensitive test uses it.
+// A removed test file cannot be inspected and keeps FULL.
+export function webappTestSensitivity(path, repositoryRoot = process.cwd()) {
+  if (!isRepositoryFile(path, repositoryRoot)) return 'Removed web app test file; its guarded subject cannot be inspected.'
+  const files = listWebappTestSources(repositoryRoot)
+  const references = new Map()
+  const referencesOf = (file) => {
+    if (!references.has(file)) references.set(file, localModuleReferences(file, repositoryRoot))
+    return references.get(file)
+  }
+  const reach = (start) => {
+    const helpers = new Set([start])
+    const sources = new Set()
+    const infrastructure = new Set()
+    const queue = [start]
+    while (queue.length) {
+      for (const target of referencesOf(queue.shift())) {
+        if (target.startsWith('webapp/src/')) sources.add(target)
+        else if (target.startsWith('webapp/e2e/') || target.startsWith('webapp/scripts/')) infrastructure.add(target)
+        else if (WEBAPP_TEST_SOURCE.test(target) && !helpers.has(target)) { helpers.add(target); queue.push(target) }
+      }
+    }
+    return { helpers, sources, infrastructure }
+  }
+  const subjects = [path]
+  if (!WEBAPP_TEST_FILE.test(path)) {
+    for (const file of files) if (WEBAPP_TEST_FILE.test(file) && file !== path && reach(file).helpers.has(path)) subjects.push(file)
+  }
+  const named = subjects.find((file) => SENSITIVE_TEST_NAME.test(file.split('/').at(-1)))
+  if (named) return named === path ? `Test name covers a protected area: ${path}.` : `Helper used by protected test ${named}.`
+  for (const subject of subjects) {
+    const [infrastructure] = reach(subject).infrastructure
+    if (infrastructure) return `Test guards browser-test infrastructure ${infrastructure}.`
+  }
+  const reached = new Map()
+  for (const subject of subjects) for (const source of reach(subject).sources) if (!reached.has(source)) reached.set(source, subject)
+  const scripts = [...reached.keys()].filter((source) => /\.[cm]?[jt]sx?$/.test(source))
+  if (!scripts.length) return null
+  const scoped = spawnSync(BASH_EXECUTABLE, [resolve(repositoryRoot, FRONTEND_SCOPE_CLI), 'classify', ...scripts], { encoding: 'utf8', cwd: repositoryRoot })
+  if (scoped.status !== 0) return `Could not classify the sources this test reaches; keep FULL. ${scoped.stderr?.trim() ?? ''}`.trim()
+  for (const line of scoped.stdout.split(/\r?\n/)) {
+    const [source, kind] = line.split('\t')
+    if (kind === 'D') {
+      const subject = reached.get(source)
+      return subject === path ? `Test reaches always-FULL source ${source}.` : `Helper used by ${subject}, which reaches always-FULL source ${source}.`
+    }
+  }
+  return null
 }
 
 function listBrowserTestSources(repositoryRoot) {

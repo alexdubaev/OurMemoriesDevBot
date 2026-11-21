@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bashExecutable, gitBashPath } from '../tests/bash-runtime.mjs'
-import { browserSupportDependents, classifyChanges, executePlan, explainChanges, frontendPlan, planFor, selectProfile, validateFrontendScope } from './verify-local.mjs'
+import { browserSupportDependents, classifyChanges, webappTestSensitivity, executePlan, explainChanges, frontendPlan, planFor, selectProfile, validateFrontendScope } from './verify-local.mjs'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const frontendScopeCli = resolve(repositoryRoot, 'deploy/selectel/frontend-scope.sh')
@@ -307,9 +307,15 @@ describe('risk based verification', () => {
   })
 
   test('package-local unit tests follow their package, sensitive ones and root release-guard tests stay FULL', () => {
-    expect(explainChanges(['webapp/tests/media-ratio.test.ts']).reasons[0]).toMatchObject({ profile: 'standard', rule: 'scoped-package-source' })
-    expect(classifyChanges(['webapp/tests/indexeddb-fake.ts'])).toBe('standard')
+    expect(explainChanges(['webapp/tests/albums-layout.test.ts']).reasons[0]).toMatchObject({ profile: 'standard', rule: 'scoped-package-source' })
     expect(classifyChanges(['website/tests/boundary.test.ts'])).toBe('standard')
+    // Tests and helpers that reach always-FULL sources or browser-test infrastructure keep FULL.
+    for (const path of ['webapp/tests/http-client-retry-after.test.ts', 'webapp/tests/avatar-resource-pool.test.ts',
+      'webapp/tests/gifts-scope.test.ts', 'webapp/tests/composer-child-tags.test.tsx', 'webapp/tests/indexeddb-fake.ts',
+      'webapp/tests/e2e-database-guard.test.ts', 'webapp/tests/removed-subject.test.ts']) {
+      expect(explainChanges([path]).reasons[0]).toMatchObject({ profile: 'full', rule: 'sensitive-test-dependency' })
+    }
+    expect(classifyChanges(['webapp/tests/helpers/session-fake.ts'])).toBe('full')
     for (const path of ['webapp/tests/private-cache.test.ts', 'webapp/tests/private-media-sw.test.ts', 'webapp/tests/max-auth-epoch.test.ts',
       'webapp/tests/family-invite-links.test.ts', 'webapp/tests/feed-poster-cache.test.ts', 'webapp/tests/app-host-auth-race.test.tsx']) {
       expect(explainChanges([path]).reasons[0]).toMatchObject({ profile: 'full', rule: 'sensitive-frontend-path' })
@@ -319,7 +325,7 @@ describe('risk based verification', () => {
     expect(classifyChanges(['deploy/selectel/control/tests/sampler_test.py'])).toBe('full')
     const helper = planFor('standard', ['webapp/tests/indexeddb-fake.ts'])
     expect(helper.map(([name]) => name)).toContain('Web app unit tests')
-    const single = planFor('standard', ['webapp/tests/media-ratio.test.ts'])
+    const single = planFor('standard', ['webapp/tests/albums-layout.test.ts'])
     expect(single.map(([name]) => name)).toContain('Changed web app unit tests')
     expect(single.map(([name]) => name)).not.toContain('Web app unit tests')
   })
@@ -340,6 +346,28 @@ describe('risk based verification', () => {
     expect(full.map(([name]) => name)).toContain('MAX Web/PWA browser journeys')
     expect(full.map(([name]) => name)).not.toContain('Browser journey webapp/e2e/critical-smoke.spec.ts')
     expect(classifyChanges(['webapp/e2e/env.ts'])).toBe('review-required')
+  })
+
+  test('web app test sensitivity follows helpers to the tests that use them', () => {
+    const root = mkdtempSync(resolve(tmpdir(), 'memoly-webapp-tests-'))
+    const put = (path, contents) => {
+      const target = resolve(root, path)
+      mkdirSync(dirname(target), { recursive: true })
+      writeFileSync(target, contents)
+    }
+    try {
+      put('webapp/tests/helpers/fake.ts', 'export const fake = 1\n')
+      put('webapp/tests/private-thing.test.ts', "import { fake } from './helpers/fake'\n")
+      put('webapp/tests/layout.test.ts', "import { layout } from '@/layout'\n")
+      put('webapp/tests/helpers/other.ts', 'export const other = 1\n')
+      put('webapp/tests/plain.test.ts', "import { other } from './helpers/other'\n")
+      put('webapp/src/layout.ts', 'export const layout = 1\n')
+      expect(webappTestSensitivity('webapp/tests/helpers/fake.ts', root)).toContain('webapp/tests/private-thing.test.ts')
+      expect(webappTestSensitivity('webapp/tests/helpers/other.ts', root)).toBeNull()
+      expect(webappTestSensitivity('webapp/tests/gone.test.ts', root)).toContain('Removed')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   test('browser support dependency search follows same-folder imports, shared inputs and unused files', () => {

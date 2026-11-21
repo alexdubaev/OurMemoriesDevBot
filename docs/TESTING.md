@@ -54,10 +54,12 @@ Three directory rules replace per-file entries:
   frontend lane treats them as A. Executable autopilot tooling (`ap.py`, `index.html`, the
   dashboard page) keeps its own classification.
 - Package-local tests (`webapp/tests/`, `website/tests/`) follow their package profile. Only the
-  root `tests/` directory (repository and Selectel release-guard suites) is critical. Web app tests
-  whose names cover auth, session, invite, private data, cache, access, permission or the service
-  worker stay D/FULL, like the source they guard. A changed non-test helper under `webapp/tests/`
-  adds the whole web app unit suite to STANDARD.
+  root `tests/` directory (repository and Selectel release-guard suites) is critical. A web app test
+  stays FULL when its name covers auth, session, invite, private data, cache, access, permission or
+  the service worker, when its imports (directly or through test helpers) reach an always-FULL (D)
+  web app source, or when it imports browser-test infrastructure. A helper stays FULL when it
+  reaches such a source or a FULL test uses it. A removed test file stays FULL. Otherwise a test is
+  STANDARD, and a changed non-test helper adds the whole web app unit suite.
 - Browser-test support files (`webapp/e2e/*.harness.{tsx,html}`, `*.no-*.ts(x)`, `fixtures/`,
   `helpers/`) are STANDARD and run every journey that loads them, found by following references
   through other support files. A reference from a shared input (root Playwright config, global
