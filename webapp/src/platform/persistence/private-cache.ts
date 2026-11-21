@@ -13,6 +13,7 @@ const privateCacheInvalidationListeners = new Set<(invalidation: PrivateCacheInv
 const PRIVATE_QUERY_LIMIT_ENTRIES = 100
 const PRIVATE_QUERY_LIMIT_BYTES = 2 * 1024 * 1024
 const IDB_OPERATION_DEADLINE_MS = 3000
+const IMAGE_READS_PER_TRANSACTION = 48
 
 const DATABASE_NAME = 'memoly-private-cache'
 // Version 2 keeps image bytes apart from their metadata, so recency updates, revalidation
@@ -562,8 +563,8 @@ async function readEntry<T>(userId: string, kind: CacheEntry['kind'], key: strin
 
 /**
  * Image reads requested before the next macrotask (one effect pass, one IntersectionObserver
- * delivery) share one readonly transaction: WebKit spends 100-600 ms per transaction while an
- * album opens, not per request.
+ * delivery) share readonly transactions of at most IMAGE_READS_PER_TRANSACTION reads: WebKit
+ * spends 100-600 ms per transaction while an album opens, not per request.
  */
 function readImage(userId: string, key: string): Promise<StoredImage | null> {
   return new Promise((resolve, reject) => {
@@ -575,16 +576,59 @@ function readImage(userId: string, key: string): Promise<StoredImage | null> {
 function flushImageReads() {
   const reads = queuedImageReads
   queuedImageReads = []
-  void withDatabase((db) => readImagesTogether(db, reads))
-    .catch((error: unknown) => { for (const read of reads) read.reject(error) })
+  // The chunks start together and share one deadline.
+  const deadline = imageReadDeadline()
+  for (let start = 0; start < reads.length; start += IMAGE_READS_PER_TRANSACTION) {
+    const chunk = reads.slice(start, start + IMAGE_READS_PER_TRANSACTION)
+    void withDatabase((db) => readImagesTogether(db, chunk, deadline))
+      .catch((error: unknown) => { for (const read of chunk) read.reject(error) })
+  }
+}
+
+type ImageReadDeadline = {
+  /** Watches one transaction until the returned function is called. */
+  watch(expire: () => void): () => void
+  /** A request of the flush answered: the deadline starts again. */
+  progress(): void
+}
+
+/**
+ * A large album answers its reads one after another for longer than one deadline. A flush
+ * fails what is still unanswered only after IDB_OPERATION_DEADLINE_MS without any answer,
+ * the bound a single read had.
+ */
+function imageReadDeadline(): ImageReadDeadline {
+  const watched = new Set<() => void>()
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const arm = () => {
+    if (timer !== null) clearTimeout(timer)
+    timer = null
+    if (!watched.size) return
+    timer = setTimeout(() => {
+      timer = null
+      const expired = [...watched]
+      watched.clear()
+      for (const expire of expired) expire()
+    }, IDB_OPERATION_DEADLINE_MS)
+  }
+  return {
+    watch(expire) {
+      watched.add(expire)
+      if (timer === null) arm()
+      return () => {
+        if (watched.delete(expire) && !watched.size) arm()
+      }
+    },
+    progress: arm,
+  }
 }
 
 /**
  * Each read settles as soon as its own two requests answer. A failed request misses only its
- * image (the error is handled, so the transaction goes on), and whatever is still unanswered at
- * the deadline fails then, the same bound a single read had.
+ * image (the error is handled, so the transaction goes on), and whatever is still unanswered
+ * when the shared deadline passes fails then.
  */
-function readImagesTogether(db: IDBDatabase, reads: ImageRead[]) {
+function readImagesTogether(db: IDBDatabase, reads: ImageRead[], deadline: ImageReadDeadline) {
   // A closed connection throws here, before any read settles, so `withDatabase` may retry.
   const transaction = db.transaction(CACHE_STORES, 'readonly')
   const metadata = transaction.objectStore(STORE_NAME)
@@ -592,15 +636,15 @@ function readImagesTogether(db: IDBDatabase, reads: ImageRead[]) {
   return new Promise<void>((done) => {
     let open = reads.length
     const failers: Array<(error: Error) => void> = []
-    const finish = () => {
-      clearTimeout(timer)
-      done()
-    }
-    const timer = setTimeout(() => {
+    const unwatch = deadline.watch(() => {
       for (const fail of failers) fail(new Error('Private cache operation timed out'))
       try { transaction.abort() } catch { /* a finished transaction cannot be aborted */ }
       done()
-    }, IDB_OPERATION_DEADLINE_MS)
+    })
+    const finish = () => {
+      unwatch()
+      done()
+    }
     transaction.onabort = () => {
       for (const fail of failers) fail(transaction.error ?? new Error('Private cache transaction aborted'))
     }
@@ -619,6 +663,7 @@ function readImagesTogether(db: IDBDatabase, reads: ImageRead[]) {
       }
       failers.push((error) => settle({ error }))
       const answer = () => {
+        deadline.progress()
         answered += 1
         if (answered < 2) return
         settle({ image: entry?.schema === PRIVATE_CACHE_SCHEMA && entry.userId === read.userId && entry.kind === 'image'
@@ -627,6 +672,7 @@ function readImagesTogether(db: IDBDatabase, reads: ImageRead[]) {
       }
       const onError = (request: IDBRequest) => (event: Event) => {
         event.preventDefault()
+        deadline.progress()
         settle({ error: request.error ?? new Error('Private cache request failed') })
       }
       const metadataRequest = metadata.get(read.id)

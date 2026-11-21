@@ -221,8 +221,10 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
       const validatorEtag = validator?.etag ?? null
       // The stored copy and the network check start together: a cached tile does not wait for
       // the network, and a tile without a copy does not wait for IndexedDB.
+      // A rejected read (timeout, IndexedDB error) says nothing about the stored copy, unlike a clean miss.
+      let storedReadFailed = false
       const stored = cacheable && !readyUrlAlreadyShown && validator?.cached !== false
-        ? readPrivateImageEntry(userId, path).catch(() => null)
+        ? readPrivateImageEntry(userId, path).catch(() => { storedReadFailed = true; return null })
         : Promise.resolve(null)
       const shownFromCache = stored.then(async (entry) => {
         if (!entry || !isCurrent() || denied || shown || hasPriorReadyUrl()) return false
@@ -248,6 +250,24 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
           return
         }
         if (!isCurrent()) return
+        if (storedReadFailed && !denied && !shown && !hasPriorReadyUrl()) {
+          // The first read gave up while IndexedDB was busy: the confirmed copy is read once more.
+          const retry = await readPrivateImageEntry(userId, path).catch(() => null)
+          if (!isCurrent()) return
+          if (retry && !denied && !shown && !hasPriorReadyUrl()) {
+            let retryShown = false
+            try { retryShown = await showBlob(retry.blob, 'cache') }
+            catch { await removePrivateImage(userId, path).catch(() => undefined) }
+            if (!isCurrent()) return
+            if (retryShown) {
+              cachedWasShown = true
+              void markPrivateImageFresh(userId, path, validatorEtag).catch(() => undefined)
+              onSettledRef.current?.()
+              return
+            }
+          }
+          if (hasPriorReadyUrl()) return
+        }
         // The copy the validator described is gone: fetch the body once without a validator.
         response = await request(null)
         if (!isCurrent()) return

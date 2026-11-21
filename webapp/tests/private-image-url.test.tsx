@@ -17,6 +17,7 @@ import {
   readPrivateImageEntry,
   restorePrivateQueryCache,
 } from '../src/platform/persistence/private-cache'
+import { withControlledTimers } from './controlled-timers'
 import { installFakeIndexedDb } from './indexeddb-fake'
 
 const userId = 'image-hook-user'
@@ -239,6 +240,33 @@ describe('private image loading', () => {
     await settle(20)
     expect(states.at(-1)?.status).toBe('ready')
     expect((await readPrivateImageEntry(userId, path))?.etag).toBe('"v1"')
+  })
+
+  test('a 304 after the stored read timed out reads the cache again instead of downloading', async () => {
+    let stallNextRead = false
+    database = installFakeIndexedDb((mode, request) => {
+      if (!stallNextRead || mode !== 'readonly' || request.store !== 'imageBytes') return undefined
+      stallNextRead = false
+      return new Promise<void>(() => undefined)
+    })
+    await seedCachedImage('"v1"')
+    expect(privateImageValidator(userId, path)).toEqual({ cached: true, etag: '"v1"' })
+    stallNextRead = true
+    database.log.transactions.length = 0
+    const { transport, calls } = controlledTransport()
+
+    await withControlledTimers(async (clock) => {
+      await render(transport)
+      expect(calls).toHaveLength(1)
+      expect(calls[0]!.headers.get('If-None-Match')).toBe('"v1"')
+      calls[0]!.reject(new ApiRequestError(304, 'INTERNAL_ERROR', 'Request failed with status 304'))
+      await act(async () => { await clock.runAll() })
+    })
+    await settle(20)
+
+    expect(calls).toHaveLength(1)
+    expect(imageByteReads()).toHaveLength(2)
+    expect(states.at(-1)?.status).toBe('ready')
   })
 
   test('a denial that arrives before a slow cache read keeps the image hidden', async () => {
