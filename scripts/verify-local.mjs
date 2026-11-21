@@ -8,9 +8,11 @@ import { performance } from 'node:perf_hooks'
 // The root tests/ directory holds repository and Selectel release-guard suites.
 // Package-local tests (webapp/tests, website/tests) follow their package profile.
 const CRITICAL = /^tests\/|(^|\/)(backend\/src\/(?:db\.ts|env\.ts|app\.ts|storage\/|outbox\/|modules\/(?:auth|families|media|uploads|users|memories|max)(?:\/|$))|backend\/prisma\/|backend\/scripts\/|packages\/|scripts\/|infra\/|deploy\/|\.github\/|\.githooks\/)|(^|\/)(package\.json|bun\.lock|bun\.lockb|Dockerfile[^/]*|.*\.ya?ml|verify-local[^/]*\.mjs|(?:vite|playwright|tsconfig|eslint)[^/]*(?:\.config\.[cm]?[jt]s|\.json))$/i
-// Autopilot run records (briefs, specs, progress journal, dashboard state). Nothing in
-// the build, the tests or the release tooling reads this directory.
-const AUTOPILOT_METADATA = /^\.autopilot\/[^/]/
+// Autopilot run records: Markdown/text notes and the JSON-only state.js data files the
+// local dashboard reads. Nothing in the build, tests or release tooling reads them.
+// Executable autopilot tooling (ap.py, dashboard/index pages, anything else) keeps its
+// own classification.
+const AUTOPILOT_METADATA = /^\.autopilot\/(?:[^/]+\/)*(?:[^/]+\.(?:md|txt)|state\.js)$/
 // Browser-test support files: page harnesses, their variants, fixtures and helpers.
 // They never ship; a change is verified by the journeys that load them.
 const E2E_SUPPORT = /^webapp\/e2e\/(?:[^/]+\.harness\.(?:tsx|html)|[^/]+\.no-[^/]+\.tsx?|(?:fixtures|helpers)\/[^/]+\.tsx?)$/
@@ -28,6 +30,7 @@ const ACCEPTED_UI_V4_SHA = 'afdb408f8bbf22b564c86bb8d33a83261f55cc48'
 // Reviewed individual executable metadata and browser infrastructure inputs.
 // Keep exact identities: adjacent/new files still require their own classification.
 const REVIEWED_FULL_PATHS = new Set([
+  '.autopilot/dashboard.html',
   '.env.example',
   'assets/manifest.json',
   'webapp/e2e/album-social.playwright.config.ts',
@@ -337,8 +340,10 @@ export function selectProfile({ paths, requested, reason }) {
 export function planFor(profile, paths = [], base = 'refs/remotes/origin/main', repositoryRoot = process.cwd()) {
   if (profile === 'review-required') throw new Error('REVIEW_REQUIRED: resolve the changed-path scope before planning checks.')
   assertProfile(profile)
-  const journeyPaths = profile === 'fast' ? [] : [...paths, ...paths.filter((path) => E2E_SUPPORT.test(path))
-    .flatMap((path) => browserSupportDependents(path, repositoryRoot).specs)]
+  // STANDARD runs the journeys behind a changed support file; FULL already runs the portfolio.
+  const journeyPaths = profile === 'fast' ? [] : profile === 'standard'
+    ? [...paths, ...paths.filter((path) => E2E_SUPPORT.test(path)).flatMap((path) => browserSupportDependents(path, repositoryRoot).specs)]
+    : paths
   const browserJourneys = changedBrowserJourneys(journeyPaths, repositoryRoot)
   const commands = [['Git whitespace and patch validation', ['git', ['diff', '--check', `${base}...HEAD`]]], ['Working tree whitespace validation', ['git', ['diff', '--check', 'HEAD']]]]
   if (profile === 'fast') {
@@ -480,7 +485,7 @@ function listBrowserTestSources(repositoryRoot) {
     for (const entry of entries) {
       const path = `${directory}/${entry.name}`
       if (entry.isDirectory()) walk(path)
-      else if (entry.isFile() && /\.(?:tsx?|html)$/.test(entry.name)) files.push(path)
+      else if (entry.isFile() && /\.(?:[cm]?[jt]sx?|html|json)$/.test(entry.name)) files.push(path)
     }
   }
   walk('webapp/e2e')
@@ -507,8 +512,12 @@ export function browserSupportDependents(path, repositoryRoot = process.cwd()) {
   while (queue.length) {
     const current = queue.shift()
     const stem = current.replace(/^webapp\/e2e\//, '').replace(/\.[^./]+$/, '')
+    const directory = current.slice(0, current.lastIndexOf('/'))
+    const sibling = `./${stem.split('/').at(-1)}`
     for (const { file, text } of sources) {
-      if (file === current || !text.includes(stem)) continue
+      if (file === current) continue
+      const sameDirectory = file.slice(0, file.lastIndexOf('/')) === directory
+      if (!text.includes(stem) && !(sameDirectory && text.includes(sibling))) continue
       if (E2E_SPEC.test(file)) { specs.add(file); continue }
       const dedicated = file.match(E2E_DEDICATED_CONFIG)
       if (dedicated) {

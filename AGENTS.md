@@ -213,7 +213,7 @@ Evidence профиля нужно, когда его требует выбра�
 
 После squash проверка не повторяется, если доказано, что проверялось то же самое:
 1. checkout итогового main чистый;
-2. tree проверенного source SHA равен tree итогового main;
+2. проверка шла на чистом дереве source SHA, и его tree равен tree итогового main (результат на грязном дереве не переносится);
 3. comparison bases и scope те же, зависимости и среда не менялись;
 4. нет ошибок и открытых review findings.
 
@@ -231,7 +231,7 @@ Evidence профиля нужно, когда его требует выбра�
 - Базовый `webapp/playwright.config.ts` стартует backend через `bun run start`. Эта команда проверяет бота через настоящий MAX API и падает без него. Для локального прохода используй backend `backend/scripts/max-verification-server.ts`, как в `webapp/playwright.max.config.ts` (требует `NODE_ENV=test`, одинаковые `DATABASE_URL` и `TEST_DATABASE_URL`, базу `*_test`).
 - Свайп карусели и полноэкранного просмотра решает одна функция `isSwipeBlockingTarget` (`webapp/src/features/feed/swipe-target.ts`), её зовут `watchDrag` и `onMediaTouchStart` в `webapp/src/features/feed/FeedPage.tsx`. Кнопки кадра (запуск видео, постер, `button.ml-media-button`) свайп не блокируют. Новую полноразмерную кнопку в слайде добавляй в `SWIPE_MEDIA_SURFACE_SELECTOR` там же, иначе свайп с неё не начнётся.
 - Кэш приватных картинок `webapp/src/platform/persistence/private-cache.ts`: IndexedDB версии 2 (метаданные и байты раздельно, хранилище `imageBytes`), лимиты 500 записей / 40 МБ / 2 МБ на картинку, чтения одного кадра идут одной транзакцией. Откат фронтенда на сборку до версии 2 не откроет базу. Загрузка картинки с `If-None-Match` и 304 — `webapp/src/platform/media/use-private-image-url.ts`.
-- Классификатор `scripts/verify-local.mjs`: всё в `.autopilot/` — FAST, тесты `webapp/tests/` — STANDARD, харнессы и фикстуры `webapp/e2e/` — STANDARD с прогоном сценариев, которые их загружают (правила в `docs/TESTING.md`). Новый `*.spec.ts` без своего Playwright-конфига по-прежнему останавливает проверку на `REVIEW_REQUIRED`. FULL гоняет `git diff --check` по всему диффу ветки, включая `.autopilot/`.
+- Классификатор `scripts/verify-local.mjs`: заметки `.autopilot/**/*.md` и данные `state.js` — FAST, тесты `webapp/tests/` — STANDARD (кроме тестов auth, session, invite, private, cache — FULL), харнессы и фикстуры `webapp/e2e/` — STANDARD с прогоном сценариев, которые их загружают (правила в `docs/TESTING.md`). Новый `*.spec.ts` без своего Playwright-конфига по-прежнему останавливает проверку на `REVIEW_REQUIRED`. FULL гоняет `git diff --check` по всему диффу ветки, включая `.autopilot/`.
 - FULL гоняется в WSL Ubuntu на стенде `~/memoly-linux-validation`: Node, PostgreSQL 18 без `createdb`, своя PostgreSQL на loopback, база `*_test`, `TEST_SKIP_DOCKER=1 E2E_SKIP_DOCKER=1`. Docker-сокет пользователю WSL недоступен.
 - Playwright WebKit под Windows тратит 300–500 мс на транзакцию IndexedDB даже на пустом хранилище. Замеры скорости кэша в нём не отражают iPhone.
 - `bun run typecheck` внутри `webapp/` в чистом клоне падает TS2307 на `backend/src/generated/prisma/client`, пока клиент не сгенерирован. Запускай из корня: он сначала генерирует Prisma client.

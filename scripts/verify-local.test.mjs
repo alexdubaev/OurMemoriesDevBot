@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bashExecutable, gitBashPath } from '../tests/bash-runtime.mjs'
-import { classifyChanges, executePlan, explainChanges, frontendPlan, planFor, selectProfile, validateFrontendScope } from './verify-local.mjs'
+import { browserSupportDependents, classifyChanges, executePlan, explainChanges, frontendPlan, planFor, selectProfile, validateFrontendScope } from './verify-local.mjs'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const frontendScopeCli = resolve(repositoryRoot, 'deploy/selectel/frontend-scope.sh')
@@ -289,46 +289,81 @@ describe('risk based verification', () => {
     }
   })
 
-  test('every autopilot run record is FAST metadata without a per-file classifier entry', () => {
-    for (const path of ['.autopilot/PROGRESS.md', '.autopilot/state.js', '.autopilot/dashboard.html',
-      '.autopilot/2026-11-21-new-run/state.js', '.autopilot/2026-11-21-new-run/tickets/01-task.md', '.autopilot/new-runner.js']) {
+  test('autopilot notes and state data are FAST while executable autopilot tooling keeps its classification', () => {
+    for (const path of ['.autopilot/PROGRESS.md', '.autopilot/state.js', '.autopilot/2026-11-21-new-run/state.js',
+      '.autopilot/2026-11-21-new-run/tickets/01-task.md', '.autopilot/2026-11-21-new-run/notes.txt']) {
       expect(explainChanges([path]).reasons).toEqual([expect.objectContaining({ path, profile: 'fast', rule: 'autopilot-metadata' })])
+    }
+    expect(explainChanges(['.autopilot/dashboard.html']).reasons[0]).toMatchObject({ profile: 'full', rule: 'reviewed-exact-critical-path' })
+    for (const path of ['.autopilot/ap.py', '.autopilot/index.html', '.autopilot/new-runner.js', '.autopilot/run/state.js.bak']) {
+      expect(classifyChanges([path])).toBe('review-required')
+    }
+    for (const path of ['.autopilot/package.json', '.autopilot/run/ci.yml', '.autopilot/tsconfig.json']) {
+      expect(classifyChanges([path])).toBe('full')
     }
     expect(classifyChanges(['.autopilot/state.js', 'webapp/src/features/feed/FeedPage.tsx'])).toBe('standard')
     expect(classifyChanges(['.autopilotx/state.js'])).toBe('review-required')
     expect(classifyChanges(['nested/.autopilot/state.js'])).toBe('review-required')
   })
 
-  test('package-local unit tests follow their package while root release-guard tests stay FULL', () => {
-    expect(explainChanges(['webapp/tests/private-cache.test.ts']).reasons[0]).toMatchObject({ profile: 'standard', rule: 'scoped-package-source' })
+  test('package-local unit tests follow their package, sensitive ones and root release-guard tests stay FULL', () => {
+    expect(explainChanges(['webapp/tests/media-ratio.test.ts']).reasons[0]).toMatchObject({ profile: 'standard', rule: 'scoped-package-source' })
     expect(classifyChanges(['webapp/tests/indexeddb-fake.ts'])).toBe('standard')
     expect(classifyChanges(['website/tests/boundary.test.ts'])).toBe('standard')
+    for (const path of ['webapp/tests/private-cache.test.ts', 'webapp/tests/private-media-sw.test.ts', 'webapp/tests/max-auth-epoch.test.ts',
+      'webapp/tests/family-invite-links.test.ts', 'webapp/tests/feed-poster-cache.test.ts', 'webapp/tests/app-host-auth-race.test.tsx']) {
+      expect(explainChanges([path]).reasons[0]).toMatchObject({ profile: 'full', rule: 'sensitive-frontend-path' })
+    }
     expect(explainChanges(['tests/selectel-release-exit.test.mjs']).reasons[0]).toMatchObject({ profile: 'full', rule: 'critical-path' })
     expect(classifyChanges(['packages/contracts/tests/media.test.ts'])).toBe('full')
     expect(classifyChanges(['deploy/selectel/control/tests/sampler_test.py'])).toBe('full')
     const helper = planFor('standard', ['webapp/tests/indexeddb-fake.ts'])
     expect(helper.map(([name]) => name)).toContain('Web app unit tests')
-    const single = planFor('standard', ['webapp/tests/private-cache.test.ts'])
+    const single = planFor('standard', ['webapp/tests/media-ratio.test.ts'])
     expect(single.map(([name]) => name)).toContain('Changed web app unit tests')
     expect(single.map(([name]) => name)).not.toContain('Web app unit tests')
   })
 
-  test('browser support files run the journeys that load them and shared inputs keep FULL', () => {
-    const harness = explainChanges(['webapp/e2e/fixed-carousel.harness.tsx']).reasons[0]
-    expect(harness).toMatchObject({ profile: 'standard', rule: 'browser-test-support' })
+  test('browser support files run the journeys that load them and shared inputs plan the complete FULL portfolio', () => {
+    expect(explainChanges(['webapp/e2e/fixed-carousel.harness.tsx']).reasons[0]).toMatchObject({ profile: 'standard', rule: 'browser-test-support' })
     const journeys = planFor('standard', ['webapp/e2e/fixed-carousel.harness.tsx'])
       .filter(([name]) => name.startsWith('Browser journey')).map(([name]) => name)
     expect(journeys).toEqual(expect.arrayContaining([
       'Browser journey webapp/e2e/fixed-carousel.spec.ts',
       'Browser journey webapp/e2e/fullscreen-swipe.spec.ts',
     ]))
-    const fixtureJourneys = planFor('standard', ['webapp/e2e/fixtures/albums.ts'])
-      .filter(([name]) => name.startsWith('Browser journey')).map(([name]) => name)
-    expect(fixtureJourneys).toEqual(expect.arrayContaining(['Browser journey webapp/e2e/albums.spec.ts']))
+    expect(() => selectProfile({ paths: ['webapp/e2e/fixtures/albums.ts'], requested: 'fast' })).toThrow('Profile downgrade refused')
     expect(explainChanges(['webapp/e2e/helpers/postgres-readiness.ts']).reasons[0]).toMatchObject({ profile: 'full', rule: 'shared-browser-test-input' })
+    const unmapped = explainChanges(['webapp/e2e/helpers/images.ts']).reasons[0]
+    expect(unmapped).toMatchObject({ profile: 'full', rule: 'shared-browser-test-input' })
+    const full = planFor('full', ['webapp/e2e/helpers/images.ts'])
+    expect(full.map(([name]) => name)).toContain('MAX Web/PWA browser journeys')
+    expect(full.map(([name]) => name)).not.toContain('Browser journey webapp/e2e/critical-smoke.spec.ts')
     expect(classifyChanges(['webapp/e2e/env.ts'])).toBe('review-required')
-    for (const requested of ['fast']) {
-      expect(() => selectProfile({ paths: ['webapp/e2e/fixtures/albums.ts'], requested })).toThrow('Profile downgrade refused')
+  })
+
+  test('browser support dependency search follows same-folder imports, shared inputs and unused files', () => {
+    const root = mkdtempSync(resolve(tmpdir(), 'memoly-e2e-support-'))
+    const put = (path, contents) => {
+      const target = resolve(root, path)
+      mkdirSync(dirname(target), { recursive: true })
+      writeFileSync(target, contents)
+    }
+    try {
+      put('webapp/e2e/fixtures/a.ts', 'export const a = 1\n')
+      put('webapp/e2e/fixtures/b.ts', "export * from './a'\n")
+      put('webapp/e2e/x.spec.ts', "import { a } from './fixtures/a'\n")
+      put('webapp/e2e/y.spec.ts', "import { a } from './fixtures/b'\n")
+      put('webapp/e2e/fixtures/unused.ts', 'export const unused = 1\n')
+      put('webapp/e2e/helpers/shared.ts', 'export const shared = 1\n')
+      put('webapp/e2e/global-setup.mjs', "import './helpers/shared.ts'\n")
+      expect(browserSupportDependents('webapp/e2e/fixtures/a.ts', root)).toEqual({
+        specs: ['webapp/e2e/x.spec.ts', 'webapp/e2e/y.spec.ts'], shared: null,
+      })
+      expect(browserSupportDependents('webapp/e2e/fixtures/unused.ts', root)).toEqual({ specs: [], shared: null })
+      expect(browserSupportDependents('webapp/e2e/helpers/shared.ts', root).shared).toBe('webapp/e2e/global-setup.mjs')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   })
 
