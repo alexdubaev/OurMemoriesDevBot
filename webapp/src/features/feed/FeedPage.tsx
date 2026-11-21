@@ -1,4 +1,4 @@
-import { maxVideoPosterReadinessSchema, maxVideoReadinessSchema, type AlbumDto, type ChildDto, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
+import { maxVideoPosterReadinessSchema, maxVideoReadinessSchema, type AlbumDto, type ChildDto, type MaxVideoPosterReadiness, type MaxVideoReadiness, type MemoryAttachment, type MemoryDto } from '@web-app-demo/contracts'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode, RefObject, TouchEvent as ReactTouchEvent } from 'react'
@@ -42,7 +42,7 @@ import { AddSheetPresentation } from '@/features/memoly-ui'
 import { VideoComposer } from '@/features/max-video-upload'
 import { composerModeForAdd, type ComposerMode } from './composer-routing'
 import { loadMaxVideoSourceOnce } from './max-video-source'
-import { maxVideoPosterPath, maxVideoPosterReadinessInterval, maxVideoPosterReadinessPath, maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from './max-video-readiness'
+import { maxVideoPosterPath, maxVideoPosterReadinessCache, maxVideoPosterReadinessInterval, maxVideoPosterReadinessPath, maxVideoReadinessCache, maxVideoReadinessInterval, maxVideoReadinessPath, withMaxVideoReadinessSlot } from './max-video-readiness'
 import { hasPendingPrivateVideo, selectPendingPrivateVideoIds } from './pending-video-selection'
 import { MemoryDeleteSpotlight } from './MemoryDeleteSpotlight'
 import { useMemorySeenObserver } from './use-memory-seen-observer'
@@ -660,10 +660,12 @@ function MixedSlideMedia({ active, attachment, hostBridge, memory, multi, onOpen
   const { accountId, membershipEpoch } = useContext(VideoQueryScope)
   const posterReadinessPath = attachment.source === 'max' && attachment.posterState === 'pending' ? maxVideoPosterReadinessPath(attachment.playbackPath) : null
   const posterReadinessKey = [...feedQueryKeys.all, 'max-video-poster-readiness', accountId, membershipEpoch, posterReadinessPath] as const
+  const queryClient = useQueryClient()
   const posterReadiness = useQuery({
     queryKey: posterReadinessKey,
     queryFn: ({ signal }) => withMaxVideoReadinessSlot(signal, () => transport.request(posterReadinessPath!, maxVideoPosterReadinessSchema, { signal })),
     enabled: surfaceActive && multi && Boolean(posterReadinessPath),
+    ...maxVideoPosterReadinessCache(queryClient.getQueryData<MaxVideoPosterReadiness>(posterReadinessKey)),
     refetchInterval: (query) => maxVideoPosterReadinessInterval(query.state),
     refetchIntervalInBackground: false,
     retry: false,
@@ -1137,6 +1139,7 @@ function MaxVideo({ attachment, autoplay = false, feedPreview, fullscreen, hostB
     queryKey: posterReadinessKey,
     queryFn: ({ signal }) => withMaxVideoReadinessSlot(signal, () => transport.request(posterReadinessPath!, maxVideoPosterReadinessSchema, { signal })),
     enabled: nearViewport && Boolean(posterReadinessPath) && attachment.posterState === 'pending',
+    ...maxVideoPosterReadinessCache(queryClient.getQueryData<MaxVideoPosterReadiness>(posterReadinessKey)),
     refetchInterval: (query) => maxVideoPosterReadinessInterval(query.state),
     refetchIntervalInBackground: false,
     retry: false,
@@ -1168,6 +1171,7 @@ function MaxVideo({ attachment, autoplay = false, feedPreview, fullscreen, hostB
     queryKey: readinessKey,
     queryFn: ({ signal }) => withMaxVideoReadinessSlot(signal, () => transport.request(readinessPath!, maxVideoReadinessSchema, { signal })),
     enabled: nearViewport && Boolean(readinessPath) && nextCheckAt !== null && nextCheckAt <= readinessClock,
+    ...maxVideoReadinessCache(cachedReadiness?.data),
     retry: false,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
