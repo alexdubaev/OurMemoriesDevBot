@@ -17,7 +17,7 @@ import { ChildHeader } from '@/components/ChildHeader'
 import { FamilyHeaderV2 } from '@/components/ui-v2/FamilyHeaderV2'
 import { useMemolyTheme } from '@/features/theme'
 import { privateMediaSource } from '@/platform/media/private-media-access'
-import { usePrivateImageResource, usePrivateImageUrl } from '@/platform/media/use-private-image-url'
+import { usePrivateImageResource } from '@/platform/media/use-private-image-url'
 import { toggleAudioPlayback } from './audio-playback'
 import type { HostBridge, TelegramInsets } from '@/platform/telegram'
 import { requestReactionHaptic } from '@/platform/reaction-haptics'
@@ -1351,7 +1351,8 @@ function PrivateImage({ attachment, borrowedUrl, onOpenPhoto, onUrlChange, inter
   const surfaceActive = useContext(FeedSurfaceActive)
   const { accountId, familyId, membershipEpoch } = useContext(VideoQueryScope)
   const scopeKey = accountId ? `${accountId}:${familyId}:${membershipEpoch}` : ''
-  const ownedUrl = usePrivateObjectUrl(path, transport, surfaceActive && !borrowedUrl, undefined, scopeKey)
+  // A photo that leaves the screen stays decoded in the idle pool of its scope and returns without a reload.
+  const ownedUrl = usePrivateObjectUrl(path, transport, surfaceActive && !borrowedUrl, undefined, scopeKey, scopeKey ? 'feed-photo' : undefined)
   const url = borrowedUrl ?? ownedUrl
   const [readyUrl, setReadyUrl] = useState<string | null>(null)
   const notifyUrlChange = useEffectEvent((nextUrl: string | null) => onUrlChange?.(attachment.id, nextUrl))
@@ -1512,10 +1513,10 @@ function MemoryDetail({ familyTimezone, hostBridge, memory, onClose, onOpenPhoto
   </DialogPrimitive.Root>
 }
 
-function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTransport, enabled = true, onSettled?: () => void, scopeKey = '') {
+function usePrivateObjectUrl(path: string | null, transport?: AuthenticatedTransport, enabled = true, onSettled?: () => void, scopeKey = '', poolMode?: 'feed-photo') {
   const auth = useContext(AuthContext)
   const mediaTransport = transport ?? auth?.transport
-  return usePrivateImageUrl(auth?.user?.id ?? '', path, mediaTransport, enabled && Boolean(mediaTransport), onSettled, scopeKey)
+  return usePrivateImageResource(auth?.user?.id ?? '', path, mediaTransport, enabled && Boolean(mediaTransport), onSettled, scopeKey, poolMode).url
 }
 
 function useFeedVideoPosterUrl(path: string | null, transport: AuthenticatedTransport, nearViewport: boolean, feedPreview: boolean) {

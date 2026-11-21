@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 
@@ -52,16 +52,39 @@ const events: Event[] = []
 const saved = new Map<string, PropertyDescriptor | undefined>()
 const globals = ['indexedDB', 'IDBKeyRange', 'window', 'Image', 'IS_REACT_ACT_ENVIRONMENT'] as const
 
-function Probe({ transport, poolMode }: { transport: AuthenticatedTransport; poolMode?: 'album-preview' }) {
+type PoolMode = 'album-preview' | 'feed-photo'
+function Probe({ transport, poolMode }: { transport: AuthenticatedTransport; poolMode?: PoolMode }) {
   states.push(usePrivateImageResource(userId, path, transport, true, undefined, 'scope', poolMode))
   return null
 }
 
-async function render(transport: AuthenticatedTransport, poolMode?: 'album-preview') {
+async function render(transport: AuthenticatedTransport, poolMode?: PoolMode) {
   await act(async () => {
     root ??= createRoot(detachedContainer())
     root.render(createElement(Probe, { transport, poolMode }))
   })
+}
+
+async function unmount() {
+  if (root) await act(async () => root!.unmount())
+  root = null
+}
+
+const imageByteReads = () => database.log.transactions.filter(({ mode, stores }) => mode === 'readonly' && stores.includes('imageBytes'))
+
+/** Loads the image from the network in the feed photo mode, then leaves the screen. */
+async function showAndLeaveFeedPhoto(etag: string) {
+  const first = controlledTransport()
+  await render(first.transport, 'feed-photo')
+  await settle()
+  first.calls[0]!.resolve(trackedImage(etag).response)
+  await settle(20)
+  const shown = states.at(-1)!
+  expect(shown.status).toBe('ready')
+  privateImageValidator(userId, path)
+  await settle()
+  await unmount()
+  return shown.url!
 }
 
 async function settle(rounds = 8) {
@@ -236,6 +259,43 @@ describe('private image loading', () => {
     await settle(20)
     expect(states.some((state) => state.status === 'error')).toBe(false)
     expect(states.at(-1)?.status).toBe('ready')
+  })
+
+  test('a remounted feed photo in the same scope shows its URL in the first layout commit without reading IndexedDB', async () => {
+    const url = await showAndLeaveFeedPhoto('"v1"')
+    database.log.transactions.length = 0
+    states = []
+
+    const second = controlledTransport()
+    // A synchronous act runs render and layout effects but no timers, so an IndexedDB read cannot finish here.
+    act(() => {
+      root = createRoot(detachedContainer())
+      root.render(createElement(Probe, { transport: second.transport, poolMode: 'feed-photo' }))
+    })
+    expect(states.at(-1)).toEqual({ url, status: 'ready' })
+    await settle(20)
+
+    expect(imageByteReads()).toEqual([])
+    expect(second.calls).toHaveLength(1)
+    expect(second.calls[0]!.headers.get('If-None-Match')).toBe('"v1"')
+    expect(states.every((state) => state.url === url || state.url === null)).toBe(true)
+  })
+
+  test('a 403 during revalidation of a pooled feed photo hides it and revokes the URL', async () => {
+    const url = await showAndLeaveFeedPhoto('"v1"')
+    const revoke = spyOn(URL, 'revokeObjectURL')
+    try {
+      const second = controlledTransport()
+      await render(second.transport, 'feed-photo')
+      expect(states.at(-1)).toEqual({ url, status: 'ready' })
+      second.calls[0]!.reject(new ApiRequestError(403, 'FORBIDDEN', 'Synthetic denial'))
+      await settle(20)
+      expect(states.at(-1)).toEqual({ url: null, status: 'error' })
+      expect(revoke.mock.calls.map(([revoked]) => revoked)).toContain(url)
+      expect(events.map((event) => [event.type, (event as CustomEvent).detail])).toEqual([[privateFamilyAccessRevokedEvent, { userId, familyId }]])
+    } finally {
+      revoke.mockRestore()
+    }
   })
 
   for (const poolMode of [undefined, 'album-preview'] as const) {

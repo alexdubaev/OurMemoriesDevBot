@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 
 import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { AvatarResourcePool, isImmutableMemberAvatarPath } from './avatar-resource-pool'
-import { idleAlbumPreviews, idleFeedPosters } from './feed-poster-cache'
+import { idleAlbumPreviews, idleFeedPhotos, idleFeedPosters } from './feed-poster-cache'
 import { cachePrivateImageResponse, eligiblePrivateImage, markPrivateImageFresh, privateFamilyCacheGeneration, privateCacheIdentityGeneration, privateImageValidator, isActivePrivateCacheIdentity, readPrivateImage, readPrivateImageEntry, removePrivateImage, clearPrivateUserCache, privateFamilyAccessRevokedEvent, subscribePrivateCacheInvalidation } from '@/platform/persistence/private-cache'
 
 // Idle pools hand a decoded image to the next tile of the same user, identity generation,
@@ -22,6 +22,7 @@ subscribePrivateCacheInvalidation((invalidation) => {
   }
   memberAvatarPool.invalidate(matches)
   idleFeedPosters.clear(matches)
+  idleFeedPhotos.clear(matches)
   idleAlbumPreviews.clear(matches)
 })
 
@@ -39,7 +40,7 @@ export function usePrivateImageUrl(userId: string, path: string | null, transpor
   return usePrivateImageResource(userId, path, transport, enabled, onSettled, scopeKey).url
 }
 
-export function usePrivateImageResource(userId: string, path: string | null, transport: AuthenticatedTransport | undefined, enabled = true, onSettled?: () => void, scopeKey = '', poolMode?: 'child-avatar' | 'feed-poster' | 'album-preview'): PrivateImageResourceState {
+export function usePrivateImageResource(userId: string, path: string | null, transport: AuthenticatedTransport | undefined, enabled = true, onSettled?: () => void, scopeKey = '', poolMode?: 'child-avatar' | 'feed-poster' | 'feed-photo' | 'album-preview'): PrivateImageResourceState {
   const identityGeneration = privateCacheIdentityGeneration()
   const eligible = path ? eligiblePrivateImage(path) : null
   const familyId = eligible?.familyId
@@ -48,7 +49,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
   const poolKey = usesAvatarPool && familyId
     ? JSON.stringify([userId, familyId, identityGeneration, familyGeneration, scopeKey, path])
     : null
-  const idlePool = poolMode === 'album-preview' ? idleAlbumPreviews : poolMode === 'feed-poster' ? idleFeedPosters : null
+  const idlePool = poolMode === 'album-preview' ? idleAlbumPreviews : poolMode === 'feed-poster' ? idleFeedPosters : poolMode === 'feed-photo' ? idleFeedPhotos : null
   const idleKey = idlePool && scopeKey && familyId && !usesAvatarPool
     ? JSON.stringify([userId, familyId, identityGeneration, familyGeneration, scopeKey, path])
     : null
@@ -192,7 +193,7 @@ export function usePrivateImageResource(userId: string, path: string | null, tra
         const image = new Image()
         image.src = url
         await image.decode()
-        if (idleKey) idleBytes = blob.size + image.naturalWidth * image.naturalHeight * 4
+        if (idleKey) idleBytes = blob.size
         if (!isCurrent() || denied || shown) {
           releaseUrl(url)
           return false

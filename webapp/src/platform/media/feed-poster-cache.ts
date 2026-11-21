@@ -1,4 +1,5 @@
 import type { AuthenticatedTransport } from '@/platform/api'
+import { PRIVATE_CACHE_MAX_IMAGE_BYTES } from '@/platform/persistence/private-cache'
 
 type ReadyImage = { url: string; size: number }
 type IdleImage = ReadyImage & {
@@ -11,8 +12,10 @@ function documentHidden() {
   return typeof document !== 'undefined' && document.visibilityState === 'hidden'
 }
 
-// The budget includes decoded pixels as well as the compressed Blob.
+// The budget counts the compressed Blob only: an idle blob URL without an <img> holds no
+// decoded pixels. A single image larger than the private cache allows is never kept.
 function createIdleImagePool(maxImages: number, maxBytes: number, retainMs: number) {
+  const maxImageBytes = Math.min(maxBytes, PRIVATE_CACHE_MAX_IMAGE_BYTES)
   const idle = new Map<string, IdleImage>()
   const forget = (key: string) => {
     const image = idle.get(key)
@@ -34,7 +37,7 @@ function createIdleImagePool(maxImages: number, maxBytes: number, retainMs: numb
     clear,
     forget,
     keep(key: string, transport: AuthenticatedTransport, image: ReadyImage) {
-      if (!Number.isSafeInteger(image.size) || image.size <= 0 || image.size > maxBytes || documentHidden()) return false
+      if (!Number.isSafeInteger(image.size) || image.size <= 0 || image.size > maxImageBytes || documentHidden()) return false
       forget(key)
       idle.set(key, {
         ...image,
@@ -64,6 +67,11 @@ function createIdleImagePool(maxImages: number, maxBytes: number, retainMs: numb
   }
 }
 
-export const idleFeedPosters = createIdleImagePool(3, 8 * 1024 * 1024, 10_000)
-export const idleAlbumPreviews = createIdleImagePool(16, 12 * 1024 * 1024, 20_000)
+const MB = 1024 * 1024
+// Hub round trips, album -> entry -> back and carousel slides remount tiles; three minutes
+// covers those trips. Every pool is emptied when the page is hidden or the cache identity,
+// user or family changes.
+export const idleFeedPosters = createIdleImagePool(24, 16 * MB, 180_000)
+export const idleFeedPhotos = createIdleImagePool(120, 32 * MB, 180_000)
+export const idleAlbumPreviews = createIdleImagePool(200, 32 * MB, 180_000)
 export const { clear: clearIdleFeedPosters, forget: forgetIdleFeedPoster, keep: keepIdleFeedPoster, take: takeIdleFeedPoster } = idleFeedPosters
