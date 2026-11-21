@@ -32,13 +32,10 @@ against both deployed backend and frontend revisions; unknown or sensitive input
 require the normal lane. No backend change alone is not proof of eligibility.
 
 Actual auth/session/ACL, API/contracts, private-media, data/schema, dependency, or deployment/recovery safety-logic changes require **FULL**. Unresolved unknown risk stops for a concrete ruling. Known small non-protected changes use the documented affected checkset. Full-service release mode is not itself a FULL verification profile; all selected-mode host safeguards remain mandatory.
-Run the selected profile once per complete source tree in the release session. After
-squash, source-bound evidence may transfer to final main only after verifying a clean
-checkout, equal source/merged trees, unchanged comparison bases and scope, and
-unchanged dependency/environment inputs with no unresolved errors or review findings.
-Record both SHAs/trees and the equality check; do not describe the transferred evidence
-as a rerun on final SHA. If those inputs differ or evidence is incomplete or stale,
-rerun the affected checks. Host release guards still run against the actual final SHA.
+Run the selected profile once per complete source tree in the release session. Evidence
+transfer after squash follows the single rule in
+[AGENTS.md, «Перенос source-bound evidence после squash»](../AGENTS.md#перенос-source-bound-evidence-после-squash).
+Host release guards still run against the actual final SHA.
 The short lane retains source/ownership/lock/disk/UI v4/immutable artifact guards,
 read-only migration-history verification, service-retention checks, public smoke,
 a protected manifest and exact frontend recovery state. It does not run migrations,
@@ -75,6 +72,10 @@ replacement for cloud bootstrap or an authentication change. If a precondition i
 unexpected, trace its origin and reproduce the relevant complete path before
 proposing new privileged access. See [the incident investigation](RELEASE_POSTMORTEM_2026-10-21.md)
 and the [Selectel operational runbook](../deploy/selectel/README.md).
+
+> The sections below describe the inactive DigitalOcean and Yandex Cloud paths and the
+> own-server option. A Selectel release does not need them; start from the
+> [Selectel release memo](development/SELECTEL_RELEASE.md).
 
 ## Supported production shape
 

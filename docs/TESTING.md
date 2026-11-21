@@ -47,8 +47,18 @@ Unknown paths, unavailable classification and an empty comparison scope return `
 before any verification stage starts. Even an explicit FULL cannot bypass this state. Review the
 file's role and risk, then add a narrow tested classification rule; for an empty scope choose the
 intended comparison base. Unresolved scope remains a blocker. Do not whitelist a whole directory.
-The progress journal `.autopilot/PROGRESS.md` is already FAST metadata; adding it to an ordinary
-UI change does not raise STANDARD to FULL.
+Three directory rules replace per-file entries:
+
+- Everything under `.autopilot/` (progress journal, briefs, run state, dashboard) is FAST metadata.
+  Nothing in the build, tests or release tooling reads it. The short frontend lane treats it as A.
+- Package-local tests (`webapp/tests/`, `website/tests/`) follow their package profile. Only the
+  root `tests/` directory (repository and Selectel release-guard suites) is critical. A changed
+  non-test helper under `webapp/tests/` adds the whole web app unit suite to STANDARD.
+- Browser-test support files (`webapp/e2e/*.harness.{tsx,html}`, `*.no-*.ts(x)`, `fixtures/`,
+  `helpers/`) are STANDARD and run every journey that loads them, found by following references
+  through other support files. A reference from a shared input (root Playwright config, global
+  setup, `env`/`ports`/`url`, a config without its own spec) or a dependent journey without a
+  supported config selects FULL. A support file that no journey loads stays `REVIEW_REQUIRED`.
 
  FULL runs architecture/dependency
 checks, typechecks, lint, production builds, repository/Selectel tools, MAX/neutral contracts and

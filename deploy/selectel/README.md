@@ -102,13 +102,9 @@ independent report, not substituting a self-review.
    confirms exact bytes and range; the existing authorized operator is the trust
    boundary for the independent provenance and semantic decision.
 
-3. Squash merge through the normal reviewed PR process. Verify a clean checkout,
-   equal complete source and merged trees, unchanged comparison bases/scope and
-   dependency/environment inputs, plus no unresolved errors or review findings.
-   Record source and final SHAs/trees and the equality check, then transfer the
-   source-bound FRONTEND evidence to final main. Do not claim the profile reran on
-   final SHA. If an input differs or evidence is stale/incomplete, rerun affected
-   checks; do not create a generic PASS cache.
+3. Squash merge through the normal reviewed PR process, then transfer the
+   source-bound FRONTEND evidence to final main under the single rule in
+   [AGENTS.md, «Перенос source-bound evidence после squash»](../../AGENTS.md#перенос-source-bound-evidence-после-squash).
 
 4. From the accepted clean main checkout, invoke the **versioned** host entry point
    with migration `false` and the explicit fifth argument `frontend`:

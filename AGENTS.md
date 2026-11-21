@@ -24,8 +24,9 @@ git rev-parse HEAD
 Канонический продуктовый репозиторий: `alexdubaev/OurMemoriesDevBot`. Допустимые адреса `origin`: SSH `git@github.com:alexdubaev/OurMemoriesDevBot.git` (предпочтительно) либо HTTPS `https://github.com/alexdubaev/OurMemoriesDevBot.git`. Любой другой `origin` — стоп-условие до проверки владельцем. Подробности: `docs/mvp/REPOSITORY.md`.
 Если нет Git-репозитория или доступного origin владельца — допустима локальная подготовка; push блокируется. Убедись, что origin не `di-sukharev/vibe`. Сохрани upstream SHA и LICENSE/NOTICE. Инициализация пустого remote и первый push main — отдельное однократное подтверждаемое действие владельца, не обычный обход PR.
 
-Для задач сборки и production-доставки существующего Selectel-хоста сначала читай
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) и связанный
+Для обычного выпуска на существующий Selectel-хост сначала читай
+[памятку выпуска](docs/development/SELECTEL_RELEASE.md). Для миграций с особыми границами,
+восстановления, настройки хоста и деталей читай [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) и
 [deploy/selectel/README.md](deploy/selectel/README.md). Текущий production host —
 `app.memoly.ru`, рабочий каталог на нём — `/opt/memoly/app`. SSH-доступ должен быть
 заранее выдан владельцем через защищённое хранилище или SSH agent. Сборка и
@@ -198,7 +199,7 @@ The agent solves technical problems and owns the result; the owner decides produ
 
 - FRONTEND применяется только к presentation-only UI, проходящему текущий strict scope gate, с required semantic receipts. FULL сохраняется для фактических auth/session/ACL, contracts, private-media, data/schema, dependency, build/deploy/recovery safety-logic changes. Изменение release metadata/preparation без влияния на gate или host behavior само по себе не меняет guard policy; для любого сомнения остановись до установления scope.
 - Запусти применимый профиль один раз для полного source tree в текущей release-сессии и зафиксируй SHA/tree, comparison bases, профиль, команды, результат и среду. FRONTEND включает typecheck, lint, production build, релевантные узкие тесты, выполненный browser journey и целевую визуальную проверку; для каждого R-range нужны независимые report и receipt, A-only не требует receipt. Ноль тестов, skips, dry-run и неполное evidence не считаются PASS. См. [Selectel runbook](deploy/selectel/README.md).
-- После squash сравни чистый checkout, полный source tree и tree итогового main; подтверди одинаковые comparison bases/scope и неизменность зависимостей и среды. Если всё совпадает и нет ошибок или открытых review findings, перенеси source-bound evidence на финальный SHA с записью SHA/tree и проверки равенства — не утверждай, что профиль запускался повторно. При новых исходниках, bases, scope, dependency/environment inputs, устаревшем advisory evidence или неполном результате повтори затронутые проверки; расширяй профиль только по конкретному риску. Универсальный кэш PASS запрещён.
+- После squash перенеси source-bound evidence на финальный SHA по разделу «Перенос source-bound evidence после squash» ниже.
 - Выпускай через версионированный `ci-release.sh` в режиме `frontend`: строится и обновляется только static/webapp. Backend, worker, scheduler, gateway/config и БД сохраняются; `migrate`, `pg_dump`, подготовка полного application rollback и перезапуск серверных сервисов в этом пути не выполняются. Не вызывай Compose вручную. Scope, текущий main, чистота/ownership, host lock, disk, UI v4, immutable image ID/OCI, read-only migration/history, сохранность серверных сервисов, smoke и manifest остаются обязательными.
 - Короткий выпуск сохраняет отдельное точное состояние восстановления frontend с прежним webapp image ID и неизменным backend. Перед promotion проверь возможность такого отката; после — frontend recovery-readiness и public smoke. Designated application recovery pair в `rollback.env` не переписывается и не объявляется заново аттестованной для произвольного source. При ошибке восстанавливается только прежний frontend. БД не откатывается. Операторское восстановление — через тот же guarded entry point в режиме `frontend-rollback`, с проверкой сохранённого состояния.
 - Используй готовое локальное тестовое окружение и кэш, когда зависимости не изменились. Не пересоздавай стенд, не запускай backend FULL, повторные полные ревью и матрицы браузеров/скриншотов для формальности. Для затронутых браузерных рисков проверяй соответствующий браузер; реальный iPhone/MAX не объявляй проверенным по desktop WebKit.
@@ -206,7 +207,17 @@ The agent solves technical problems and owns the result; the owner decides produ
 
 ## Перенос source-bound evidence после squash
 
-Release-profile evidence applies when required by the selected release lane. For known small changes, use the documented affected checkset and report what actually ran; never claim an unrun profile passed. Host locks, disk/ownership/current-main, immutable artifacts, recovery/readiness and smoke guards still run for an actual deployment.
+Это единственное описание правила, остальные документы ссылаются сюда.
+
+Evidence профиля нужно, когда его требует выбранный release lane. Для известного малого изменения достаточно документированного affected checkset и честного списка того, что реально запускалось. Непрогнанный профиль не объявляется PASS.
+
+После squash проверка не повторяется, если доказано, что проверялось то же самое:
+1. checkout итогового main чистый;
+2. tree проверенного source SHA равен tree итогового main;
+3. comparison bases и scope те же, зависимости и среда не менялись;
+4. нет ошибок и открытых review findings.
+
+Тогда evidence переносится на итоговый SHA с записью обоих SHA, tree и результата сравнения. Не утверждай, что профиль запускался повторно. Если отличаются исходники, bases, scope, зависимости или среда, либо evidence неполное или устаревшее, повтори затронутые проверки и расширяй профиль только по конкретному риску. Универсальный кэш PASS запрещён. Host lock, disk/ownership/current-main, immutable artifacts, recovery/readiness и smoke при фактической выкладке выполняются всегда.
 
 <!-- autopilot:start -->
 ## 13. Подводные камни и проверенные команды
@@ -220,7 +231,7 @@ Release-profile evidence applies when required by the selected release lane. For
 - Базовый `webapp/playwright.config.ts` стартует backend через `bun run start`. Эта команда проверяет бота через настоящий MAX API и падает без него. Для локального прохода используй backend `backend/scripts/max-verification-server.ts`, как в `webapp/playwright.max.config.ts` (требует `NODE_ENV=test`, одинаковые `DATABASE_URL` и `TEST_DATABASE_URL`, базу `*_test`).
 - Свайп карусели и полноэкранного просмотра решает одна функция `isSwipeBlockingTarget` (`webapp/src/features/feed/swipe-target.ts`), её зовут `watchDrag` и `onMediaTouchStart` в `webapp/src/features/feed/FeedPage.tsx`. Кнопки кадра (запуск видео, постер, `button.ml-media-button`) свайп не блокируют. Новую полноразмерную кнопку в слайде добавляй в `SWIPE_MEDIA_SURFACE_SELECTOR` там же, иначе свайп с неё не начнётся.
 - Кэш приватных картинок `webapp/src/platform/persistence/private-cache.ts`: IndexedDB версии 2 (метаданные и байты раздельно, хранилище `imageBytes`), лимиты 500 записей / 40 МБ / 2 МБ на картинку, чтения одного кадра идут одной транзакцией. Откат фронтенда на сборку до версии 2 не откроет базу. Загрузка картинки с `If-None-Match` и 304 — `webapp/src/platform/media/use-private-image-url.ts`.
-- Классификатор `scripts/verify-local.mjs` знает архивные `.autopilot/*/state.js` и e2e-харнессы только по точному имени в `REVIEWED_FULL_PATHS`. Новый архивный `state.js`, новый харнесс или новый `*.spec.ts` без своего Playwright-конфига останавливают FULL на `REVIEW_REQUIRED`. FULL также гоняет `git diff --check` по всему диффу ветки, включая `.autopilot/`.
+- Классификатор `scripts/verify-local.mjs`: всё в `.autopilot/` — FAST, тесты `webapp/tests/` — STANDARD, харнессы и фикстуры `webapp/e2e/` — STANDARD с прогоном сценариев, которые их загружают (правила в `docs/TESTING.md`). Новый `*.spec.ts` без своего Playwright-конфига по-прежнему останавливает проверку на `REVIEW_REQUIRED`. FULL гоняет `git diff --check` по всему диффу ветки, включая `.autopilot/`.
 - FULL гоняется в WSL Ubuntu на стенде `~/memoly-linux-validation`: Node, PostgreSQL 18 без `createdb`, своя PostgreSQL на loopback, база `*_test`, `TEST_SKIP_DOCKER=1 E2E_SKIP_DOCKER=1`. Docker-сокет пользователю WSL недоступен.
 - Playwright WebKit под Windows тратит 300–500 мс на транзакцию IndexedDB даже на пустом хранилище. Замеры скорости кэша в нём не отражают iPhone.
 - `bun run typecheck` внутри `webapp/` в чистом клоне падает TS2307 на `backend/src/generated/prisma/client`, пока клиент не сгенерирован. Запускай из корня: он сначала генерирует Prisma client.
