@@ -312,7 +312,7 @@ describe('risk based verification', () => {
     // Tests and helpers that reach always-FULL sources or browser-test infrastructure keep FULL.
     for (const path of ['webapp/tests/http-client-retry-after.test.ts', 'webapp/tests/avatar-resource-pool.test.ts',
       'webapp/tests/gifts-scope.test.ts', 'webapp/tests/composer-child-tags.test.tsx', 'webapp/tests/indexeddb-fake.ts',
-      'webapp/tests/e2e-database-guard.test.ts', 'webapp/tests/removed-subject.test.ts']) {
+      'webapp/tests/e2e-database-guard.test.ts', 'webapp/tests/removed-subject.test.ts', 'webapp/tests/pwa-runtime-journal.test.ts']) {
       expect(explainChanges([path]).reasons[0]).toMatchObject({ profile: 'full', rule: 'sensitive-test-dependency' })
     }
     expect(classifyChanges(['webapp/tests/helpers/session-fake.ts'])).toBe('full')
@@ -365,6 +365,10 @@ describe('risk based verification', () => {
       expect(webappTestSensitivity('webapp/tests/helpers/fake.ts', root)).toContain('webapp/tests/private-thing.test.ts')
       expect(webappTestSensitivity('webapp/tests/helpers/other.ts', root)).toBeNull()
       expect(webappTestSensitivity('webapp/tests/gone.test.ts', root)).toContain('Removed')
+      put('webapp/tests/dynamic.test.ts', 'const name = "x"\nawait import(`../src/${name}`)\n')
+      expect(webappTestSensitivity('webapp/tests/dynamic.test.ts', root)).toContain('Unresolved local reference')
+      put('webapp/tests/missing.test.ts', "import { gone } from '../src/not-there'\n")
+      expect(webappTestSensitivity('webapp/tests/missing.test.ts', root)).toContain('Unresolved local reference')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

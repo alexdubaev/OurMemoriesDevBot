@@ -492,18 +492,23 @@ function isRepositoryFile(path, repositoryRoot) {
 
 // Local module references of a web app test file: quoted './', '../' or '@/' specifiers
 // (static imports, dynamic imports and module mocks), resolved to repository paths.
+// A specifier that cannot be resolved (including a template literal with \${...}) is
+// reported as unresolved so the caller can fail closed.
 function localModuleReferences(file, repositoryRoot) {
   let text
-  try { text = readFileSync(resolve(repositoryRoot, file), 'utf8') } catch { return [] }
+  try { text = readFileSync(resolve(repositoryRoot, file), 'utf8') } catch { return { found: [], unresolved: [] } }
   const directory = posix.dirname(file)
   const found = new Set()
+  const unresolved = new Set()
+  for (const [specifier] of text.matchAll(/(?<=['"`])(?:\.{1,2}\/|@\/)[^'"`\s]*\$\{[^'"`]*(?=['"`])/g)) unresolved.add(specifier)
   for (const [, specifier] of text.matchAll(/['"`]((?:\.{1,2}\/|@\/)[^'"`\s$]+)['"`]/g)) {
     const base = specifier.startsWith('@/') ? `webapp/src/${specifier.slice(2)}` : posix.normalize(posix.join(directory, specifier))
     const target = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '/index.ts', '/index.tsx'].map((suffix) => `${base}${suffix}`)
       .find((candidate) => isRepositoryFile(candidate, repositoryRoot))
     if (target) found.add(target)
+    else unresolved.add(specifier)
   }
-  return [...found]
+  return { found: [...found], unresolved: [...unresolved] }
 }
 
 function listWebappTestSources(repositoryRoot) {
@@ -531,6 +536,7 @@ export function webappTestSensitivity(path, repositoryRoot = process.cwd()) {
   if (!isRepositoryFile(path, repositoryRoot)) return 'Removed web app test file; its guarded subject cannot be inspected.'
   const files = listWebappTestSources(repositoryRoot)
   const references = new Map()
+  /** @returns {{ found: string[], unresolved: string[] }} */
   const referencesOf = (file) => {
     if (!references.has(file)) references.set(file, localModuleReferences(file, repositoryRoot))
     return references.get(file)
@@ -539,15 +545,20 @@ export function webappTestSensitivity(path, repositoryRoot = process.cwd()) {
     const helpers = new Set([start])
     const sources = new Set()
     const infrastructure = new Set()
+    const unresolved = new Set()
     const queue = [start]
     while (queue.length) {
-      for (const target of referencesOf(queue.shift())) {
-        if (target.startsWith('webapp/src/')) sources.add(target)
-        else if (target.startsWith('webapp/e2e/') || target.startsWith('webapp/scripts/')) infrastructure.add(target)
-        else if (WEBAPP_TEST_SOURCE.test(target) && !helpers.has(target)) { helpers.add(target); queue.push(target) }
+      const current = queue.shift()
+      const { found, unresolved: missing } = referencesOf(current)
+      for (const specifier of missing) unresolved.add(`${current}: ${specifier}`)
+      for (const target of found) {
+        if (target.startsWith('webapp/tests/')) {
+          if (WEBAPP_TEST_SOURCE.test(target) && !helpers.has(target)) { helpers.add(target); queue.push(target) }
+        } else if (target.startsWith('webapp/e2e/') || target.startsWith('webapp/scripts/')) infrastructure.add(target)
+        else sources.add(target)
       }
     }
-    return { helpers, sources, infrastructure }
+    return { helpers, sources, infrastructure, unresolved }
   }
   const subjects = [path]
   if (!WEBAPP_TEST_FILE.test(path)) {
@@ -556,14 +567,17 @@ export function webappTestSensitivity(path, repositoryRoot = process.cwd()) {
   const named = subjects.find((file) => SENSITIVE_TEST_NAME.test(file.split('/').at(-1)))
   if (named) return named === path ? `Test name covers a protected area: ${path}.` : `Helper used by protected test ${named}.`
   for (const subject of subjects) {
-    const [infrastructure] = reach(subject).infrastructure
+    const { infrastructure: [infrastructure], unresolved: [missing] } = reach(subject)
     if (infrastructure) return `Test guards browser-test infrastructure ${infrastructure}.`
+    if (missing) return `Unresolved local reference ${missing}; its subject cannot be classified.`
   }
   const reached = new Map()
   for (const subject of subjects) for (const source of reach(subject).sources) if (!reached.has(source)) reached.set(source, subject)
-  const scripts = [...reached.keys()].filter((source) => /\.[cm]?[jt]sx?$/.test(source))
-  if (!scripts.length) return null
-  const scoped = spawnSync(BASH_EXECUTABLE, [resolve(repositoryRoot, FRONTEND_SCOPE_CLI), 'classify', ...scripts], { encoding: 'utf8', cwd: repositoryRoot })
+  // Every reached file outside webapp/tests goes through the frontend policy; D or an
+  // unclassified path (for example a shipped worker in webapp/public) keeps FULL.
+  const targets = [...reached.keys()]
+  if (!targets.length) return null
+  const scoped = spawnSync(BASH_EXECUTABLE, [resolve(repositoryRoot, FRONTEND_SCOPE_CLI), 'classify', ...targets], { encoding: 'utf8', cwd: repositoryRoot })
   if (scoped.status !== 0) return `Could not classify the sources this test reaches; keep FULL. ${scoped.stderr?.trim() ?? ''}`.trim()
   for (const line of scoped.stdout.split(/\r?\n/)) {
     const [source, kind] = line.split('\t')
