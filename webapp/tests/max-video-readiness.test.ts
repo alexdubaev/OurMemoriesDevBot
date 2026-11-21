@@ -43,13 +43,14 @@ async function swipeAround<T>(answer: T, cache: CacheOptions<T>) {
 }
 
 describe('MAX video readiness answers across swipes', () => {
-  test('a final poster answer is fetched once and kept for a long time', async () => {
-    for (const answer of [
-      { state: 'ready', posterPath: '/api/v1/families/11111111-1111-4111-8111-111111111111/media/max-videos/22222222-2222-4222-8222-222222222222/poster' },
-      { state: 'failed' },
-    ] satisfies MaxVideoPosterReadiness[]) {
-      expect(await swipeAround<MaxVideoPosterReadiness>(answer, maxVideoPosterReadinessCache)).toEqual({ fetches: 1, gcTime: MAX_VIDEO_FINAL_READINESS_GC_MS })
-    }
+  test('a ready poster answer is fetched once and kept for a long time', async () => {
+    const answer = { state: 'ready', posterPath: '/api/v1/families/11111111-1111-4111-8111-111111111111/media/max-videos/22222222-2222-4222-8222-222222222222/poster' } satisfies MaxVideoPosterReadiness
+    expect(await swipeAround<MaxVideoPosterReadiness>(answer, maxVideoPosterReadinessCache)).toEqual({ fetches: 1, gcTime: MAX_VIDEO_FINAL_READINESS_GC_MS })
+  })
+
+  test('a failed poster is checked again on activation, because a server retry may still produce it', async () => {
+    const { fetches } = await swipeAround<MaxVideoPosterReadiness>({ state: 'failed' }, maxVideoPosterReadinessCache)
+    expect(fetches).toBe(5)
   })
 
   test('a pending poster is checked again on every activation', async () => {

@@ -72,6 +72,7 @@ const MB = 1024 * 1024
 // covers those trips. Every pool is emptied when the page is hidden or the cache identity,
 // user or family changes.
 export const idleFeedPosters = createIdleImagePool(24, 16 * MB, 180_000)
-export const idleFeedPhotos = createIdleImagePool(120, 32 * MB, 180_000)
-export const idleAlbumPreviews = createIdleImagePool(200, 32 * MB, 180_000)
+// WebKit may keep decoded pixels of an idle blob URL that was drawn, so counts stay modest.
+export const idleFeedPhotos = createIdleImagePool(60, 24 * MB, 180_000)
+export const idleAlbumPreviews = createIdleImagePool(120, 24 * MB, 180_000)
 export const { clear: clearIdleFeedPosters, forget: forgetIdleFeedPoster, keep: keepIdleFeedPoster, take: takeIdleFeedPoster } = idleFeedPosters

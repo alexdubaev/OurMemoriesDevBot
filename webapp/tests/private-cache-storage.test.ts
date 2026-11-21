@@ -200,6 +200,28 @@ describe('private image validators at launch', () => {
   })
 })
 
+describe('private image validators removed during the launch scan', () => {
+  test('an image removed while the restore scan runs does not come back as a validator', async () => {
+    await store(preview(1), 512, '"v1"')
+    await store(preview(2), 512, '"v2"')
+    await drain()
+    generation = activatePrivateCacheIdentity(userId)
+    allowPrivateFamilyCache(userId, familyId, 1)
+    const log = database.log.cursorValues
+    let removal: Promise<void> | null = null
+    log.push = (...values) => {
+      removal ??= removePrivateImage(userId, preview(1))
+      return Array.prototype.push.apply(log, values)
+    }
+
+    expect(await restorePrivateQueryCache(new QueryClient(), userId, generation)).toBe(true)
+    await removal
+    expect(removal).not.toBeNull()
+    expect(privateImageValidator(userId, preview(1))).toEqual({ cached: false, etag: null })
+    expect(privateImageValidator(userId, preview(2))).toEqual({ cached: true, etag: '"v2"' })
+  })
+})
+
 describe('private image removal keeps no bytes behind', () => {
   test('removing one image, a family or the user deletes the stored bytes too', async () => {
     await store(preview(1))

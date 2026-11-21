@@ -54,21 +54,21 @@ test('an expired or differently authenticated poster cannot be taken over', () =
   }
 })
 
-test('the feed photo budget counts blob bytes and holds more than 100 display-size photos', () => {
+test('the feed photo budget counts blob bytes and holds 60 display-size photos', () => {
   const revoke = spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
   try {
     // A display-size photo is ~250 KB compressed; its decoded pixels are not held by a blob URL.
-    for (let index = 0; index < 110; index += 1) {
+    for (let index = 0; index < 60; index += 1) {
       expect(idleFeedPhotos.keep(`photo${index}`, transport, { url: `photo${index}`, size: 250 * 1024 })).toBe(true)
     }
     expect(revoke).not.toHaveBeenCalled()
     expect(idleFeedPhotos.take('photo0', transport)?.url).toBe('photo0')
-    expect(idleFeedPhotos.take('photo109', transport)?.url).toBe('photo109')
+    expect(idleFeedPhotos.take('photo59', transport)?.url).toBe('photo59')
 
-    // The budget is 32 MB of blob bytes: 17 photos of 2 MB leave the oldest ones out.
+    // The budget is 24 MB of blob bytes: 13 photos of 2 MB leave the oldest one out.
     idleFeedPhotos.clear()
     revoke.mockClear()
-    for (let index = 0; index < 17; index += 1) {
+    for (let index = 0; index < 13; index += 1) {
       expect(idleFeedPhotos.keep(`big${index}`, transport, { url: `big${index}`, size: 2 * MB })).toBe(true)
     }
     expect(revoke.mock.calls).toEqual([['big0']])
@@ -77,10 +77,10 @@ test('the feed photo budget counts blob bytes and holds more than 100 display-si
   }
 })
 
-test('the feed photo pool keeps at most 120 photos', () => {
+test('the feed photo pool keeps at most 60 photos', () => {
   const revoke = spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
   try {
-    for (let index = 0; index < 121; index += 1) idleFeedPhotos.keep(`photo${index}`, transport, { url: `photo${index}`, size: 1_000 })
+    for (let index = 0; index < 61; index += 1) idleFeedPhotos.keep(`photo${index}`, transport, { url: `photo${index}`, size: 1_000 })
     expect(revoke.mock.calls).toEqual([['photo0']])
   } finally {
     revoke.mockRestore()

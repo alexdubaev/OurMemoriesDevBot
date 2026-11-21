@@ -34,7 +34,8 @@ const activeFamilyEpochByUser = new Map<string, number | null>()
 const familyCacheScopeKey = (userId: string, familyId: string) => `${userId}:${familyId}`
 type Connection = { factory: IDBFactory; database: Promise<IDBDatabase> }
 let connection: Connection | null = null
-type ValidatorIndex = { generation: number; etags: Map<string, string | null>; ready: boolean; loading: Promise<void> | null }
+// `removed` holds keys forgotten before the index was ready, so a running scan cannot bring them back.
+type ValidatorIndex = { generation: number; etags: Map<string, string | null>; ready: boolean; loading: Promise<void> | null; removed: Set<string> }
 const imageValidators = new Map<string, ValidatorIndex>()
 let pendingTouches = new Map<string, { userId: string; accessedAt: number; etag: string | null; isCurrent: () => boolean }>()
 let touchFlush: Promise<void> | null = null
@@ -430,6 +431,7 @@ function currentFamilyCheck(userId: string, familyId: string) {
 async function discardOtherSchemas(userId: string, generation: number) {
   const index = isActivePrivateCacheIdentity(userId, generation) ? validatorIndex(userId) : null
   const etags = new Map<string, string | null>()
+  const scannedAt = Date.now()
   await enqueue(() => withDatabase(async (db) => {
     const transaction = db.transaction(CACHE_STORES, 'readwrite')
     const bytes = transaction.objectStore(BYTES_STORE_NAME)
@@ -441,7 +443,7 @@ async function discardOtherSchemas(userId: string, generation: number) {
       if (entry.schema !== PRIVATE_CACHE_SCHEMA) {
         cursor.delete()
         if (entry.kind === 'image') bytes.delete(entry.id)
-      } else if (entry.kind === 'image' && entry.userId === userId) {
+      } else if (entry.kind === 'image' && entry.userId === userId && scannedAt - entry.lastAccess <= PRIVATE_CACHE_MAX_AGE_MS) {
         etags.set(entry.key, entry.etag ?? null)
       }
       cursor.continue()
@@ -449,8 +451,9 @@ async function discardOtherSchemas(userId: string, generation: number) {
     await transactionDone(transaction)
     // Only the index of the identity that started the scan, and only while it is still current.
     if (!index || index.ready || !isActivePrivateCacheIdentity(userId, generation) || imageValidators.get(userId) !== index) return
-    for (const [key, etag] of etags) if (!index.etags.has(key)) index.etags.set(key, etag)
+    for (const [key, etag] of etags) if (!index.etags.has(key) && !index.removed.has(key)) index.etags.set(key, etag)
     index.ready = true
+    index.removed.clear()
   }))
 }
 
@@ -731,7 +734,7 @@ function entryId(userId: string, kind: CacheEntry['kind'], key: string) {
 function validatorIndex(userId: string) {
   let index = imageValidators.get(userId)
   if (!index || index.generation !== identityGeneration) {
-    index = { generation: identityGeneration, etags: new Map(), ready: false, loading: null }
+    index = { generation: identityGeneration, etags: new Map(), ready: false, loading: null, removed: new Set() }
     imageValidators.set(userId, index)
   }
   return index
@@ -742,7 +745,10 @@ function rememberValidator(userId: string, key: string, etag: string | null) {
 }
 
 function forgetValidator(userId: string, key: string) {
-  imageValidators.get(userId)?.etags.delete(key)
+  const index = imageValidators.get(userId)
+  if (!index) return
+  index.etags.delete(key)
+  if (!index.ready) index.removed.add(key)
 }
 
 async function loadValidators(userId: string, index: ValidatorIndex) {
@@ -750,9 +756,10 @@ async function loadValidators(userId: string, index: ValidatorIndex) {
     const entries = await withDatabase((db) => readImageMetadata(db, userId))
     if (imageValidators.get(userId) !== index) return
     for (const entry of entries) {
-      if (entry.schema === PRIVATE_CACHE_SCHEMA && entry.userId === userId && !index.etags.has(entry.key)) index.etags.set(entry.key, entry.etag ?? null)
+      if (entry.schema === PRIVATE_CACHE_SCHEMA && entry.userId === userId && !index.etags.has(entry.key) && !index.removed.has(entry.key)) index.etags.set(entry.key, entry.etag ?? null)
     }
     index.ready = true
+    index.removed.clear()
   } catch {
     // Without the index an image is revalidated without a validator; a later lookup retries.
     index.loading = null
