@@ -876,19 +876,44 @@ async function visibleTextCount(page: import('@playwright/test').Page, text: str
   }, text)
 }
 
-for (const source of ['feed', 'family']) {
-  test(`add sheet opened from the ${source} shows its title once on a phone and keeps the dialog name`, async ({ page }) => {
+for (const [source, tab] of [['feed', 'Лента'], ['family', 'Семья'], ['albums', 'Альбомы'], ['gifts', 'Вишлист']]) {
+  test(`bottom Add sheet dims the open ${source} tab and returns to it`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/e2e/selected-family-app.harness.html?albums=6&feedPhotos&channelMemory')
-    const navigation = page.locator('[data-testid="bottom-navigation"]')
-    await expect(navigation).toBeVisible()
-    const install = page.getByRole('button', { name: 'Продолжить без установки' })
-    if (await install.isVisible().catch(() => false)) await install.click()
-    if (source === 'family') await navigation.getByRole('button', { name: 'Семья', exact: true }).click()
+    const navigation = page.locator('[data-testid="bottom-navigation"]').filter({ visible: true })
+    const feed = page.locator('[data-navigation-surface="feed"]')
+    await expect(feed.locator('.memory-card').first()).toBeVisible()
+    if (source !== 'feed') await navigation.getByRole('button', { name: tab, exact: true }).click()
+
+    const surface = page.locator(`[data-navigation-surface="${source}"]`)
+    await expect(surface).toBeVisible()
+    if (source === 'feed') await page.evaluate(() => window.scrollTo(0, 180))
+    const scrollBeforeOpening = await page.evaluate(() => window.scrollY)
     await navigation.getByRole('button', { name: 'Добавить', exact: true }).click()
-    await expect(page.getByRole('dialog', { name: 'Добавить воспоминание' })).toBeVisible()
-    await page.waitForTimeout(700)
-    expect(await visibleTextCount(page, 'Добавить воспоминание')).toBe(1)
+
+    const sheet = page.getByRole('dialog', { name: 'Добавить воспоминание' })
+    await expect(sheet).toBeVisible()
+    await expect(surface).toBeVisible()
+    const backdrop = page.locator('[data-slot="drawer-overlay"][data-state="open"]')
+    await expect(backdrop).toBeVisible()
+    await expect(backdrop).toHaveCSS('background-color', 'rgba(32, 38, 32, 0.48)')
+    await expect(page.locator('[aria-label="Добавление воспоминания"]')).toBeHidden()
+    if (source === 'feed' || source === 'family') {
+      await page.screenshot({ path: testInfo.outputPath(`add-sheet-${source}.png`), animations: 'disabled' })
+    }
+    await expect.poll(() => visibleTextCount(page, 'Добавить воспоминание')).toBe(1)
+
+    if (source === 'family') {
+      await sheet.getByRole('button', { name: 'Добавить заметку', exact: true }).click()
+      await expect(page.getByRole('textbox', { name: 'Текст заметки' })).toBeVisible()
+      await page.getByRole('button', { name: 'Назад', exact: true }).click()
+    } else {
+      await page.keyboard.press('Escape')
+    }
+    await expect(sheet).toBeHidden()
+    await expect(surface).toBeVisible()
+    await expect(navigation.getByRole('button', { name: tab, exact: true })).toBeVisible()
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrollBeforeOpening)
   })
 }
 
