@@ -279,7 +279,7 @@ body:has(.ml-settings-sheet[data-view='menu']) [data-slot='bottom-navigation'][d
 
 [data-memoly-bottom-sheet='true']:has(.memoly-add-sheet-panel) { max-height: 100dvh; border-radius: 36px 36px 0 0; background: linear-gradient(155deg, rgb(252 252 248 / 99.5%), rgb(239 241 235 / 99.5%)); }
 [data-memoly-bottom-sheet='true']:has(.memoly-add-sheet-panel) > .hidden { display: none !important; }
-[data-memoly-bottom-sheet='true']:has(.memoly-add-sheet-panel) > .memoly-bottom-sheet-body { padding: 5px 12px calc(14px + var(--host-inset-bottom, 0px)); }
+[data-memoly-bottom-sheet='true']:has(.memoly-add-sheet-panel) > .memoly-bottom-sheet-body { padding: 5px 12px calc(24px + var(--host-inset-bottom, 0px)); }
 [data-memoly-bottom-sheet='true']:has(.memoly-add-sheet-panel) [data-slot='memoly-bottom-sheet-handle'] { width: 52px; height: 6px; margin-top: 8px; margin-bottom: 0; background: rgb(154 164 170 / 100%); }
 
 /* Approved Add sheet composition: three horizontal option cards. */
