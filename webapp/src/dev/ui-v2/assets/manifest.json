@@ -1,0 +1,46 @@
+[
+  {
+    "path": "portrait.webp",
+    "usage": "synthetic-demo-only",
+    "generator": "built-in image_gen",
+    "prompt": "Fictional child hugging a terrier, portrait, natural light.",
+    "width": 900,
+    "height": 1200,
+    "alpha": false,
+    "bytes": 158668,
+    "sha256": "ab5b493f382de5b15fbf1246f9289b4d4e9a47a6b8e4258a6aa09e49ac52812b"
+  },
+  {
+    "path": "family.webp",
+    "usage": "synthetic-demo-only",
+    "generator": "built-in image_gen",
+    "prompt": "Fictional parents and daughter walking together in a park, landscape.",
+    "width": 1200,
+    "height": 900,
+    "alpha": false,
+    "bytes": 150828,
+    "sha256": "24ce997868963b898e349ee94dc7a69d1e0bc314a8470c02130c5bf782c3b6dc"
+  },
+  {
+    "path": "painting.webp",
+    "usage": "synthetic-demo-only",
+    "generator": "built-in image_gen",
+    "prompt": "Fictional child painting at a kitchen table, landscape.",
+    "width": 1200,
+    "height": 900,
+    "alpha": false,
+    "bytes": 97298,
+    "sha256": "6bb0aac0daa515653fe489846b8f8d78ead9702ca46fbbe1b0b1b88f7d4d4e47"
+  },
+  {
+    "path": "father-daughter.webp",
+    "usage": "synthetic-demo-only",
+    "generator": "built-in image_gen",
+    "prompt": "Fictional father kissing his laughing three-year-old daughter, golden-hour lakeside candid photograph. No UI or real identities.",
+    "width": 1200,
+    "height": 900,
+    "alpha": false,
+    "bytes": 111834,
+    "sha256": "64a5b508f48689e8e5245b09adff8742e84b2dad6f56545fef1eb50346e61f94"
+  }
+]
