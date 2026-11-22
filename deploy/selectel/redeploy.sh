@@ -854,7 +854,9 @@ rollback_source_compatibility_profile() {
 				"$MONTH_PHOTO_RECOVERY_SHA:$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT:a6fd6fd6267b67b946db3b000e78cc3722ef3979eb127e4db4b7e5fa04db1d3d:s3-album-month-photos"
 				# Idle photo pools, launch ETag index and chunked cache reads (webapp only);
 				# backend source, schema, lockfile and the 67-migration catalog match a6fd6fd6.
-				"$MONTH_PHOTO_RECOVERY_SHA:$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT:b82986b5dd08765daad51076d3d1710f904f0498688b78a1f5a53386cb21c7b2:s3-album-month-photos") ;;
+				"$MONTH_PHOTO_RECOVERY_SHA:$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT:b82986b5dd08765daad51076d3d1710f904f0498688b78a1f5a53386cb21c7b2:s3-album-month-photos"
+				# Add sheet presentation only; backend, lockfile and the schema-67 catalog match b82986b5.
+				"$MONTH_PHOTO_RECOVERY_SHA:$MONTH_PHOTO_RECOVERY_RUNTIME_FINGERPRINT:2fd83c752bb65cc491a6ebab6f1ff68121af0f9d58539b0d79f53121784a69e5:s3-album-month-photos") ;;
 		e383d79269a3595f4c6cabedf167335aea042cf3)
 			attestations=("3fce2739205da927b95eb3379b1d066b61282965:3d021aa1eb5160c8022ad5da3189ee30d6738bcb967f752458bef38145509857:candidate") ;;
 		3fce2739205da927b95eb3379b1d066b61282965)
