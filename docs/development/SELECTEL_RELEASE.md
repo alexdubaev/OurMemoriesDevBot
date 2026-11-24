@@ -11,6 +11,9 @@
 
 ## 2. Узнать, что сейчас работает
 
+Если Windows OpenSSH сообщает `connect to host app.memoly.ru port 22: Permission denied`,
+сначала проверь доступ по инструкции [Windows SSH via WSL](../../deploy/selectel/README.md#windows-ssh-via-wsl).
+
 ```sh
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru \
   'docker inspect --format "{{.Config.Image}} {{.Image}}" memoly-backend-1 memoly-static-1'
