@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 
 import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { MemolyBottomSheet } from '@/components/MemolyBottomSheet'
-import { useNavigationAppearance } from '@/components/NavigationAppearance'
+import { useNavigationAppearance } from '@/components/navigation-appearance-context'
 import { DiagnosticsReportAction } from '@/platform/diagnostics/DiagnosticsReportAction'
 import { getMemolyThemeConfig, MEMOLY_THEMES, useMemolyTheme, type MemolyTheme } from '@/features/theme'
 import type { HostBridge } from '@/platform/host-bridge'

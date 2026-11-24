@@ -1,19 +1,7 @@
-import { createContext, useContext, useState, type PropsWithChildren } from 'react'
-
-export type NavigationTab = 'feed' | 'albums' | 'family' | 'gifts'
-type NavigationStyle = 'classic' | 'glass'
-type TabMotion = { from: NavigationTab; to: NavigationTab }
-
-type NavigationAppearance = {
-  style: NavigationStyle
-  selectStyle: (style: NavigationStyle) => void
-  motion: TabMotion | null
-  moveIndicator: (from: NavigationTab, to: NavigationTab) => void
-  finishMotion: (finished: TabMotion) => void
-}
+import { useState, type PropsWithChildren } from 'react'
+import { NavigationAppearanceContext, type NavigationStyle, type NavigationTab, type TabMotion } from './navigation-appearance-context'
 
 const preferenceKey = 'memoly:navigation-style'
-const NavigationAppearanceContext = createContext<NavigationAppearance | null>(null)
 
 function readStyle(): NavigationStyle {
   try {
@@ -49,8 +37,4 @@ export function NavigationAppearanceProvider({ children }: PropsWithChildren) {
   return <NavigationAppearanceContext.Provider value={{ style, selectStyle, motion, moveIndicator, finishMotion }}>
     {children}
   </NavigationAppearanceContext.Provider>
-}
-
-export function useNavigationAppearance() {
-  return useContext(NavigationAppearanceContext)
 }

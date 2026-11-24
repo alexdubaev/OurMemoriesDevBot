@@ -4,7 +4,7 @@ import { Typography } from '@/components/typography'
 import { WebpIcon, type WebpIconName } from '@/components/WebpIcon'
 import { UiVersionContext } from '@/features/ui-version'
 
-import { useNavigationAppearance, type NavigationTab } from './NavigationAppearance'
+import { useNavigationAppearance, type NavigationTab } from './navigation-appearance-context'
 
 import './BottomNavigation.css'
 
