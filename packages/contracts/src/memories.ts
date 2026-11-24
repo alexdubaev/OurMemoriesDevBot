@@ -15,6 +15,7 @@ const plainTextSchema = z.string().superRefine((value, context) => {
 })
 
 const occurredAtSchema = z.string().datetime({ offset: true })
+const occurredAtUtcSchema = z.string().datetime()
 
 /** Upper bound of child tag rows on one memory: every child on every attachment (≤ 10) and on the whole publication. */
 export const MAX_MEMORY_CHILD_TAGS = MAX_FAMILY_CHILDREN * 11
@@ -67,8 +68,8 @@ export const updateMemoryRequestSchema = z.object({
 export const listMemoriesQuerySchema = z.object({
   childId: uuid.optional(),
   kind: memoryKindSchema.optional(),
-  occurredFrom: occurredAtSchema.optional(),
-  occurredBefore: occurredAtSchema.optional(),
+  occurredFrom: occurredAtUtcSchema.optional(),
+  occurredBefore: occurredAtUtcSchema.optional(),
   cursor: z.string().min(1).max(2_048).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
   unreadOnly: z.enum(['true', 'false']).transform((value) => value === 'true').optional(),

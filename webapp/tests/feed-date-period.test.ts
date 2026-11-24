@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { feedDateBounds } from '../src/features/feed/date-period'
+import { feedDateBounds, isCivilDateAvailable } from '../src/features/feed/date-period'
 
 test('converts family civil periods to half-open UTC bounds across year rollover and DST', () => {
   expect(feedDateBounds({ mode: 'range', fromYear: 2024, fromMonth: 12, toYear: 2025, toMonth: 1 }, 'Europe/Moscow'))
@@ -12,4 +12,9 @@ test('converts family civil periods to half-open UTC bounds across year rollover
 
 test('rejects a reversed month range', () => {
   expect(() => feedDateBounds({ mode: 'range', fromYear: 2026, fromMonth: 2, toYear: 2026, toMonth: 1 }, 'UTC')).toThrow()
+})
+
+test('skipped family civil days are unavailable and cannot produce an empty API interval', () => {
+  expect(isCivilDateAvailable('2011-12-30', 'Pacific/Apia')).toBe(false)
+  expect(() => feedDateBounds({ mode: 'day', date: '2011-12-30' }, 'Pacific/Apia')).toThrow()
 })

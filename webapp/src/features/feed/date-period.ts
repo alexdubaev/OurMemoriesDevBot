@@ -6,6 +6,8 @@ export type FeedDatePeriod =
 
 export type FeedDateBounds = { occurredFrom: string; occurredBefore: string }
 
+const civilDateFormatters = new Map<string, Intl.DateTimeFormat>()
+
 export function feedDateBounds(period: FeedDatePeriod, timezone: string): FeedDateBounds {
   let start: string
   let end: string
@@ -20,7 +22,19 @@ export function feedDateBounds(period: FeedDatePeriod, timezone: string): FeedDa
     start = period.date; const date = parseCivilDate(period.date)
     end = civilDate(...nextDay(date.year, date.month, date.day))
   }
-  return { occurredFrom: zonedMidnight(start, timezone), occurredBefore: zonedMidnight(end, timezone) }
+  const occurredFrom = zonedMidnight(start, timezone)
+  const occurredBefore = zonedMidnight(end, timezone)
+  if (occurredFrom >= occurredBefore) throw new RangeError('Эта дата отсутствует в часовом поясе семьи')
+  return { occurredFrom, occurredBefore }
+}
+
+export function isCivilDateAvailable(date: string, timezone: string) {
+  try {
+    feedDateBounds({ mode: 'day', date }, timezone)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function feedDatePeriodLabel(period: FeedDatePeriod) {
@@ -45,7 +59,11 @@ export function calendarCivilDate(date: Date) {
 function zonedMidnight(date: string, timezone: string) {
   const { year, month, day } = parseCivilDate(date)
   const target = Date.UTC(year, month - 1, day)
-  const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' })
+  let formatter = civilDateFormatters.get(timezone)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' })
+    civilDateFormatters.set(timezone, formatter)
+  }
   const localDateNumber = (instant: number) => {
     const parts = formatter.formatToParts(new Date(instant))
     const get = (part: string) => Number(parts.find(({ type }) => type === part)?.value)

@@ -374,7 +374,7 @@ export function FeedPage({
 
   const closeComposerAfterRefresh = async () => {
     // A new memory can land in several child lists and in «Без отметки»; refresh every list of this family.
-    try { await (multiChild ? queryClient.invalidateQueries({ predicate: (query) => isFeedListKey(query.queryKey, familyId) }) : refetch()) } finally { setComposer(null); setEditingMemory(null) }
+    try { await queryClient.invalidateQueries({ predicate: (query) => isFeedListKey(query.queryKey, familyId) }) } finally { setComposer(null); setEditingMemory(null) }
   }
   const selectChildFilter = (next: ChildFilter) => {
     if (next === activeChildFilter) return

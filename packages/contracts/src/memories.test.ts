@@ -25,6 +25,7 @@ describe('memory contracts', () => {
     expect(listMemoriesQuerySchema.safeParse({ occurredFrom: valid.occurredFrom }).success).toBe(false)
     expect(listMemoriesQuerySchema.safeParse({ ...valid, occurredBefore: valid.occurredFrom }).success).toBe(false)
     expect(listMemoriesQuerySchema.safeParse({ ...valid, occurredBefore: '2026-02-01T00:00:00.000Z' }).success).toBe(false)
+    expect(listMemoriesQuerySchema.safeParse({ occurredFrom: '2026-03-01T02:00:00+02:00', occurredBefore: valid.occurredBefore }).success).toBe(false)
   })
   test('MAX readiness survives JSON and enforces retry semantics', () => {
     for (const state of ['processing', 'ready', 'unavailable', 'unknown'] as const) {

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { MemolyBottomSheet } from '@/components/MemolyBottomSheet'
 import { Typography } from '@/components/typography'
-import { calendarCivilDate, familyCivilDate, type FeedDatePeriod } from './date-period'
+import { calendarCivilDate, familyCivilDate, isCivilDateAvailable, type FeedDatePeriod } from './date-period'
 
 const modes = [
   ['year', 'Год'], ['month', 'Месяц'], ['range', 'Диапазон'], ['day', 'День'],
@@ -31,11 +31,12 @@ export function DatePeriodSheet({ active, familyTimezone, onApply, onOpenChange,
   const [toMonth, setToMonth] = useState(initial.mode === 'range' ? initial.toMonth : currentMonth)
   const [selectedDay, setSelectedDay] = useState(initial.mode === 'day' ? initial.date : today)
   const reversed = mode === 'range' && fromYear * 12 + fromMonth > toYear * 12 + toMonth
+  const selectedDayAvailable = isCivilDateAvailable(selectedDay, familyTimezone)
   const invalidYear = (mode === 'year' && !validYear(year, currentYear)) ||
     (mode === 'month' && !validYear(year, currentYear)) ||
     (mode === 'range' && (!validYear(fromYear, currentYear) || !validYear(toYear, currentYear)))
   const apply = () => {
-    if (reversed || invalidYear) return
+    if (reversed || invalidYear || (mode === 'day' && !selectedDayAvailable)) return
     if (mode === 'year') onApply({ mode, year })
     else if (mode === 'month') onApply({ mode, year, month })
     else if (mode === 'range') onApply({ mode, fromYear, fromMonth, toYear, toMonth })
@@ -53,11 +54,11 @@ export function DatePeriodSheet({ active, familyTimezone, onApply, onOpenChange,
         <TabsContent value="year"><label className="feed-date-field">Год<input aria-label="Год" max={currentYear} min="1900" onChange={(event) => setYear(Number(event.target.value))} type="number" value={year} /></label></TabsContent>
         <TabsContent value="month"><div className="feed-date-fields"><label className="feed-date-field">Месяц<select aria-label="Месяц" onChange={(event) => setMonth(Number(event.target.value))} value={month}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></label><label className="feed-date-field">Год<input aria-label="Год" max={currentYear} min="1900" onChange={(event) => setYear(Number(event.target.value))} type="number" value={year} /></label></div></TabsContent>
         <TabsContent value="range"><div className="feed-date-range">{([[fromMonth, fromYear, setFromMonth, setFromYear, 'С'] as const, [toMonth, toYear, setToMonth, setToYear, 'По'] as const]).map(([monthValue, yearValue, setMonthValue, setYearValue, label]) => <fieldset className="feed-date-fields" key={label}><legend>{label}</legend><label className="feed-date-field">Месяц<select aria-label={`${label} месяц`} onChange={(event) => setMonthValue(Number(event.target.value))} value={monthValue}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></label><label className="feed-date-field">Год<input aria-label={`${label} год`} max={currentYear} min="1900" onChange={(event) => setYearValue(Number(event.target.value))} type="number" value={yearValue} /></label></fieldset>)}</div></TabsContent>
-        <TabsContent value="day"><Calendar aria-label="Выберите день" captionLayout="dropdown" endMonth={new Date(`${today.slice(0, 7)}-01T12:00:00`)} locale={ru} mode="single" onSelect={(date) => { if (date) setSelectedDay(calendarCivilDate(date)) }} selected={new Date(`${selectedDay}T12:00:00`)} startMonth={new Date('1900-01-01T12:00:00')} weekStartsOn={1} /></TabsContent>
+        <TabsContent value="day"><Calendar aria-label="Выберите день" captionLayout="dropdown" disabled={(date) => !isCivilDateAvailable(calendarCivilDate(date), familyTimezone)} endMonth={new Date(`${today.slice(0, 7)}-01T12:00:00`)} labels={{ labelMonthDropdown: () => 'Месяц', labelYearDropdown: () => 'Год', labelPrevious: () => 'Предыдущий месяц', labelNext: () => 'Следующий месяц' }} locale={ru} mode="single" onSelect={(date) => { if (date) setSelectedDay(calendarCivilDate(date)) }} selected={new Date(`${selectedDay}T12:00:00`)} startMonth={new Date('1900-01-01T12:00:00')} weekStartsOn={1} /></TabsContent>
       </Tabs>
       {reversed ? <Typography as="p" className="feed-date-error" role="alert" variant="bodySm">Начальный месяц должен быть раньше конечного.</Typography> : null}
       {invalidYear ? <Typography as="p" className="feed-date-error" role="alert" variant="bodySm">Укажите год от 1900 до текущего.</Typography> : null}
-      <div className="feed-date-actions"><Button onClick={() => onOpenChange(false)} type="button" variant="outline">Отмена</Button><Button disabled={reversed || invalidYear} onClick={apply} type="button">Показать</Button></div>
+      <div className="feed-date-actions"><Button onClick={() => onOpenChange(false)} type="button" variant="outline">Отмена</Button><Button disabled={reversed || invalidYear || (mode === 'day' && !selectedDayAvailable)} onClick={apply} type="button">Показать</Button></div>
     </section>
   </MemolyBottomSheet>
 }

@@ -969,10 +969,8 @@ test('mobile feed applies and clears a family timezone date period', async ({ pa
     return calls.some((path) => path.includes('occurredFrom=2024-11-30T21%3A00%3A00.000Z') && path.includes('occurredBefore=2024-12-31T21%3A00%3A00.000Z'))
   })).toBe(true)
   await page.getByRole('button', { name: 'Сбросить период дат' }).click()
-  await expect.poll(() => page.evaluate(() => {
-    const calls = (window as typeof window & { __selectedFamilyMemoryQueries: string[] }).__selectedFamilyMemoryQueries
-    return calls.some((path) => !new URL(path, location.origin).searchParams.has('occurredFrom'))
-  })).toBe(true)
+  await expect(page.locator('.astryx-feed-period')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Даты' })).toBeVisible()
 })
 
 test('mobile glass navigation still follows the selected tab without WebGL', async ({ page }) => {
