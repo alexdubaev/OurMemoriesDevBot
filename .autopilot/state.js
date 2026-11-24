@@ -2,7 +2,7 @@ window.STATE =
 {
   "version": 2,
   "slug": "feed-date-period",
-  "dir": "2026-11-24-feed-date-period--wip",
+  "dir": "2026-11-24-feed-date-period",
   "title": "Фильтр дат в ленте Memoly",
   "mode": "semi",
   "depth": "normal",
@@ -11,10 +11,10 @@ window.STATE =
   "memoryFile": "CLAUDE.md",
   "memoryOwner": "user",
   "skillDir": "C:/Users/Alexandr/.codex/skills/autopilot",
-  "baseCommit": null,
+  "baseCommit": "84c501cd",
   "startedAt": "2026-11-24T20:34:42+03:00",
-  "updatedAt": "2026-11-24T20:38:47+03:00",
-  "finishedAt": null,
+  "updatedAt": "2026-11-24T21:08:00+03:00",
+  "finishedAt": "2026-11-24T21:08:00+03:00",
   "stages": [
     {
       "id": "preflight",
@@ -43,26 +43,33 @@ window.STATE =
     },
     {
       "id": "plan",
-      "status": "active",
-      "startedAt": "2026-11-24T20:38:44+03:00"
+      "status": "done",
+      "startedAt": "2026-11-24T20:38:44+03:00",
+      "finishedAt": "2026-11-24T20:39:22+03:00"
     },
     {
       "id": "build",
-      "status": "pending"
+      "status": "done",
+      "startedAt": "2026-11-24T20:39:22+03:00",
+      "finishedAt": "2026-11-24T21:00:58+03:00"
     },
     {
       "id": "review",
-      "status": "pending"
+      "status": "done",
+      "startedAt": "2026-11-24T21:00:58+03:00",
+      "finishedAt": "2026-11-24T21:07:36+03:00"
     },
     {
       "id": "final",
-      "status": "pending"
+      "status": "done",
+      "startedAt": "2026-11-24T21:07:36+03:00",
+      "finishedAt": "2026-11-24T21:08:00+03:00"
     }
   ],
   "requirements": {
     "total": 7,
-    "done": 0,
-    "inTicket": 7,
+    "done": 7,
+    "inTicket": 0,
     "inSpec": 0,
     "placeholder": 0,
     "deferred": 0,
@@ -94,12 +101,52 @@ window.STATE =
       ],
       "review": "нет",
       "model": "обычная",
-      "status": "pending",
+      "status": "done",
+      "startedAt": "2026-11-24T20:39:23+03:00",
+      "finishedAt": "2026-11-24T21:00:57+03:00",
       "retries": 0,
-      "repairs": 0
+      "repairs": 0,
+      "tests": {
+        "passed": 161,
+        "failed": 0
+      },
+      "commit": "06b6a677"
+    },
+    {
+      "id": "F1",
+      "title": "Правки по ревью фильтра дат",
+      "requirements": [
+        "R01",
+        "R05",
+        "R06",
+        "R07i"
+      ],
+      "blockedBy": [],
+      "wave": 2,
+      "zone": [
+        "packages/contracts/src",
+        "webapp/src/features/feed",
+        "webapp/tests",
+        "webapp/e2e"
+      ],
+      "review": "да — ремонт ветки",
+      "model": "сильная",
+      "status": "done",
+      "retries": 0,
+      "repairs": 0,
+      "startedAt": "2026-11-24T21:03:37+03:00",
+      "finishedAt": "2026-11-24T21:07:35+03:00",
+      "tests": {
+        "passed": 398,
+        "failed": 0
+      },
+      "commit": "874abdf0"
     }
   ],
-  "tests": null,
+  "tests": {
+    "passed": 398,
+    "failed": 0
+  },
   "debt": {
     "placeholders": [],
     "assumptions": [],
@@ -113,7 +160,11 @@ window.STATE =
     "items": []
   },
   "concerns": [],
-  "blind": null,
+  "blind": {
+    "checked": 7,
+    "matched": 7,
+    "mismatches": []
+  },
   "beats": [
     "2026-11-24T20:34:42+03:00",
     "2026-11-24T20:34:57+03:00",
@@ -124,9 +175,22 @@ window.STATE =
     "2026-11-24T20:38:44+03:00",
     "2026-11-24T20:38:45+03:00",
     "2026-11-24T20:38:46+03:00",
-    "2026-11-24T20:38:47+03:00"
+    "2026-11-24T20:38:47+03:00",
+    "2026-11-24T20:39:21+03:00",
+    "2026-11-24T20:39:22+03:00",
+    "2026-11-24T20:39:23+03:00",
+    "2026-11-24T21:00:57+03:00",
+    "2026-11-24T21:00:58+03:00",
+    "2026-11-24T21:03:35+03:00",
+    "2026-11-24T21:03:36+03:00",
+    "2026-11-24T21:03:37+03:00",
+    "2026-11-24T21:03:38+03:00",
+    "2026-11-24T21:05:49+03:00",
+    "2026-11-24T21:07:35+03:00",
+    "2026-11-24T21:07:36+03:00",
+    "2026-11-24T21:08:00+03:00"
   ],
-  "rev": 11,
+  "rev": 25,
   "waiting": null,
   "waits": [],
   "log": [
@@ -192,43 +256,132 @@ window.STATE =
       "g": "G3",
       "ok": true,
       "problems": 0
+    },
+    {
+      "t": "2026-11-24T20:39:22+03:00",
+      "k": "stage",
+      "id": "build",
+      "act": "start"
+    },
+    {
+      "t": "2026-11-24T20:39:23+03:00",
+      "k": "ticket",
+      "ids": [
+        "01"
+      ],
+      "act": "start"
+    },
+    {
+      "t": "2026-11-24T21:00:57+03:00",
+      "k": "ticket",
+      "ids": [
+        "01"
+      ],
+      "act": "done",
+      "tests": {
+        "passed": 161,
+        "failed": 0
+      }
+    },
+    {
+      "t": "2026-11-24T21:00:58+03:00",
+      "k": "stage",
+      "id": "review",
+      "act": "start"
+    },
+    {
+      "t": "2026-11-24T21:03:35+03:00",
+      "k": "tickets",
+      "n": 2
+    },
+    {
+      "t": "2026-11-24T21:03:36+03:00",
+      "k": "gate",
+      "g": "G3",
+      "ok": true,
+      "problems": 0
+    },
+    {
+      "t": "2026-11-24T21:03:37+03:00",
+      "k": "ticket",
+      "ids": [
+        "F1"
+      ],
+      "act": "start"
+    },
+    {
+      "t": "2026-11-24T21:03:38+03:00",
+      "k": "add",
+      "key": "report",
+      "n": 1
+    },
+    {
+      "t": "2026-11-24T21:05:49+03:00",
+      "k": "gate",
+      "g": "G4",
+      "ok": true,
+      "checked": 7,
+      "matched": 7
+    },
+    {
+      "t": "2026-11-24T21:07:35+03:00",
+      "k": "ticket",
+      "ids": [
+        "F1"
+      ],
+      "act": "done",
+      "tests": {
+        "passed": 398,
+        "failed": 0
+      }
+    },
+    {
+      "t": "2026-11-24T21:07:36+03:00",
+      "k": "stage",
+      "id": "final",
+      "act": "start"
+    },
+    {
+      "t": "2026-11-24T21:08:00+03:00",
+      "k": "finish",
+      "result": "Фильтр дат работает в тестовой ленте и прошёл независимую приёмку. Состояние выпуска определяется проверкой FULL."
     }
   ],
   "reqList": [
     {
       "id": "R01",
       "text": "«Реализуй» · «Даты» справа от «Лента воспоминаний»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R02",
       "text": "«выбор года»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R03",
       "text": "«выбор месяца»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R04",
       "text": "«диапазон месяцев»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R05",
       "text": "«дня»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R06",
       "text": "«выбранный период находится под заголовком и сбрасывается крестиком»",
-      "status": "in-ticket"
+      "status": "done"
     },
     {
       "id": "R07i",
       "text": "«Реализуй» · рабочая лента воспоминаний",
-      "status": "in-ticket"
+      "status": "done"
     }
   ],
   "gates": {
@@ -247,9 +400,18 @@ window.STATE =
     },
     "G3": {
       "ok": true,
-      "at": "2026-11-24T20:38:47+03:00",
+      "at": "2026-11-24T21:03:36+03:00",
       "problems": 0
+    },
+    "G4": {
+      "ok": true,
+      "at": "2026-11-24T21:05:49+03:00",
+      "checked": 7,
+      "matched": 7
     }
   },
-  "result": null
+  "result": "Фильтр дат работает в тестовой ленте и прошёл независимую приёмку. Состояние выпуска определяется проверкой FULL.",
+  "report": [
+    "В редких исторических переходах часовых поясов местный день может состоять из двух раздельных интервалов. Один запрос использует один интервал UTC."
+  ]
 }

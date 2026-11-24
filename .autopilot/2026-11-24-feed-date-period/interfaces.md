@@ -12,3 +12,8 @@
 Официальный источник — `origin/main` репозитория alexdubaev/OurMemoriesDevBot. Рабочий каталог для изменения — этот worktree. Актуальные `AGENTS.md`, `docs/development/SMALL_CHANGE_WORKFLOW.md` и `docs/TESTING.md` имеют силу. Сохраняем действующие ограничения доступа и Media ACL. Публикация только с gate/evidence, которые применяет проект. Прод окружение и данные не используются в проверках. Правила и решения предыдущих релизов за пределами ленты остаются в `.autopilot/PROGRESS.md`.
 
 Стек существующего monorepo, версии в package.json и bun.lock. Зависимости уже установлены `bun install --frozen-lockfile`. Пакеты и lock-файл не изменяем. Проверка проекта: документированный FULL через `bun run verify:local` в WSL и узкий mobile сценарий, который тестирует новую функцию. Узкий тест дат: `bun run --cwd webapp test <файл>`; Playwright: `bun run --cwd webapp e2e --config=e2e/memoly-v4.playwright.config.ts -g '…'`. Запуск backend integration по `docs/TESTING.md`, с отдельной тестовой БД.
+
+## Реализованные интерфейсы
+
+- T01. Список воспоминаний принимает ISO-пару `occurredFrom` и `occurredBefore`. Курсоры привязаны к нормализованным границам. Курсоры без дат сохраняют прежнее применение.
+- T01. Клиент переводит календарный выбор семьи в полуоткрытый интервал UTC. Интервал участвует в ключах кэша, обновлении ленты и запросах обычного и непрочитанного списков.
