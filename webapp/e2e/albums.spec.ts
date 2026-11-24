@@ -1427,7 +1427,7 @@ test('bottom navigation grows and wraps labels at 200% text without reducing tou
   await page.getByRole('button', { name: /^Оформление/ }).click()
   await page.getByRole('group', { name: 'Нижнее меню' }).getByRole('button', { name: 'Классическое' }).click()
   await page.keyboard.press('Escape')
-  const nav = page.getByTestId('bottom-navigation')
+  const nav = page.getByRole('navigation', { name: 'Основная навигация', exact: true })
   await expect(nav).toBeVisible()
   await expect(nav).toHaveAttribute('data-nav-style', 'classic')
   const baseHeight = await nav.evaluate((element) => element.getBoundingClientRect().height)
