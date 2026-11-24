@@ -3955,3 +3955,36 @@ slowTest('notification batch source retains exact month recovery binding and rej
   const drifted = run(laterFrontendSource)
   assert.equal(drifted.status, 1, 'an unattested frontend release must stay rejected for full recovery')
 })
+
+slowTest('feed date bounds bind only the measured executable source to month-photo recovery', () => {
+  const baseline = '84013f43a5060d2a20d0b33ef0e9de7829332218'
+  const target = '95496ef26b677529ee9b1ac10fc12f6075dd912b'
+  const blobs = [
+    ['backend/src/modules/memories/application/memory-service.ts', '888c06f7ea3ede16c37e00e9a11fbbcd28a11478'],
+    ['backend/src/modules/memories/domain/memory-cursor.ts', '3a71ea850cf57e83578d74f4b1b598af470ee9e5'],
+    ['backend/src/modules/memories/infrastructure/prisma-memory-repository.ts', '541d7aff2cfe9df2df9e3bcfeec5ff118ba8d834'],
+    ['packages/contracts/src/memories.ts', '309451a402a6d0602499a0f11b8198e191c5f51c'],
+    ['webapp/src/features/feed/DatePeriodSheet.tsx', '271268b9e0a9cb49f1af6611ff9c52db71df2a34'],
+    ['webapp/src/features/feed/FeedPage.tsx', '89ea5260f36951fd6a9951b2b05e1b029625aa55'],
+    ['webapp/src/features/feed/api.ts', '61e5bbdf2ea74eb4dce45786db0541ce39719a8a'],
+    ['webapp/src/features/feed/date-period.ts', '40699714804f55c1c72c6637e7f55dcd30a69386'],
+    ['webapp/src/features/feed/presentation/FeedPresentation.tsx', '3dd5fe83f074c963712a2485c5d669baef2eb100'],
+    ['webapp/src/features/feed/presentation/astryx-feed.css', 'd4653d6fbd010db86a5b9ec09643022e8c0c70f2'],
+    ['webapp/src/features/feed/queries.ts', 'b9118b0aa91eeaabf00e9d766e53ac7f73c38af0'],
+  ]
+  const directory = mkdtempSync(resolve(root, '.scratch', 'rollback-feed-date-'))
+  const added = spawnSync('git', ['worktree', 'add', '--detach', directory, baseline], { cwd: root, encoding: 'utf8' })
+  assert.equal(added.status, 0, added.stdout + added.stderr)
+  fixtureWorktrees.push(directory)
+  const source = commitFrozenSourceFiles({ root: directory, sha: baseline }, blobs, 'freeze feed date production inputs')
+  const profile = (revision) => spawnSync(bashExecutable, ['-s'], {
+    cwd: root,
+    input: `${redeployDefinitions}\nAPP_ROOT=${shellQuote(directory)}\nrollback_s3_host_inputs_match() { return 0; }\nrollback_source_compatibility_profile ${shellLiteral(revision)} ${target}\n`,
+    encoding: 'utf8',
+  })
+  const accepted = profile(source.sha)
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr)
+  assert.equal(accepted.stdout.trim(), 's3-album-month-photos')
+  const drift = commitSourceChange(source, 'packages/contracts/src/memories.ts', '\n// unmeasured feed contract drift\n', 'change the measured feed contract')
+  assert.equal(profile(drift.sha).status, 1)
+})
