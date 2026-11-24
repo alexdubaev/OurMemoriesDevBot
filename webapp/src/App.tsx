@@ -4,6 +4,7 @@ import type { BrowserLinkStartResponse, FamilyHomeResponse, FamilyInviteDto, Fam
 
 import { WebpIcon } from '@/components/WebpIcon'
 import { BottomNavigation } from '@/components/BottomNavigation'
+import { NavigationAppearanceProvider } from '@/components/NavigationAppearance'
 import { AlbumsPage, ComposerHost } from '@/features/albums'
 import { BrandLogo } from '@/components/BrandLogo'
 import { Button } from '@/components/ui/button'
@@ -53,7 +54,9 @@ export type AppProps = { hostBridge: HostBridge }
 export default function App(props: AppProps) {
   return (
     <ThemeProvider>
-      <AppContent {...props} />
+      <NavigationAppearanceProvider>
+        <AppContent {...props} />
+      </NavigationAppearanceProvider>
     </ThemeProvider>
   )
 }

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 
 import { DrawerDescription, DrawerTitle } from '@/components/ui/drawer'
 import { MemolyBottomSheet } from '@/components/MemolyBottomSheet'
+import { useNavigationAppearance } from '@/components/NavigationAppearance'
 import { DiagnosticsReportAction } from '@/platform/diagnostics/DiagnosticsReportAction'
 import { getMemolyThemeConfig, MEMOLY_THEMES, useMemolyTheme, type MemolyTheme } from '@/features/theme'
 import type { HostBridge } from '@/platform/host-bridge'
@@ -87,7 +88,15 @@ function ShareBotAction() {
 }
 
 export function AppearanceChoices({ onSelect, selected }: { onSelect: (theme: MemolyTheme) => void; selected: MemolyTheme }) {
+  const navigation = useNavigationAppearance()
   return <div className="ml-theme-choices astryx-theme-choices">
+    {navigation ? <div className="astryx-nav-style-settings">
+      <p>Нижнее меню</p>
+      <div aria-label="Нижнее меню" className="astryx-nav-style-options" role="group">
+        <button aria-pressed={navigation.style === 'glass'} onClick={() => navigation.selectStyle('glass')} type="button">Стекло</button>
+        <button aria-pressed={navigation.style === 'classic'} onClick={() => navigation.selectStyle('classic')} type="button">Классическое</button>
+      </div>
+    </div> : null}
     <p>Цвет фона аватаров без фотографии</p>
     <div aria-label="Цвет фона аватаров" className="ml-theme-grid" role="group">
       {MEMOLY_THEMES.map((theme) => (
