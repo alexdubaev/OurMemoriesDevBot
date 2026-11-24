@@ -75,9 +75,9 @@ export function FeedPresentation(props: FeedPresentationProps) {
       <main className="app astryx-feed" data-slot="feed-scroll">
         <div className="astryx-feed-heading">
           <Typography as="h1" className="astryx-feed-title" variant="memoryScreen">Лента воспоминаний</Typography>
-          {props.headingAction}
+          <Typography as="span" variant="body">{props.headingAction}</Typography>
         </div>
-        {props.headingSubline ? <div className="astryx-feed-period">{props.headingSubline}</div> : null}
+        {props.headingSubline ? <div className="astryx-feed-period"><Typography as="span" variant="memoryCaption">{props.headingSubline}</Typography></div> : null}
         <div className="astryx-feed-identity">
         {props.header ?? <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarStatus={props.childAvatarStatus} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" onAllFamilies={props.onAllFamilies} onOpenChild={props.onOpenChild} onOpenSettings={props.onOpenSettings} theme={theme} />}
         </div>

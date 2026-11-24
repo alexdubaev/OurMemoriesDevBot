@@ -143,13 +143,16 @@ export function FeedPage({
   const displayedChildAvatarStatus = childAvatarStatus ?? (displayedChildAvatarUrl ? 'ready' : 'absent')
   const [unreadOnly, setUnreadOnly] = useState(false)
   const [dateSheetOpen, setDateSheetOpen] = useState(false)
-  const [datePeriod, setDatePeriod] = useState<FeedDatePeriod | null>(null)
+  const [dateSelection, setDateSelection] = useState<{ timezone: string; period: FeedDatePeriod | null }>({ timezone: familyTimezone, period: null })
+  if (dateSelection.timezone !== familyTimezone) {
+    const period = dateSelection.period && feedDateBoundsForTimezone(dateSelection.period, familyTimezone) ? dateSelection.period : null
+    setDateSelection({ timezone: familyTimezone, period })
+  }
+  const datePeriod = dateSelection.period
+  const setDatePeriod = (period: FeedDatePeriod | null) => setDateSelection({ timezone: familyTimezone, period })
   const dateButtonRef = useRef<HTMLButtonElement | null>(null)
   const dateBounds = useMemo(() => datePeriod ? feedDateBoundsForTimezone(datePeriod, familyTimezone) : null, [datePeriod, familyTimezone])
   const effectiveDatePeriod = dateBounds ? datePeriod : null
-  useEffect(() => {
-    if (datePeriod && !dateBounds) setDatePeriod(null)
-  }, [dateBounds, datePeriod])
   const [unreadCycle, setUnreadCycle] = useState(0)
   const { theme } = useMemolyTheme()
   const childList = useMemo(() => childProfiles ?? [], [childProfiles])
@@ -435,8 +438,8 @@ export function FeedPage({
     <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ id: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.id, path: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
     <MediaPlaybackCoordinator active={active && !commentsOpen}>
     <FeedPresentation activeFilter="all"
-      headingAction={<button aria-label="Даты" className="astryx-feed-dates" onClick={() => setDateSheetOpen(true)} ref={dateButtonRef} type="button"><HugeiconsIcon aria-hidden icon={Calendar03Icon} strokeWidth={2} /><span>Даты</span></button>}
-      headingSubline={effectiveDatePeriod ? <span className="astryx-feed-period-chip">{feedDatePeriodLabel(effectiveDatePeriod)}<button aria-label="Сбросить период дат" onClick={() => setDatePeriod(null)} type="button">×</button></span> : null}
+      headingAction={<button aria-label="Даты" className="astryx-feed-dates" onClick={() => setDateSheetOpen(true)} ref={dateButtonRef} type="button"><HugeiconsIcon aria-hidden icon={Calendar03Icon} strokeWidth={2} /><Typography as="span" variant="body">Даты</Typography></button>}
+      headingSubline={effectiveDatePeriod ? <span className="astryx-feed-period-chip"><Typography as="span" variant="memoryCaption">{feedDatePeriodLabel(effectiveDatePeriod)}</Typography><button aria-label="Сбросить период дат" onClick={() => setDatePeriod(null)} type="button"><Typography as="span" variant="body">×</Typography></button></span> : null}
       header={multiChild ? selectedChild
         ? <ChildPageHeader child={selectedChild} enabled={childAvatarsEnabled} familyId={familyId} familyTimezone={familyTimezone} membershipEpoch={membershipEpoch} onAllFamilies={onAllFamilies} onOpenSettings={onOpenSettings} transport={transport} />
         : <FamilyHeaderV2 childList={childList} familyName={familyName} mode="feed" onAllFamilies={onAllFamilies} onOpenSettings={onOpenSettings} onSelectChild={selectChildFilter} renderChildAvatar={(item) => <FamilyChildAvatar child={item} enabled={childAvatarsEnabled} familyId={familyId} membershipEpoch={membershipEpoch} transport={transport} />} theme={theme} />
@@ -457,7 +460,7 @@ export function FeedPage({
       {!isAppBootstrapped || feed.isPending || missingFilterChildId ? <FeedSkeleton /> : null}
       {!missingFilterChildId && shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
       {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? effectiveDatePeriod
-        ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">За этот период записей нет</Typography><Button onClick={() => setDatePeriod(null)} type="button" variant="outline">Показать всю ленту</Button></div>
+        ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">За этот период записей нет</Typography><Button onClick={() => setDatePeriod(null)} type="button" variant="outline"><Typography as="span" variant="memoryButton">Показать всю ленту</Typography></Button></div>
         : unreadOnly
         ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">Все новые воспоминания просмотрены</Typography><Typography as="p" variant="memoryBody">Новых воспоминаний пока нет.</Typography></div>
         : activeChildFilter ? <ChildFeedEmpty childName={selectedChild?.name} onAdd={role === 'full' && selectedChild ? () => setAddSheetOpen(true) : undefined} onShowAll={() => selectChildFilter(null)} />
