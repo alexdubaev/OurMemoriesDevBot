@@ -47,7 +47,7 @@ import { hasPendingPrivateVideo, selectPendingPrivateVideoIds } from './pending-
 import { MemoryDeleteSpotlight } from './MemoryDeleteSpotlight'
 import { useMemorySeenObserver } from './use-memory-seen-observer'
 import { DatePeriodSheet } from './DatePeriodSheet'
-import { feedDateBounds, feedDatePeriodLabel, type FeedDatePeriod } from './date-period'
+import { feedDateBoundsForTimezone, feedDatePeriodLabel, type FeedDatePeriod } from './date-period'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Calendar03Icon } from '@hugeicons/core-free-icons'
 import { mediaCardSeenReady } from './seen-visibility'
@@ -145,7 +145,11 @@ export function FeedPage({
   const [dateSheetOpen, setDateSheetOpen] = useState(false)
   const [datePeriod, setDatePeriod] = useState<FeedDatePeriod | null>(null)
   const dateButtonRef = useRef<HTMLButtonElement | null>(null)
-  const dateBounds = useMemo(() => datePeriod ? feedDateBounds(datePeriod, familyTimezone) : null, [datePeriod, familyTimezone])
+  const dateBounds = useMemo(() => datePeriod ? feedDateBoundsForTimezone(datePeriod, familyTimezone) : null, [datePeriod, familyTimezone])
+  const effectiveDatePeriod = dateBounds ? datePeriod : null
+  useEffect(() => {
+    if (datePeriod && !dateBounds) setDatePeriod(null)
+  }, [dateBounds, datePeriod])
   const [unreadCycle, setUnreadCycle] = useState(0)
   const { theme } = useMemolyTheme()
   const childList = useMemo(() => childProfiles ?? [], [childProfiles])
@@ -432,12 +436,12 @@ export function FeedPage({
     <MediaPlaybackCoordinator active={active && !commentsOpen}>
     <FeedPresentation activeFilter="all"
       headingAction={<button aria-label="Даты" className="astryx-feed-dates" onClick={() => setDateSheetOpen(true)} ref={dateButtonRef} type="button"><HugeiconsIcon aria-hidden icon={Calendar03Icon} strokeWidth={2} /><span>Даты</span></button>}
-      headingSubline={datePeriod ? <span className="astryx-feed-period-chip">{feedDatePeriodLabel(datePeriod)}<button aria-label="Сбросить период дат" onClick={() => setDatePeriod(null)} type="button">×</button></span> : null}
+      headingSubline={effectiveDatePeriod ? <span className="astryx-feed-period-chip">{feedDatePeriodLabel(effectiveDatePeriod)}<button aria-label="Сбросить период дат" onClick={() => setDatePeriod(null)} type="button">×</button></span> : null}
       header={multiChild ? selectedChild
         ? <ChildPageHeader child={selectedChild} enabled={childAvatarsEnabled} familyId={familyId} familyTimezone={familyTimezone} membershipEpoch={membershipEpoch} onAllFamilies={onAllFamilies} onOpenSettings={onOpenSettings} transport={transport} />
         : <FamilyHeaderV2 childList={childList} familyName={familyName} mode="feed" onAllFamilies={onAllFamilies} onOpenSettings={onOpenSettings} onSelectChild={selectChildFilter} renderChildAvatar={(item) => <FamilyChildAvatar child={item} enabled={childAvatarsEnabled} familyId={familyId} membershipEpoch={membershipEpoch} transport={transport} />} theme={theme} />
         : undefined}
-      showUnreadCountInMode={activeChildFilter === null && datePeriod === null}
+      showUnreadCountInMode={activeChildFilter === null && effectiveDatePeriod === null}
       renderSubheader={multiChild ? () => <>
         <ChildFilterChips chips={childFilterChips(childList, showUntagged)} onChange={selectChildFilter} value={activeChildFilter} />
         {selectedChild ? <ChildAlbumsStrip accountId={accountId} active={active && isAppBootstrapped} child={selectedChild} familyId={familyId} key={selectedChild.id} membershipEpoch={membershipEpoch ?? 0} onChildMissing={onChildFilterMissing ? () => onChildFilterMissingRef.current?.(selectedChild.id) : undefined} onOpenAlbum={onOpenAlbum} role={role} transport={transport} /> : null}
@@ -452,7 +456,7 @@ export function FeedPage({
       {newAvailable ? <div className="feed-new-available" role="status"><div><Typography as="span" variant="bodySm">Есть новые воспоминания</Typography>{refreshError ? <Typography as="p" role="alert" variant="bodySm">Не удалось обновить ленту. Повторите попытку.</Typography> : null}</div><Button onClick={() => { if (unreadOnly) { pendingNewRefresh.current = true; setUnreadOnly(false); setNewAvailableFor(null); return } void refreshFromTop(feed.refetch, knownFirstId, () => currentScope.current === feedScope, () => setNewAvailableFor(null)).then((success) => { if (currentScope.current === feedScope) setRefreshErrorFor(success ? null : feedScope) }) }} type="button">Показать новые</Button></div> : null}
       {!isAppBootstrapped || feed.isPending || missingFilterChildId ? <FeedSkeleton /> : null}
       {!missingFilterChildId && shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
-      {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? datePeriod
+      {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? effectiveDatePeriod
         ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">За этот период записей нет</Typography><Button onClick={() => setDatePeriod(null)} type="button" variant="outline">Показать всю ленту</Button></div>
         : unreadOnly
         ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">Все новые воспоминания просмотрены</Typography><Typography as="p" variant="memoryBody">Новых воспоминаний пока нет.</Typography></div>
@@ -506,7 +510,7 @@ export function FeedPage({
       {active && tagsMemory && canEditChildTags(role, childList, tagsMemory) ? <MemoryChildTagsEditor accountId={accountId} childOptions={childList} key={tagsMemory.id} memory={tagsMemory} onClose={() => setTagsMemory(null)} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
       {commentsOpen && currentCommentsSelection ? <CommentsPanel familyTimezone={familyTimezone} hostBridge={hostBridge} onClose={() => setCommentsSelection(null)} open scope={currentCommentsSelection} transport={transport} returnFocusRef={detailReturnFocusRef} hostInsets={insets} /> : null}
     </FeedPresentation>
-    <DatePeriodSheet active={active} familyTimezone={familyTimezone} key={dateSheetOpen ? JSON.stringify(datePeriod) : 'closed'} onApply={setDatePeriod} onOpenChange={setDateSheetOpen} open={dateSheetOpen} period={datePeriod} returnFocusRef={dateButtonRef} />
+    <DatePeriodSheet active={active} familyTimezone={familyTimezone} key={dateSheetOpen ? JSON.stringify(effectiveDatePeriod) : 'closed'} onApply={setDatePeriod} onOpenChange={setDateSheetOpen} open={dateSheetOpen} period={effectiveDatePeriod} returnFocusRef={dateButtonRef} />
     <AddSheetPresentation
       hostBridge={hostBridge}
       onNote={() => { const next = composerModeForAdd('note', childId); if (next) setComposer(next) }}

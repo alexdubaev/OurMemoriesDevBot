@@ -28,6 +28,15 @@ export function feedDateBounds(period: FeedDatePeriod, timezone: string): FeedDa
   return { occurredFrom, occurredBefore }
 }
 
+export function feedDateBoundsForTimezone(period: FeedDatePeriod, timezone: string): FeedDateBounds | null {
+  try {
+    return feedDateBounds(period, timezone)
+  } catch (error) {
+    if (period.mode === 'day' && error instanceof RangeError) return null
+    throw error
+  }
+}
+
 export function isCivilDateAvailable(date: string, timezone: string) {
   try {
     feedDateBounds({ mode: 'day', date }, timezone)
