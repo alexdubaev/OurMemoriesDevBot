@@ -64,6 +64,8 @@ export class MemoryService {
       childId: query.childId ?? null,
       kind: query.kind ?? null,
       untagged: query.untagged === true,
+      occurredFrom: query.occurredFrom ? new Date(query.occurredFrom).toISOString() : null,
+      occurredBefore: query.occurredBefore ? new Date(query.occurredBefore).toISOString() : null,
     }
     const now = this.now()
     if (query.unreadOnly === true) {

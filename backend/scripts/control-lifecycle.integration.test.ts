@@ -591,6 +591,8 @@ describe('Control account lifecycle', () => {
   })
 
   test('replays the exact result without extending the deadline and rejects a stale cycle', async () => {
+    const [{ fixtureNow }] = await prisma.$queryRaw<[{ fixtureNow: Date }]>`SELECT clock_timestamp() AS "fixtureNow"`
+    const daysAgo = (days: number) => new Date(fixtureNow.getTime() - days * 24 * 60 * 60 * 1000)
     const preview = await previewUserDeletion(prisma, targetId, protectedIds)
     const command = {
       actorId, targetId, protectedIds,
@@ -598,8 +600,8 @@ describe('Control account lifecycle', () => {
       fingerprint: preview.fingerprint,
       confirmation: targetId,
     }
-    const first = await trashControlUser(prisma, command, new Date('2026-10-25T12:00:00Z'))
-    const replay = await trashControlUser(prisma, command, new Date('2026-10-26T12:00:00Z'))
+    const first = await trashControlUser(prisma, command, daysAgo(4))
+    const replay = await trashControlUser(prisma, command, daysAgo(3))
     expect(replay).toEqual(first)
     expect(await prisma.controlUserDeletion.count({ where: { targetUserId: targetId } })).toBe(1)
 
@@ -607,19 +609,19 @@ describe('Control account lifecycle', () => {
       actorId, targetId, protectedIds,
       key: '70000000-0000-4000-8000-000000000107',
       deletionId: first.deletionId,
-    })
+    }, daysAgo(2))
     const secondPreview = await previewUserDeletion(prisma, targetId, protectedIds)
     const second = await trashControlUser(prisma, {
       ...command,
       key: '70000000-0000-4000-8000-000000000108',
       fingerprint: secondPreview.fingerprint,
-    })
+    }, daysAgo(1))
     expect(second.deletionId).not.toBe(first.deletionId)
     await expect(restoreControlUser(prisma, {
       actorId, targetId, protectedIds,
       key: '70000000-0000-4000-8000-000000000109',
       deletionId: first.deletionId,
-    })).rejects.toMatchObject({ code: 'stale_deletion_cycle' })
+    }, fixtureNow)).rejects.toMatchObject({ code: 'stale_deletion_cycle' })
   })
 
   test('database fences old-runtime sessions, membership reactivation and owned-family creation', async () => {

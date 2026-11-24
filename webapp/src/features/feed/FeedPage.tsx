@@ -46,6 +46,10 @@ import { maxVideoPosterPath, maxVideoPosterReadinessCache, maxVideoPosterReadine
 import { hasPendingPrivateVideo, selectPendingPrivateVideoIds } from './pending-video-selection'
 import { MemoryDeleteSpotlight } from './MemoryDeleteSpotlight'
 import { useMemorySeenObserver } from './use-memory-seen-observer'
+import { DatePeriodSheet } from './DatePeriodSheet'
+import { feedDateBoundsForTimezone, feedDatePeriodLabel, type FeedDatePeriod } from './date-period'
+import { HugeiconsIcon } from '@hugeicons/react'
+import { Calendar03Icon } from '@hugeicons/core-free-icons'
 import { mediaCardSeenReady } from './seen-visibility'
 import { VideoPlaybackControls } from './video-presentation'
 import { FeedAuthorAvatar, FeedSharedAuthorAvatars } from './shared-author-avatars'
@@ -138,13 +142,24 @@ export function FeedPage({
   const displayedChildAvatarUrl = childAvatarUrl ?? null
   const displayedChildAvatarStatus = childAvatarStatus ?? (displayedChildAvatarUrl ? 'ready' : 'absent')
   const [unreadOnly, setUnreadOnly] = useState(false)
+  const [dateSheetOpen, setDateSheetOpen] = useState(false)
+  const [dateSelection, setDateSelection] = useState<{ timezone: string; period: FeedDatePeriod | null }>({ timezone: familyTimezone, period: null })
+  if (dateSelection.timezone !== familyTimezone) {
+    const period = dateSelection.period && feedDateBoundsForTimezone(dateSelection.period, familyTimezone) ? dateSelection.period : null
+    setDateSelection({ timezone: familyTimezone, period })
+  }
+  const datePeriod = dateSelection.period
+  const setDatePeriod = (period: FeedDatePeriod | null) => setDateSelection({ timezone: familyTimezone, period })
+  const dateButtonRef = useRef<HTMLButtonElement | null>(null)
+  const dateBounds = useMemo(() => datePeriod ? feedDateBoundsForTimezone(datePeriod, familyTimezone) : null, [datePeriod, familyTimezone])
+  const effectiveDatePeriod = dateBounds ? datePeriod : null
   const [unreadCycle, setUnreadCycle] = useState(0)
   const { theme } = useMemolyTheme()
   const childList = useMemo(() => childProfiles ?? [], [childProfiles])
   const multiChild = childList.length >= 2
   const activeChildFilter = normalizeChildFilter(childFilter, childList, { allowUntagged: role === 'full' })
   const selectedChild = activeChildFilter && activeChildFilter !== UNTAGGED_CHILD_FILTER ? childList.find((item) => item.id === activeChildFilter) : undefined
-  const feed = useFeedQuery(transport, familyId, 'all', unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0, active, activeChildFilter)
+  const feed = useFeedQuery(transport, familyId, 'all', unreadOnly, accountId, membershipEpoch ?? 0, unreadOnly ? unreadCycle : 0, active, activeChildFilter, true, dateBounds)
   // Shares its key with the «Без отметки» list: the chip shows only while untagged memories exist.
   const untaggedProbe = useFeedQuery(transport, familyId, 'all', false, accountId, membershipEpoch ?? 0, 0, active, UNTAGGED_CHILD_FILTER, active && multiChild && role === 'full')
   const showUntagged = multiChild && role === 'full' && ((untaggedProbe.data?.pages[0]?.items.length ?? 0) > 0 || activeChildFilter === UNTAGGED_CHILD_FILTER)
@@ -170,9 +185,9 @@ export function FeedPage({
   const [composer, setComposer] = useState<ComposerMode | null>(maxVideoUploadAcceptance ? 'video' : null)
   const [editingMemory, setEditingMemory] = useState<MemoryDto | null>(null)
   const [tagsMemory, setTagsMemory] = useState<MemoryDto | null>(null)
-  const registerSeenContent = useMemorySeenObserver(active && Boolean(onSeenCandidate && membershipEpoch && unreadState !== 'not_enabled'), Boolean(detail || mixedViewer || addSheetOpen || actionsMemory || tagsMemory || deleteTarget || commentsSelection), (id) => onSeenCandidate?.(id))
+  const registerSeenContent = useMemorySeenObserver(active && Boolean(onSeenCandidate && membershipEpoch && unreadState !== 'not_enabled'), Boolean(detail || mixedViewer || addSheetOpen || actionsMemory || tagsMemory || deleteTarget || commentsSelection || dateSheetOpen), (id) => onSeenCandidate?.(id))
   const addButtonRef = useRef<HTMLButtonElement | null>(null)
-  const feedScope = useMemo(() => ({ familyId, filter: 'all' as const, unreadOnly, unreadCycle, childFilter: activeChildFilter }), [familyId, unreadOnly, unreadCycle, activeChildFilter])
+  const feedScope = useMemo(() => ({ familyId, filter: 'all' as const, unreadOnly, unreadCycle, childFilter: activeChildFilter, dateBounds }), [familyId, unreadOnly, unreadCycle, activeChildFilter, dateBounds])
   const [newAvailableFor, setNewAvailableFor] = useState<typeof feedScope | null>(null)
   const [refreshErrorFor, setRefreshErrorFor] = useState<typeof feedScope | null>(null)
   const newAvailable = newAvailableFor === feedScope
@@ -252,7 +267,7 @@ export function FeedPage({
 
   useEffect(() => {
     knownFirstId.current = null
-  }, [familyId, accountId, membershipEpoch, activeChildFilter])
+  }, [familyId, accountId, membershipEpoch, activeChildFilter, dateBounds])
 
   useEffect(() => {
     // Reset transient selection when its private route scope changes.
@@ -295,7 +310,7 @@ export function FeedPage({
       if (!shouldCheckForNew({ checking, hidden: document.hidden })) return
       checking = true
       try {
-        const latest = await loadFeed(transport, familyId, 'all', null, undefined, false, activeChildFilter)
+        const latest = await loadFeed(transport, familyId, 'all', null, undefined, false, activeChildFilter, dateBounds)
         if (disposed) return
         const latestFirstId = latest.items[0]?.id ?? null
         if (unreadOnly && knownFirstId.current === null) {
@@ -324,7 +339,7 @@ export function FeedPage({
     const timer = window.setInterval(() => { void checkForNew() }, 15_000)
     document.addEventListener('visibilitychange', onVisibility)
     return () => { disposed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
-  }, [active, activeChildFilter, familyId, feedScope, refetch, transport, unreadOnly])
+  }, [active, activeChildFilter, dateBounds, familyId, feedScope, refetch, transport, unreadOnly])
 
   useEffect(() => {
     if (active) return
@@ -342,6 +357,7 @@ export function FeedPage({
     setDeleteTarget(null)
     setDeleteTargetIndex(null)
     setDeleteError(null)
+    setDateSheetOpen(false)
   }, [active])
 
   const closeMixedViewer = () => {
@@ -365,7 +381,7 @@ export function FeedPage({
 
   const closeComposerAfterRefresh = async () => {
     // A new memory can land in several child lists and in «Без отметки»; refresh every list of this family.
-    try { await (multiChild ? queryClient.invalidateQueries({ predicate: (query) => isFeedListKey(query.queryKey, familyId) }) : refetch()) } finally { setComposer(null); setEditingMemory(null) }
+    try { await queryClient.invalidateQueries({ predicate: (query) => isFeedListKey(query.queryKey, familyId) }) } finally { setComposer(null); setEditingMemory(null) }
   }
   const selectChildFilter = (next: ChildFilter) => {
     if (next === activeChildFilter) return
@@ -395,6 +411,11 @@ export function FeedPage({
     return hostBridge.onBack(() => setActionsMemory(null))
   }, [active, actionsMemory, hostBridge])
 
+  useEffect(() => {
+    if (!active || !dateSheetOpen) return undefined
+    return hostBridge.onBack(() => setDateSheetOpen(false))
+  }, [active, dateSheetOpen, hostBridge])
+
   if (active && composer === 'video' && childId) {
     return <VideoComposer childId={childId} childOptions={composerChildOptions} initialChildIds={composerInitialChildren} familyId={familyId} familyTimezone={familyTimezone} onCancel={() => { setComposer(null); onMaxVideoLaunchHandled?.() }} onSuccess={async () => { await closeComposerAfterRefresh(); onMaxVideoLaunchHandled?.() }} transport={transport} />
   }
@@ -417,11 +438,13 @@ export function FeedPage({
     <FeedSharedAuthorAvatars authors={visibleItems.map((memory) => ({ id: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.id, path: memory.publicationAttribution?.kind === 'channel' ? null : memory.author.avatarPath }))} enabled={active && isAppBootstrapped && !feed.isPending && visibleItems.length > 0} familyId={familyId} membershipEpoch={membershipEpoch ?? 0} transport={transport} userId={accountId}>
     <MediaPlaybackCoordinator active={active && !commentsOpen}>
     <FeedPresentation activeFilter="all"
+      headingAction={<button aria-label="Даты" className="astryx-feed-dates" onClick={() => setDateSheetOpen(true)} ref={dateButtonRef} type="button"><HugeiconsIcon aria-hidden icon={Calendar03Icon} strokeWidth={2} /><Typography as="span" variant="body">Даты</Typography></button>}
+      headingSubline={effectiveDatePeriod ? <span className="astryx-feed-period-chip"><Typography as="span" variant="memoryCaption">{feedDatePeriodLabel(effectiveDatePeriod)}</Typography><button aria-label="Сбросить период дат" onClick={() => setDatePeriod(null)} type="button"><Typography as="span" variant="body">×</Typography></button></span> : null}
       header={multiChild ? selectedChild
         ? <ChildPageHeader child={selectedChild} enabled={childAvatarsEnabled} familyId={familyId} familyTimezone={familyTimezone} membershipEpoch={membershipEpoch} onAllFamilies={onAllFamilies} onOpenSettings={onOpenSettings} transport={transport} />
         : <FamilyHeaderV2 childList={childList} familyName={familyName} mode="feed" onAllFamilies={onAllFamilies} onOpenSettings={onOpenSettings} onSelectChild={selectChildFilter} renderChildAvatar={(item) => <FamilyChildAvatar child={item} enabled={childAvatarsEnabled} familyId={familyId} membershipEpoch={membershipEpoch} transport={transport} />} theme={theme} />
         : undefined}
-      showUnreadCountInMode={activeChildFilter === null}
+      showUnreadCountInMode={activeChildFilter === null && effectiveDatePeriod === null}
       renderSubheader={multiChild ? () => <>
         <ChildFilterChips chips={childFilterChips(childList, showUntagged)} onChange={selectChildFilter} value={activeChildFilter} />
         {selectedChild ? <ChildAlbumsStrip accountId={accountId} active={active && isAppBootstrapped} child={selectedChild} familyId={familyId} key={selectedChild.id} membershipEpoch={membershipEpoch ?? 0} onChildMissing={onChildFilterMissing ? () => onChildFilterMissingRef.current?.(selectedChild.id) : undefined} onOpenAlbum={onOpenAlbum} role={role} transport={transport} /> : null}
@@ -436,7 +459,9 @@ export function FeedPage({
       {newAvailable ? <div className="feed-new-available" role="status"><div><Typography as="span" variant="bodySm">Есть новые воспоминания</Typography>{refreshError ? <Typography as="p" role="alert" variant="bodySm">Не удалось обновить ленту. Повторите попытку.</Typography> : null}</div><Button onClick={() => { if (unreadOnly) { pendingNewRefresh.current = true; setUnreadOnly(false); setNewAvailableFor(null); return } void refreshFromTop(feed.refetch, knownFirstId, () => currentScope.current === feedScope, () => setNewAvailableFor(null)).then((success) => { if (currentScope.current === feedScope) setRefreshErrorFor(success ? null : feedScope) }) }} type="button">Показать новые</Button></div> : null}
       {!isAppBootstrapped || feed.isPending || missingFilterChildId ? <FeedSkeleton /> : null}
       {!missingFilterChildId && shouldRenderInitialFeedError({ isAppBootstrapped, isFeedError: feed.isError, isFeedPending: feed.isPending, itemCount: items.length }) ? <InlineError onRetry={() => void feed.refetch()} /> : null}
-      {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? unreadOnly
+      {isAppBootstrapped && !feed.isPending && !feed.isError && visibleItems.length === 0 ? effectiveDatePeriod
+        ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">За этот период записей нет</Typography><Button onClick={() => setDatePeriod(null)} type="button" variant="outline"><Typography as="span" variant="memoryButton">Показать всю ленту</Typography></Button></div>
+        : unreadOnly
         ? <div className="feed-unread-empty" role="status"><Typography as="h2" variant="memoryEmptyTitle">Все новые воспоминания просмотрены</Typography><Typography as="p" variant="memoryBody">Новых воспоминаний пока нет.</Typography></div>
         : activeChildFilter ? <ChildFeedEmpty childName={selectedChild?.name} onAdd={role === 'full' && selectedChild ? () => setAddSheetOpen(true) : undefined} onShowAll={() => selectChildFilter(null)} />
         : <EmptyState filtered={false} mode={role} onResetFilter={() => onFilterChange('all')} /> : null}
@@ -488,6 +513,7 @@ export function FeedPage({
       {active && tagsMemory && canEditChildTags(role, childList, tagsMemory) ? <MemoryChildTagsEditor accountId={accountId} childOptions={childList} key={tagsMemory.id} memory={tagsMemory} onClose={() => setTagsMemory(null)} returnFocusRef={detailReturnFocusRef} transport={transport} /> : null}
       {commentsOpen && currentCommentsSelection ? <CommentsPanel familyTimezone={familyTimezone} hostBridge={hostBridge} onClose={() => setCommentsSelection(null)} open scope={currentCommentsSelection} transport={transport} returnFocusRef={detailReturnFocusRef} hostInsets={insets} /> : null}
     </FeedPresentation>
+    <DatePeriodSheet active={active} familyTimezone={familyTimezone} key={dateSheetOpen ? JSON.stringify(effectiveDatePeriod) : 'closed'} onApply={setDatePeriod} onOpenChange={setDateSheetOpen} open={dateSheetOpen} period={effectiveDatePeriod} returnFocusRef={dateButtonRef} />
     <AddSheetPresentation
       hostBridge={hostBridge}
       onNote={() => { const next = composerModeForAdd('note', childId); if (next) setComposer(next) }}

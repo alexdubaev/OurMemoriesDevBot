@@ -19,6 +19,14 @@ import {
 const childId = '018f01d8-0c2a-7c25-bf83-ae68985c7e90'
 
 describe('memory contracts', () => {
+  test('memory list date bounds are paired and ordered', () => {
+    const valid = { occurredFrom: '2026-03-01T00:00:00.000Z', occurredBefore: '2026-04-01T00:00:00.000Z' }
+    expect(listMemoriesQuerySchema.parse(valid)).toMatchObject(valid)
+    expect(listMemoriesQuerySchema.safeParse({ occurredFrom: valid.occurredFrom }).success).toBe(false)
+    expect(listMemoriesQuerySchema.safeParse({ ...valid, occurredBefore: valid.occurredFrom }).success).toBe(false)
+    expect(listMemoriesQuerySchema.safeParse({ ...valid, occurredBefore: '2026-02-01T00:00:00.000Z' }).success).toBe(false)
+    expect(listMemoriesQuerySchema.safeParse({ occurredFrom: '2026-03-01T02:00:00+02:00', occurredBefore: valid.occurredBefore }).success).toBe(false)
+  })
   test('MAX readiness survives JSON and enforces retry semantics', () => {
     for (const state of ['processing', 'ready', 'unavailable', 'unknown'] as const) {
       const recheckable = state === 'processing' || state === 'unknown'

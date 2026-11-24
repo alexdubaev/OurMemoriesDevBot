@@ -952,6 +952,27 @@ test('mobile glass navigation can return to classic from Appearance', async ({ p
   await expect(canvas).toHaveCount(0)
 })
 
+test('mobile feed applies and clears a family timezone date period', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 })
+  await page.goto('/e2e/selected-family-app.harness.html?albums=6&feedPhotos')
+  await page.getByRole('button', { name: 'Даты' }).click()
+  await expect(page.getByRole('dialog', { name: 'Даты в ленте' })).toBeVisible()
+  await page.getByRole('tab', { name: 'День' }).click()
+  await expect(page.getByRole('grid', { name: /^[а-яё]+\s+\d{4}$/i })).toBeVisible()
+  await page.getByRole('tab', { name: 'Месяц', exact: true }).click()
+  await page.getByRole('spinbutton', { name: 'Год' }).fill('2024')
+  await page.getByRole('tabpanel', { name: 'Месяц' }).getByRole('combobox', { name: 'Месяц' }).selectOption('12')
+  await page.getByRole('button', { name: 'Показать', exact: true }).click()
+  await expect(page.getByText('декабрь 2024', { exact: false })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => {
+    const calls = (window as typeof window & { __selectedFamilyMemoryQueries: string[] }).__selectedFamilyMemoryQueries
+    return calls.some((path) => path.includes('occurredFrom=2024-11-30T21%3A00%3A00.000Z') && path.includes('occurredBefore=2024-12-31T21%3A00%3A00.000Z'))
+  })).toBe(true)
+  await page.getByRole('button', { name: 'Сбросить период дат' }).click()
+  await expect(page.locator('.astryx-feed-period')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Даты' })).toBeVisible()
+})
+
 test('mobile glass navigation still follows the selected tab without WebGL', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 740 })
   await page.addInitScript(() => {
