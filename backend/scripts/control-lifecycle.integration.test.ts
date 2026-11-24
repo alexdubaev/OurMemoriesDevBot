@@ -607,19 +607,19 @@ describe('Control account lifecycle', () => {
       actorId, targetId, protectedIds,
       key: '70000000-0000-4000-8000-000000000107',
       deletionId: first.deletionId,
-    })
+    }, new Date('2026-10-27T12:00:00Z'))
     const secondPreview = await previewUserDeletion(prisma, targetId, protectedIds)
     const second = await trashControlUser(prisma, {
       ...command,
       key: '70000000-0000-4000-8000-000000000108',
       fingerprint: secondPreview.fingerprint,
-    })
+    }, new Date('2026-10-28T12:00:00Z'))
     expect(second.deletionId).not.toBe(first.deletionId)
     await expect(restoreControlUser(prisma, {
       actorId, targetId, protectedIds,
       key: '70000000-0000-4000-8000-000000000109',
       deletionId: first.deletionId,
-    })).rejects.toMatchObject({ code: 'stale_deletion_cycle' })
+    }, new Date('2026-10-29T12:00:00Z'))).rejects.toMatchObject({ code: 'stale_deletion_cycle' })
   })
 
   test('database fences old-runtime sessions, membership reactivation and owned-family creation', async () => {
