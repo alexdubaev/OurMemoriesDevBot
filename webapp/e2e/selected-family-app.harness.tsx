@@ -65,6 +65,7 @@ syncPrivateMediaAccessToken('synthetic-selected-family-token', userId)
 
 const timeline: Array<{ stage: string; at: number; url?: string; cacheHit?: boolean; duration?: number }> = []
 const rawPaths: string[] = []
+const memoryQueries: string[] = []
 const nativeIdbGet = IDBObjectStore.prototype.get
 IDBObjectStore.prototype.get = function (query: IDBValidKey | IDBKeyRange) {
   const request = nativeIdbGet.call(this, query)
@@ -90,6 +91,7 @@ HTMLImageElement.prototype.decode = function () {
 Object.assign(window, {
   __selectedFamilyAvatarTimeline: timeline,
   __selectedFamilyRawPaths: rawPaths,
+  __selectedFamilyMemoryQueries: memoryQueries,
   __selectedFamilyAvatarRequests: [] as number[],
   __selectedFamilyLiveBlobCount: () => liveBlobUrls.size,
   __selectedFamilyIsBlobLive: (url: string) => liveBlobUrls.has(url),
@@ -186,6 +188,7 @@ const transport = {
       return schema.parse({ gift: currentGift })
     }
     if (path.startsWith(`/api/v1/families/${familyId}/memories`) || path.startsWith(`/api/v1/families/${secondFamilyId}/memories`)) {
+      memoryQueries.push(path)
       const items = !path.includes(familyId) ? [] : params.has('feedPhotos') ? albums?.feedMemories ?? [] : params.has('channelMemory') ? [syntheticChannelMemory()] : []
       return schema.parse({ items, nextCursor: null })
     }

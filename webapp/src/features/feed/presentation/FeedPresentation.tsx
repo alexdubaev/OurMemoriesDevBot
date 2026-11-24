@@ -56,6 +56,8 @@ export type FeedPresentationProps = {
   renderSubheader?: () => ReactNode
   /** Whether the family-wide unread count describes the current list. */
   showUnreadCountInMode?: boolean
+  headingAction?: ReactNode
+  headingSubline?: ReactNode
 }
 
 export function FeedPresentation(props: FeedPresentationProps) {
@@ -71,7 +73,11 @@ export function FeedPresentation(props: FeedPresentationProps) {
   return (
     <div data-memoly-feed="true" style={style}>
       <main className="app astryx-feed" data-slot="feed-scroll">
-        <Typography as="h1" className="astryx-feed-title" variant="memoryScreen">Лента воспоминаний</Typography>
+        <div className="astryx-feed-heading">
+          <Typography as="h1" className="astryx-feed-title" variant="memoryScreen">Лента воспоминаний</Typography>
+          {props.headingAction}
+        </div>
+        {props.headingSubline ? <div className="astryx-feed-period">{props.headingSubline}</div> : null}
         <div className="astryx-feed-identity">
         {props.header ?? <ChildHeader childAvatarCrop={props.childAvatarCrop ?? null} childAvatarStatus={props.childAvatarStatus} childAvatarUrl={props.childAvatarUrl ?? null} childName={props.childName} childSubtitle={props.childSubtitle} mode="feed" onAllFamilies={props.onAllFamilies} onOpenChild={props.onOpenChild} onOpenSettings={props.onOpenSettings} theme={theme} />}
         </div>

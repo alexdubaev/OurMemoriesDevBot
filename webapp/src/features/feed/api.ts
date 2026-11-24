@@ -15,6 +15,7 @@ import {
 
 import type { AuthenticatedTransport } from '@/platform/api'
 import type { FeedFilter } from './presentation'
+import type { FeedDateBounds } from './date-period'
 import { UNTAGGED_CHILD_FILTER, type ChildFilter } from './child-filter'
 
 /** Child tags ride along only when the client asks; old clients keep the strict old DTO. */
@@ -28,6 +29,7 @@ export function loadFeed(
   signal?: AbortSignal,
   unreadOnly = false,
   childFilter: ChildFilter = null,
+  dateBounds: FeedDateBounds | null = null,
 ): Promise<MemoryPage> {
   const query = new URLSearchParams({ limit: '20' })
   if (filter !== 'all') query.set('kind', filter)
@@ -35,6 +37,7 @@ export function loadFeed(
   if (unreadOnly) query.set('unreadOnly', 'true')
   if (childFilter === UNTAGGED_CHILD_FILTER) query.set('untagged', 'true')
   else if (childFilter) query.set('childId', childFilter)
+  if (dateBounds) { query.set('occurredFrom', dateBounds.occurredFrom); query.set('occurredBefore', dateBounds.occurredBefore) }
   return transport.request(
     `/api/v1/families/${encodeURIComponent(familyId)}/memories?${query.toString()}`,
     memoryPageSchema,

@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { MemoryKind } from '@web-app-demo/contracts'
 
 /** `childId`: memories with any tag of that child; `untagged`: memories without a single tag. */
-export type MemoryCursorFilters = { childId: string | null; kind: MemoryKind | null; untagged: boolean }
+export type MemoryCursorFilters = { childId: string | null; kind: MemoryKind | null; untagged: boolean; occurredFrom: string | null; occurredBefore: string | null }
 export type MemoryCursorPosition = { occurredAt: string; id: string }
 export type MemoryCursorClaims = {
   version: 2
@@ -96,12 +96,14 @@ export class MemoryCursorError extends Error {
 }
 
 function sameFilters(left: MemoryCursorFilters, right: MemoryCursorFilters) {
-  return left.childId === right.childId && left.kind === right.kind && left.untagged === right.untagged
+  return left.childId === right.childId && left.kind === right.kind && left.untagged === right.untagged &&
+    (left.occurredFrom ?? null) === (right.occurredFrom ?? null) && (left.occurredBefore ?? null) === (right.occurredBefore ?? null)
 }
 
 /** Cursors issued before the untagged filter existed carry no `untagged` and mean "not untagged". */
 function withNormalizedFilters<Claims extends { filters: MemoryCursorFilters }>(claims: Claims): Claims {
-  return { ...claims, filters: { ...claims.filters, untagged: claims.filters.untagged === true } }
+  return { ...claims, filters: { ...claims.filters, untagged: claims.filters.untagged === true,
+    occurredFrom: claims.filters.occurredFrom ?? null, occurredBefore: claims.filters.occurredBefore ?? null } }
 }
 
 function sign(payload: string, secret: string, domain = 'memory-feed-v2') {
@@ -146,6 +148,8 @@ function isFilters(value: unknown): value is MemoryCursorFilters {
   const filters = value as Partial<MemoryCursorFilters>
   return (filters.childId === null || typeof filters.childId === 'string') &&
     (filters.untagged === undefined || typeof filters.untagged === 'boolean') &&
+    (filters.occurredFrom === undefined || filters.occurredFrom === null || (typeof filters.occurredFrom === 'string' && !Number.isNaN(Date.parse(filters.occurredFrom)))) &&
+    (filters.occurredBefore === undefined || filters.occurredBefore === null || (typeof filters.occurredBefore === 'string' && !Number.isNaN(Date.parse(filters.occurredBefore)))) &&
     (filters.kind === null || filters.kind === 'note' || filters.kind === 'photo' ||
       filters.kind === 'video' || filters.kind === 'voice')
 }

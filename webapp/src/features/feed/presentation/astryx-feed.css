@@ -1,20 +1,54 @@
 .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] > .astryx-feed {
   display: grid;
-  grid-template-areas: 'identity' 'heading' 'feed';
-  grid-template-rows: auto auto 1fr;
+  grid-template-areas: 'identity' 'heading' 'period' 'feed';
+  grid-template-rows: auto auto auto 1fr;
   width: min(100%, 720px);
   align-content: start;
 }
 
 .astryx-feed-identity { grid-area: identity; min-width: 0; }
-.astryx-feed > .astryx-feed-title {
+.astryx-feed-heading {
   grid-area: heading;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 20px max(16px, var(--host-inset-right, 0px)) 0 max(16px, var(--host-inset-left, 0px));
+  min-width: 0;
+}
+.astryx-feed > .astryx-feed-heading > .astryx-feed-title {
+  min-width: 0;
+  margin: 0;
   color: var(--astryx-text);
   font-size: 1.375rem;
   font-weight: 700;
   line-height: 1.25;
   letter-spacing: -.025em;
+}
+.astryx-feed-period { grid-area: period; min-width: 0; margin: 5px 16px 0; }
+.astryx-feed-period-chip { display: inline-flex; min-height: 32px; align-items: center; gap: 8px; border-radius: 999px; padding: 4px 10px; color: var(--astryx-accent); background: var(--astryx-accent-soft); font-size: .8125rem; }
+.astryx-feed-period-chip button { display: inline-grid; width: 24px; height: 24px; place-items: center; border: 0; border-radius: 50%; color: inherit; background: transparent; font-size: 1rem; }
+.astryx-feed-dates { display: inline-flex; min-width: 44px; min-height: 44px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid var(--astryx-line); border-radius: var(--astryx-radius-control); color: var(--astryx-accent); background: var(--astryx-surface); font: inherit; }
+.astryx-feed-dates svg { width: 18px; height: 18px; }
+.feed-date-sheet { display: grid; gap: 16px; padding: 16px 0 max(12px, env(safe-area-inset-bottom)); }
+body:has(.feed-date-sheet) [data-memoly-bottom-sheet='true'] > .memoly-bottom-sheet-body { max-height: calc(80dvh - 26px); overflow-y: auto; overscroll-behavior: contain; }
+.feed-date-tabs { gap: 16px; }
+.feed-date-modes { display: grid; width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 0; background: transparent; }
+.feed-date-modes [data-slot='tabs-trigger'] { min-width: 0; min-height: 42px; border: 0; border-radius: 12px; color: var(--astryx-text); background: var(--astryx-neutral); font: inherit; }
+.feed-date-modes [data-slot='tabs-trigger'][data-state='active'] { border: 1px solid var(--astryx-accent); color: var(--astryx-accent); background: var(--astryx-accent-soft); font-weight: 700; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--astryx-accent) 18%, transparent); }
+.feed-date-fields { display: flex; min-width: 0; flex: 1; gap: 8px; border: 0; padding: 0; }
+.feed-date-fields legend { margin-bottom: 8px; font-size: .875rem; font-weight: 600; }
+.feed-date-field { display: grid; min-width: 0; flex: 1; gap: 6px; font-size: .8125rem; }
+.feed-date-field :is(input, select) { width: 100%; min-height: 44px; border: 1px solid var(--astryx-line); border-radius: 12px; padding: 0 10px; color: var(--astryx-text); background: var(--astryx-surface); font: inherit; }
+.feed-date-range { display: grid; gap: 16px; }
+.feed-date-error { color: var(--destructive); }
+.feed-date-actions { position: sticky; z-index: 1; bottom: calc(-14px - var(--host-inset-bottom, 0px)); display: flex; justify-content: flex-end; gap: 8px; margin: 0 -14px; padding: 10px 14px calc(12px + var(--host-inset-bottom, 0px)); background: var(--memory-surface); box-shadow: 0 -8px 14px color-mix(in srgb, var(--memory-surface) 92%, transparent); }
+.feed-date-actions > button { min-height: 44px; }
+.feed-date-sheet [data-slot='calendar'] { margin-inline: auto; }
+@media (max-width: 380px) {
+  .astryx-feed-dates { width: 44px; padding-inline: 0; }
+  .astryx-feed-dates span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .astryx-feed > .astryx-feed-heading > .astryx-feed-title { font-size: 1.125rem; }
 }
 .astryx-feed > .feed-rest { grid-area: feed; min-width: 0; }
 
@@ -74,7 +108,8 @@
     gap: 16px;
     padding: calc(24px + var(--host-inset-top, 0px)) max(24px, var(--host-inset-right, 0px)) 32px max(24px, var(--host-inset-left, 0px));
   }
-  .astryx-feed > .astryx-feed-title { margin: 0; font-size: 1.75rem; }
+  .astryx-feed-heading { margin: 0; }
+  .astryx-feed > .astryx-feed-heading > .astryx-feed-title { font-size: 1.75rem; }
   .astryx-feed-identity > .ui-v2-child-header-frame { padding-top: 0; }
   .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .astryx-feed > .feed-rest { padding-inline: 0; }
   .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .astryx-feed .feed-child-chips,
@@ -90,7 +125,7 @@
     column-gap: 24px;
     padding-top: calc(32px + var(--host-inset-top, 0px));
   }
-  .astryx-feed > .astryx-feed-title { margin-bottom: 8px; }
+  .astryx-feed-heading { margin-bottom: 8px; }
   .astryx-feed-identity { align-self: start; }
   .memoly-app-root[data-ui-version='v2'] [data-memoly-feed] .astryx-feed .feed-content { padding-top: 0; }
 }

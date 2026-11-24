@@ -7,25 +7,26 @@ import { ApiRequestError, type AuthenticatedTransport } from '@/platform/api'
 import { sessionQueryKeys } from '@/features/auth'
 import type { FeedFilter } from './presentation'
 import type { ChildFilter } from './child-filter'
+import type { FeedDateBounds } from './date-period'
 import { deleteMemory, loadFeed, loadMemory, setMemoryReaction } from './api'
 import { MemoryReactionQueue, reactionCountsAfterChange } from './reaction-queue'
 
 export const feedQueryKeys = {
   all: [...sessionQueryKeys.all, 'feed'] as const,
   /** The child filter is last so the positional reaction/persistence checks keep their indexes. */
-  list: (familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0, childFilter: ChildFilter = null) =>
-    [...feedQueryKeys.all, familyId, filter, unreadOnly, accountId, membershipEpoch, cycle, childFilter] as const,
+  list: (familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0, childFilter: ChildFilter = null, dateBounds: FeedDateBounds | null = null) =>
+    [...feedQueryKeys.all, familyId, filter, unreadOnly, accountId, membershipEpoch, cycle, childFilter, ...(dateBounds ? [dateBounds.occurredFrom, dateBounds.occurredBefore] : [])] as const,
 }
 
 /** Feed list keys (any filter) under one family, as opposed to per-memory side queries. */
 export function isFeedListKey(key: readonly unknown[], familyId: string) {
-  return key[0] === 'session' && key[1] === 'feed' && key[2] === familyId && key.length === 9 && typeof key[4] === 'boolean'
+  return key[0] === 'session' && key[1] === 'feed' && key[2] === familyId && (key.length === 9 || key.length === 11) && typeof key[4] === 'boolean'
 }
 
-export function useFeedQuery(transport: AuthenticatedTransport, familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0, active = true, childFilter: ChildFilter = null, enabled = true) {
+export function useFeedQuery(transport: AuthenticatedTransport, familyId: string, filter: FeedFilter, unreadOnly = false, accountId = '', membershipEpoch = 0, cycle = 0, active = true, childFilter: ChildFilter = null, enabled = true, dateBounds: FeedDateBounds | null = null) {
   return useInfiniteQuery({
-    queryKey: feedQueryKeys.list(familyId, filter, unreadOnly, accountId, membershipEpoch, cycle, childFilter),
-    queryFn: ({ pageParam, signal }) => loadFeed(transport, familyId, filter, pageParam, signal, unreadOnly, childFilter),
+    queryKey: feedQueryKeys.list(familyId, filter, unreadOnly, accountId, membershipEpoch, cycle, childFilter, dateBounds),
+    queryFn: ({ pageParam, signal }) => loadFeed(transport, familyId, filter, pageParam, signal, unreadOnly, childFilter, dateBounds),
     enabled,
     retry: shouldRetryFeedQuery,
     initialPageParam: null as string | null,

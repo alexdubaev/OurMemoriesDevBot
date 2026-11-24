@@ -6,7 +6,7 @@ import { childFilterChips, composerInitialChildIds, missingChildFilterId, normal
 import { ApiRequestError } from '../src/platform/api'
 import { loadFeed } from '../src/features/feed/api'
 import { childAlbumsQueryKey, missingChildAlbumTemplates, orderChildAlbums } from '../src/features/feed/child-albums'
-import { feedQueryKeys, matchesReactionFeedScope, removeMemoryFromCachedFeeds, shouldRetryFeedQuery } from '../src/features/feed/queries'
+import { feedQueryKeys, isFeedListKey, matchesReactionFeedScope, removeMemoryFromCachedFeeds, shouldRetryFeedQuery } from '../src/features/feed/queries'
 import { isPersistableQueryKey, removePrivateFamilyQueries } from '../src/platform/persistence/private-cache'
 import type { AuthenticatedTransport } from '../src/platform/api'
 import type { HttpRequestOptions } from '../src/platform/api/http-client'
@@ -85,6 +85,13 @@ describe('composer preselection', () => {
 })
 
 describe('feed list keys with a child filter', () => {
+  test('date periods get isolated feed caches and are recognized for family invalidation', () => {
+    const bounds = { occurredFrom: '2026-03-01T00:00:00.000Z', occurredBefore: '2026-04-01T00:00:00.000Z' }
+    const key = feedQueryKeys.list(familyId, 'all', false, accountId, 3, 0, null, bounds)
+    expect(key.slice(-2)).toEqual([bounds.occurredFrom, bounds.occurredBefore])
+    expect(isFeedListKey(key, familyId)).toBe(true)
+    expect(isPersistableQueryKey(key)).toBe(false)
+  })
   test('the child filter is the last key element, so «Все» and a child have separate caches', () => {
     const all = feedQueryKeys.list(familyId, 'all', false, accountId, 3, 0, null)
     const lilyaKey = feedQueryKeys.list(familyId, 'all', false, accountId, 3, 0, lilya.id)
@@ -157,6 +164,18 @@ describe('feed request with a child filter', () => {
     expect(query(calls[0]!.path).has('childId')).toBe(false)
     expect(query(calls[1]!.path).has('childId')).toBe(false)
     expect(query(calls[1]!.path).has('untagged')).toBe(false)
+  })
+
+  test('period bounds are sent to normal and unread server requests', async () => {
+    const { calls, transport } = recordingTransport()
+    const bounds = { occurredFrom: '2026-03-01T00:00:00.000Z', occurredBefore: '2026-04-01T00:00:00.000Z' }
+    await loadFeed(transport, familyId, 'all', null, undefined, false, null, bounds)
+    await loadFeed(transport, familyId, 'all', null, undefined, true, null, bounds)
+    for (const call of calls) {
+      expect(query(call.path).get('occurredFrom')).toBe(bounds.occurredFrom)
+      expect(query(call.path).get('occurredBefore')).toBe(bounds.occurredBefore)
+    }
+    expect(query(calls[1]!.path).get('unreadOnly')).toBe('true')
   })
 })
 

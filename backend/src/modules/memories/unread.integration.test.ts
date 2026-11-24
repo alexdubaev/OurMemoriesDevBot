@@ -251,6 +251,27 @@ describe('personal unread memories', () => {
     expect(stale.body.error.code).toBe('VERSION_CONFLICT')
   })
 
+  test('unread archive pagination respects period bounds and rejects a cursor from another period', async () => {
+    const owner = await user('owner', '39130')
+    const viewer = await user('viewer', '39131')
+    const family = await createFamily(owner)
+    await invite(owner, viewer, family.id)
+    await activate(family.id)
+    const before = await note(owner, family, 'before', '2024-11-30T20:59:59.999Z')
+    const start = await note(owner, family, 'start', '2024-11-30T21:00:00.000Z')
+    const middle = await note(owner, family, 'middle', '2024-12-10T12:00:00.000Z')
+    const end = await note(owner, family, 'end', '2024-12-31T21:00:00.000Z')
+    const range = '&occurredFrom=2024-11-30T21%3A00%3A00.000Z&occurredBefore=2024-12-31T21%3A00%3A00.000Z'
+    const first = await api(viewer, `/families/${family.id}/memories?unreadOnly=true&limit=1${range}`, 'GET')
+    expect(first.body.items.map((item: { id: string }) => item.id)).toEqual([middle.body.id])
+    const next = await api(viewer, `/families/${family.id}/memories?unreadOnly=true&limit=1${range}&cursor=${encodeURIComponent(first.body.nextCursor)}`, 'GET')
+    expect(next.body.items.map((item: { id: string }) => item.id)).toEqual([start.body.id])
+    const wrongPeriod = await api(viewer, `/families/${family.id}/memories?unreadOnly=true&cursor=${encodeURIComponent(first.body.nextCursor)}&occurredFrom=2025-01-01T00%3A00%3A00.000Z&occurredBefore=2025-02-01T00%3A00%3A00.000Z`, 'GET')
+    expect(wrongPeriod.response.status).toBe(422)
+    expect((await api(viewer, `/families/${family.id}/memories?unreadOnly=true`, 'GET')).body.items.map((item: { id: string }) => item.id))
+      .toEqual([end.body.id, middle.body.id, start.body.id, before.body.id])
+  })
+
   test('unread cursor restarts after event-date edits across the page boundary in either direction', async () => {
     const owner = await user('owner', '39124')
     const viewer = await user('viewer', '39125')

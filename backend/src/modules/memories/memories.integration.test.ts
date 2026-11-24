@@ -393,6 +393,25 @@ describe('Memories API', () => {
       owner.token, 'GET', undefined)).response.status).toBe(422)
   })
 
+  test('filters archive pages by inclusive start and exclusive end and binds both bounds to cursors', async () => {
+    const owner = await admittedUser('Владелец', '35003')
+    const family = await createFamily(owner.token, 'Семья')
+    const familyId = family.body.family.id
+    const childId = family.body.child.id
+    const before = await createNote(owner.token, familyId, childId, 'До периода', Date.parse('2024-11-30T20:59:59.999Z'))
+    const start = await createNote(owner.token, familyId, childId, 'Начало периода', Date.parse('2024-11-30T21:00:00.000Z'))
+    const middle = await createNote(owner.token, familyId, childId, 'Продолжение периода', Date.parse('2024-12-10T12:00:00.000Z'))
+    const end = await createNote(owner.token, familyId, childId, 'Конец периода', Date.parse('2024-12-31T21:00:00.000Z'))
+    const from = '2024-11-30T21:00:00.000Z'; const until = '2024-12-31T21:00:00.000Z'
+    const first = await request(`/api/v1/families/${familyId}/memories?limit=1&occurredFrom=${encodeURIComponent(from)}&occurredBefore=${encodeURIComponent(until)}`, owner.token, 'GET', undefined)
+    expect(first.body.items.map((item: { id: string }) => item.id)).toEqual([middle.body.id])
+    const second = await request(`/api/v1/families/${familyId}/memories?limit=1&occurredFrom=${encodeURIComponent(from)}&occurredBefore=${encodeURIComponent(until)}&cursor=${encodeURIComponent(first.body.nextCursor)}`, owner.token, 'GET', undefined)
+    expect(second.body.items.map((item: { id: string }) => item.id)).toEqual([start.body.id])
+    expect((await request(`/api/v1/families/${familyId}/memories?limit=1&occurredFrom=2025-01-01T00%3A00%3A00.000Z&occurredBefore=2025-02-01T00%3A00%3A00.000Z&cursor=${encodeURIComponent(first.body.nextCursor)}`, owner.token, 'GET', undefined)).response.status).toBe(422)
+    const unfiltered = await request(`/api/v1/families/${familyId}/memories`, owner.token, 'GET', undefined)
+    expect(unfiltered.body.items.map((item: { id: string }) => item.id)).toEqual([end.body.id, middle.body.id, start.body.id, before.body.id])
+  })
+
   test('soft-deletes a memory without returning it again', async () => {
     const owner = await admittedUser('Владелец', '36001')
     const family = await createFamily(owner.token, 'Семья')

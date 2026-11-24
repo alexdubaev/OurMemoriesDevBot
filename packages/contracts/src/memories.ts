@@ -67,6 +67,8 @@ export const updateMemoryRequestSchema = z.object({
 export const listMemoriesQuerySchema = z.object({
   childId: uuid.optional(),
   kind: memoryKindSchema.optional(),
+  occurredFrom: occurredAtSchema.optional(),
+  occurredBefore: occurredAtSchema.optional(),
   cursor: z.string().min(1).max(2_048).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
   unreadOnly: z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
@@ -74,6 +76,10 @@ export const listMemoriesQuerySchema = z.object({
   untagged: z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
 }).strict().refine((query) => !(query.untagged && query.childId), {
   message: 'Нельзя одновременно выбрать ребёнка и «Без отметки»', path: ['untagged'],
+}).refine((query) => (query.occurredFrom === undefined) === (query.occurredBefore === undefined), {
+  message: 'Обе границы периода обязательны', path: ['occurredBefore'],
+}).refine((query) => query.occurredFrom === undefined || new Date(query.occurredFrom) < new Date(query.occurredBefore!), {
+  message: 'Начало периода должно быть раньше конца', path: ['occurredBefore'],
 })
 
 /** One child tag: `attachmentId = null` tags the whole publication, otherwise one attachment. */
