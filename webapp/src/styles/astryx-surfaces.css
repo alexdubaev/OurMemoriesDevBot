@@ -257,3 +257,37 @@ html[data-ui-version='v2'] [data-slot='drawer-overlay']:has(+ [data-memoly-botto
   line-height: 1.15;
   letter-spacing: -.04em;
 }
+
+.astryx-nav-style-settings {
+  margin-bottom: 24px;
+}
+.astryx-nav-style-settings > p {
+  margin: 0 0 8px;
+  color: var(--astryx-muted);
+  font-size: .875rem;
+}
+.astryx-nav-style-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.astryx-nav-style-options > button {
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid var(--astryx-line);
+  border-radius: var(--astryx-radius-control);
+  color: var(--astryx-text);
+  background: var(--astryx-surface);
+}
+.astryx-nav-style-options > button[aria-pressed='true'] {
+  border-color: var(--astryx-accent);
+  background: var(--astryx-accent-soft);
+  font-weight: 700;
+}
+.astryx-nav-style-options > button:focus-visible {
+  outline: 2px solid var(--astryx-focus);
+  outline-offset: 2px;
+}
+@media (min-width: 768px) {
+  .astryx-nav-style-settings { display: none; }
+}

@@ -876,6 +876,66 @@ async function visibleTextCount(page: import('@playwright/test').Page, text: str
   }, text)
 }
 
+test('mobile glass navigation can return to classic from Appearance', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 740 })
+  await page.goto('/e2e/selected-family-app.harness.html?albums=6&feedPhotos&channelMemory')
+  const navigation = page.getByTestId('bottom-navigation').filter({ visible: true })
+  const indicator = navigation.locator('.astryx-nav-indicator')
+  const currentTab = navigation.locator('[aria-current="page"]')
+  await expect(navigation).toHaveAttribute('data-nav-style', 'glass')
+  await expect(currentTab).toHaveText('Лента')
+  await expect(indicator).toBeVisible()
+  await page.evaluate(() => {
+    document.addEventListener('animationstart', (event) => {
+      if (event.animationName === 'astryx-nav-slide') document.documentElement.dataset.navSlideObserved = 'true'
+    })
+  })
+
+  await navigation.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await expect(currentTab).toHaveText('Альбомы')
+  await expect(page.locator('html')).toHaveAttribute('data-nav-slide-observed', 'true')
+  await expect.poll(async () => {
+    const [pill, tab] = await Promise.all([indicator.boundingBox(), currentTab.boundingBox()])
+    return pill && tab && Math.abs(pill.x + pill.width / 2 - tab.x - tab.width / 2) < 2
+  }).toBe(true)
+
+  await navigation.getByRole('button', { name: 'Семья', exact: true }).click()
+  await expect(currentTab).toHaveText('Семья')
+  await page.screenshot({ path: testInfo.outputPath('mobile-nav-glass.png'), animations: 'disabled' })
+  await navigation.getByRole('button', { name: 'Добавить', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Добавить воспоминание' })).toBeVisible()
+  await expect(page.locator('[data-navigation-surface="family"]')).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  await page.locator('[data-navigation-surface="family"]').getByRole('button', { name: 'Настройки', exact: true }).click()
+  await page.getByRole('button', { name: /^Оформление/ }).click()
+  const styleOptions = page.getByRole('group', { name: 'Нижнее меню' })
+  const classic = styleOptions.getByRole('button', { name: 'Классическое' })
+  const glass = styleOptions.getByRole('button', { name: 'Стекло' })
+  await expect(glass).toHaveAttribute('aria-pressed', 'true')
+  await classic.click()
+  await expect(classic).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.press('Escape')
+  await expect(navigation).toHaveAttribute('data-nav-style', 'classic')
+  await expect(indicator).toBeHidden()
+  await page.screenshot({ path: testInfo.outputPath('mobile-nav-classic.png'), animations: 'disabled' })
+  await page.reload()
+  await expect(navigation).toHaveAttribute('data-nav-style', 'classic')
+
+  await page.getByRole('button', { name: 'Настройки', exact: true }).click()
+  await page.getByRole('button', { name: /^Оформление/ }).click()
+  await expect(classic).toHaveAttribute('aria-pressed', 'true')
+  await glass.click()
+  await page.keyboard.press('Escape')
+  await expect(navigation).toHaveAttribute('data-nav-style', 'glass')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await navigation.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  await expect(currentTab).toHaveText('Альбомы')
+  await expect(indicator).toHaveCSS('animation-name', 'none')
+  await page.setViewportSize({ width: 1200, height: 800 })
+  await expect(indicator).toBeHidden()
+})
+
 for (const [source, tab] of [['feed', 'Лента'], ['family', 'Семья'], ['albums', 'Альбомы'], ['gifts', 'Вишлист']]) {
   test(`bottom Add sheet dims the open ${source} tab and returns to it`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 })
