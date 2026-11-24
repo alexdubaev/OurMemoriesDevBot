@@ -158,6 +158,25 @@ Documentation-only PRs have no runtime deployment. The initial installation of t
 release tooling uses the normal reviewed FULL release; future eligible UI commits
 then use the short lane. No product UI change is required merely to install tooling.
 
+### Windows SSH via WSL
+
+If Windows OpenSSH reports `connect to host app.memoly.ru port 22: Permission denied`,
+the direct TCP connection failed before SSH authentication. On a Windows workstation
+with the owner-provisioned identity loaded in the Windows SSH agent and the
+verified server host key in Windows `known_hosts`, run this read-only preflight
+from PowerShell:
+
+```powershell
+ssh.exe -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o 'ProxyCommand=C:/Windows/System32/wsl.exe -d Ubuntu --exec /usr/bin/nc -w 5 %h %p' root@app.memoly.ru true
+```
+
+The Ubuntu WSL distribution supplies `nc` for the TCP connection. Windows
+OpenSSH performs authentication and host-key verification. On exit code 0,
+pass the same `-o ProxyCommand=...` option to Windows `ssh.exe` and, if needed,
+`scp.exe` for the chosen release procedure. A host-key error or
+`Permission denied (publickey)` still requires the access stop in
+[Access and build inputs](#access-and-build-inputs).
+
 ### Access and build inputs
 
 For disk-constrained production, build the accepted immutable images off-host and
@@ -175,8 +194,11 @@ change application recovery, source/image checks or the S3 restore prerequisite.
   ssh -o BatchMode=yes -o StrictHostKeyChecking=yes root@app.memoly.ru true
   ```
 
-  If this fails, stop and ask the owner to provision the server access. Never look
-  for, print, commit, or request a private key in Git or chat.
+  If the access check fails, see [Windows SSH via WSL](#windows-ssh-via-wsl)
+  for the Windows TCP connection error. If the host identity or SSH access still
+  cannot be verified, stop and ask the owner to provision access through the
+  secure store or SSH agent. Never look for, print, commit, or request a private
+  key in Git or chat.
 - GitHub Actions CI/CD is not used. The owner-provisioned SSH access is the
   manual release route; never store private key values or paths in this repository.
 - The server stores PostgreSQL environment and MAX secrets under `/opt/memoly/env`
