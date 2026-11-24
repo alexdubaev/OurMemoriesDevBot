@@ -1,8 +1,10 @@
-import { useContext, type CSSProperties, type Ref } from 'react'
+import { useContext, type Ref } from 'react'
 
 import { Typography } from '@/components/typography'
+import { LiquidNavbarSurface, type NimbusFx } from '@/components/ui/liquid-glass-navbar'
 import { WebpIcon, type WebpIconName } from '@/components/WebpIcon'
 import { UiVersionContext } from '@/features/ui-version'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 import { useNavigationAppearance, type NavigationTab } from './navigation-appearance-context'
 
@@ -35,8 +37,10 @@ export function BottomNavigation({
 }: BottomNavigationProps) {
   const showIcons = useContext(UiVersionContext) === 'v2'
   const navAppearance = useNavigationAppearance()
+  const mobile = useIsMobile()
   const style = showIcons && navAppearance?.style === 'glass' ? 'glass' : 'classic'
-  const moving = navAppearance?.motion?.to === active ? navAppearance.motion : null
+  const glass = mobile && style === 'glass'
+  const moving = glass && navAppearance?.motion?.to === active ? navAppearance.motion : null
 
   function navigate(to: NavigationTab, onClick?: () => void) {
     if (!onClick) return
@@ -54,20 +58,20 @@ export function BottomNavigation({
       data-testid="bottom-navigation"
     >
       <Typography aria-hidden="true" as="span" className="astryx-nav-brand" variant="memoryScreen">memoLy</Typography>
-      <div className="astryx-nav-list">
-        {style === 'glass' ? <span
-          aria-hidden="true"
-          className="astryx-nav-indicator"
-          data-moving={moving ? 'true' : undefined}
-          onAnimationEnd={() => { if (moving) navAppearance?.finishMotion(moving) }}
-          style={{ '--nav-column': columns[active], '--nav-from-column': moving ? columns[moving.from] : undefined } as CSSProperties}
-        /> : null}
-        <NavButton active={active === 'feed'} icon={showIcons ? 'home' : undefined} label="Лента" onClick={() => navigate('feed', onFeed)} position="home" />
-        <NavButton active={active === 'albums'} icon={showIcons ? 'archive-box' : undefined} label="Альбомы" onClick={() => navigate('albums', onAlbums)} position="archive-box" />
+      <LiquidNavbarSurface
+        active={columns[active]}
+        className="astryx-nav-list"
+        enabled={glass}
+        fromIndex={moving ? columns[moving.from] : undefined}
+        onSettled={() => { if (moving) navAppearance?.finishMotion(moving) }}
+      >
+        <NavButton active={active === 'feed'} fx={moving?.to === 'feed' ? 'glow' : undefined} icon={showIcons ? 'home' : undefined} label="Лента" onClick={() => navigate('feed', onFeed)} position="home" />
+        <NavButton active={active === 'albums'} fx={moving?.to === 'albums' ? 'spin' : undefined} icon={showIcons ? 'archive-box' : undefined} label="Альбомы" onClick={() => navigate('albums', onAlbums)} position="archive-box" />
         {role === 'full' ? (
           <button
             aria-label="Добавить"
             className="astryx-nav-item astryx-nav-add"
+            data-liquid-nav-item
             data-nav-position="add"
             data-v2-add="true"
             disabled={!onAdd}
@@ -76,31 +80,33 @@ export function BottomNavigation({
             type="button"
           >
             {showIcons
-              ? <span aria-hidden="true" className="astryx-nav-plus"><WebpIcon decorative name="plus" size={20} /></span>
+              ? <span aria-hidden="true" className="astryx-nav-plus"><WebpIcon decorative name="plus" size={glass ? 18 : 20} /></span>
               : <Typography aria-hidden="true" as="span" className="astryx-nav-plus" variant="memoryNav">+</Typography>}
-            <Typography as="span" variant="memoryNav">Добавить</Typography>
+            <Typography as="span" className="nimbus-label" variant="memoryNav">Добавить</Typography>
           </button>
         ) : (
           <div
             aria-label="Режим просмотра"
             className="astryx-nav-item astryx-nav-viewer"
+            data-liquid-nav-item
             data-nav-position="viewer"
             data-nav-viewer="true"
             role="img"
           >
-            {showIcons ? <WebpIcon decorative name="lock" size={20} /> : null}
-            <Typography as="span" variant="memoryNav">Просмотр</Typography>
+            {showIcons ? <WebpIcon decorative name="lock" size={glass ? 18 : 20} /> : null}
+            <Typography as="span" className="nimbus-label" variant="memoryNav">Просмотр</Typography>
           </div>
         )}
-        <NavButton active={active === 'gifts'} icon={showIcons ? 'gift' : undefined} label="Вишлист" onClick={() => navigate('gifts', onGifts)} position="gifts" />
-        <NavButton active={active === 'family'} icon={showIcons ? 'family' : undefined} label="Семья" onClick={() => navigate('family', onFamily)} position="family" />
-      </div>
+        <NavButton active={active === 'gifts'} fx={moving?.to === 'gifts' ? 'pop' : undefined} icon={showIcons ? 'gift' : undefined} label="Вишлист" onClick={() => navigate('gifts', onGifts)} position="gifts" />
+        <NavButton active={active === 'family'} fx={moving?.to === 'family' ? 'wave' : undefined} icon={showIcons ? 'family' : undefined} label="Семья" onClick={() => navigate('family', onFamily)} position="family" />
+      </LiquidNavbarSurface>
     </nav>
   )
 }
 
-function NavButton({ active, icon, label, onClick, position }: {
+function NavButton({ active, fx, icon, label, onClick, position }: {
   active: boolean
+  fx?: NimbusFx
   icon?: WebpIconName
   label: string
   onClick?: () => void
@@ -109,14 +115,16 @@ function NavButton({ active, icon, label, onClick, position }: {
   return (
     <button
       aria-current={active ? 'page' : undefined}
+      aria-label={label}
       className="astryx-nav-item"
+      data-liquid-nav-item
       data-nav-position={position}
       data-v2-active={active ? 'true' : undefined}
       onClick={onClick}
       type="button"
     >
-      {icon ? <WebpIcon decorative name={icon} size={20} /> : null}
-      <Typography as="span" variant="memoryNav">{label}</Typography>
+      {icon ? <span className="astryx-nav-icon nv-ico" data-fx={fx}><WebpIcon decorative name={icon} size={20} /></span> : null}
+      <Typography as="span" className="nimbus-label" variant="memoryNav">{label}</Typography>
     </button>
   )
 }

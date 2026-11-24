@@ -878,29 +878,44 @@ async function visibleTextCount(page: import('@playwright/test').Page, text: str
 
 test('mobile glass navigation can return to classic from Appearance', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 740 })
+  await page.addInitScript(() => {
+    const blobUniforms = new WeakSet<WebGLUniformLocation>()
+    const prototype = WebGLRenderingContext.prototype
+    const getUniformLocation = prototype.getUniformLocation
+    const uniform4fv = prototype.uniform4fv
+    prototype.getUniformLocation = function (program, name) {
+      const location = getUniformLocation.call(this, program, name)
+      if (location && name === 'uBlob') blobUniforms.add(location)
+      return location
+    }
+    prototype.uniform4fv = function (location, values) {
+      uniform4fv.call(this, location, values)
+      if (!location || !blobUniforms.has(location) || !(values instanceof Float32Array) || !(this.canvas instanceof HTMLCanvasElement)) return
+      const canvas = this.canvas
+      const selected = canvas.parentElement?.querySelector<HTMLElement>('[aria-current="page"]')
+      if (!selected?.offsetWidth) return
+      const target = 14 + selected.offsetLeft + selected.offsetWidth / 2
+      const stretched = Math.abs(values[0] - values[4]) > 6
+      if (Math.abs(values[0] - target) > 6) canvas.dataset.leftTarget = 'true'
+      if (stretched) canvas.dataset.stretched = 'true'
+      if (values[11] > 0) canvas.dataset.split = 'true'
+      canvas.dataset.aligned = String(Math.abs(values[0] - target) < 2 && !stretched)
+    }
+  })
   await page.goto('/e2e/selected-family-app.harness.html?albums=6&feedPhotos&channelMemory')
   const navigation = page.getByTestId('bottom-navigation').filter({ visible: true })
-  const indicator = navigation.locator('.astryx-nav-indicator')
+  const canvas = navigation.locator('.nimbus-water')
   const currentTab = navigation.locator('[aria-current="page"]')
   await expect(navigation).toHaveAttribute('data-nav-style', 'glass')
   await expect(currentTab).toHaveText('Лента')
-  await expect(indicator).toBeVisible()
-  await page.evaluate(() => {
-    document.addEventListener('animationstart', (event) => {
-      if (event.animationName === 'astryx-nav-slide') document.documentElement.dataset.navSlideObserved = 'true'
-    })
-  })
-
-  await navigation.getByRole('button', { name: 'Альбомы', exact: true }).click()
-  await expect(currentTab).toHaveText('Альбомы')
-  await expect(page.locator('html')).toHaveAttribute('data-nav-slide-observed', 'true')
-  await expect.poll(async () => {
-    const [pill, tab] = await Promise.all([indicator.boundingBox(), currentTab.boundingBox()])
-    return pill && tab && Math.abs(pill.x + pill.width / 2 - tab.x - tab.width / 2) < 2
-  }).toBe(true)
+  await expect(canvas).toBeVisible()
+  await expect(canvas).toHaveAttribute('data-aligned', 'true')
 
   await navigation.getByRole('button', { name: 'Семья', exact: true }).click()
   await expect(currentTab).toHaveText('Семья')
+  await expect(canvas).toHaveAttribute('data-stretched', 'true')
+  await expect(canvas).toHaveAttribute('data-split', 'true')
+  await expect(canvas).toHaveAttribute('data-aligned', 'true')
   await page.screenshot({ path: testInfo.outputPath('mobile-nav-glass.png'), animations: 'disabled' })
   await navigation.getByRole('button', { name: 'Добавить', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Добавить воспоминание' })).toBeVisible()
@@ -917,7 +932,7 @@ test('mobile glass navigation can return to classic from Appearance', async ({ p
   await expect(classic).toHaveAttribute('aria-pressed', 'true')
   await page.keyboard.press('Escape')
   await expect(navigation).toHaveAttribute('data-nav-style', 'classic')
-  await expect(indicator).toBeHidden()
+  await expect(canvas).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('mobile-nav-classic.png'), animations: 'disabled' })
   await page.reload()
   await expect(navigation).toHaveAttribute('data-nav-style', 'classic')
@@ -931,9 +946,35 @@ test('mobile glass navigation can return to classic from Appearance', async ({ p
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await navigation.getByRole('button', { name: 'Альбомы', exact: true }).click()
   await expect(currentTab).toHaveText('Альбомы')
-  await expect(indicator).toHaveCSS('animation-name', 'none')
+  await expect(canvas).toHaveAttribute('data-aligned', 'true')
+  await expect(canvas).not.toHaveAttribute('data-left-target', 'true')
   await page.setViewportSize({ width: 1200, height: 800 })
-  await expect(indicator).toBeHidden()
+  await expect(canvas).toHaveCount(0)
+})
+
+test('mobile glass navigation still follows the selected tab without WebGL', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 })
+  await page.addInitScript(() => {
+    const prototype = HTMLCanvasElement.prototype
+    prototype.getContext = new Proxy(prototype.getContext, {
+      apply(target, canvas, args) {
+        return args[0] === 'webgl' ? null : Reflect.apply(target, canvas, args)
+      },
+    })
+  })
+  await page.goto('/e2e/selected-family-app.harness.html?albums=6&feedPhotos')
+  const navigation = page.getByTestId('bottom-navigation').filter({ visible: true })
+  const drop = navigation.locator('.nimbus-drop')
+  await expect(drop).toBeVisible()
+  await navigation.getByRole('button', { name: 'Альбомы', exact: true }).click()
+  const current = navigation.locator('[aria-current="page"]')
+  await expect(current).toHaveText('Альбомы')
+  await expect.poll(async () => {
+    const [water, tab] = await Promise.all([drop.boundingBox(), current.boundingBox()])
+    return water && tab && Math.abs(water.x + water.width / 2 - tab.x - tab.width / 2) < 2
+  }).toBe(true)
+  await navigation.getByRole('button', { name: 'Добавить', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Добавить воспоминание' })).toBeVisible()
 })
 
 for (const [source, tab] of [['feed', 'Лента'], ['family', 'Семья'], ['albums', 'Альбомы'], ['gifts', 'Вишлист']]) {
