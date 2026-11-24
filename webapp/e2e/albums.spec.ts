@@ -456,8 +456,9 @@ test('MAX authenticated albums persist year chapters and a text event through re
   await expect(page.getByTestId('bottom-navigation')).toBeVisible()
   // A family album is available before the child profile is completed.
   await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Создать альбом', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Создать альбом', exact: true }).click()
+  const createAlbum = page.locator('.albums-heading').getByRole('button', { name: 'Создать альбом', exact: true })
+  await expect(createAlbum).toBeVisible()
+  await createAlbum.click()
   await page.getByRole('button', { name: /Свободный альбом/ }).click()
   await page.getByLabel('Название альбома').fill('Семейная поездка')
   await page.getByRole('button', { name: 'Создать', exact: true }).click()
