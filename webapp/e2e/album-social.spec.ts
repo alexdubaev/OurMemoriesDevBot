@@ -29,7 +29,7 @@ async function start(page: Page) {
   const home = await page.request.get('/api/v1/me/families', { headers })
   const familyId = z.object({ ownFamilyId: z.string() }).parse(await home.json()).ownFamilyId
   await page.getByRole('button', { name: 'Альбомы', exact: true }).click()
-  await page.getByRole('button', { name: 'Создать альбом', exact: true }).click()
+  await page.locator('.albums-heading').getByRole('button', { name: 'Создать альбом', exact: true }).click()
   await page.getByRole('button', { name: /Свободный альбом/ }).click()
   await page.getByLabel('Название альбома').fill('Социальная история')
   await page.getByRole('button', { name: 'Создать', exact: true }).click()
