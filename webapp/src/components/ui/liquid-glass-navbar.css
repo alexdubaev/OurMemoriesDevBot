@@ -11,7 +11,7 @@
   padding: 6px;
   border-radius: 999px;
   isolation: isolate;
-  font-family: ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-family: var(--memoly-font-family);
   -webkit-font-smoothing: antialiased;
   user-select: none;
   -webkit-tap-highlight-color: transparent;

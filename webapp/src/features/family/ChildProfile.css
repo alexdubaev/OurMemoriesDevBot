@@ -1,7 +1,7 @@
 /* Child-profile declarations transcribed from #familyChild and its design-system layer in
    docs/memoly-final-functional-state-pack.html. Selectors are scoped to this React profile. */
 .family-screen.child-screen:has(.child-profile) {
-  --ds-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --ds-font: var(--memoly-font-family);
   --ds-fs-page: 21px;
   --ds-fs-entity: 18px;
   --ds-fs-body: 14px;
@@ -722,7 +722,7 @@
   padding: calc(12px + var(--host-inset-top, 0px)) calc(14px + var(--host-inset-right, 0px)) calc(34px + var(--host-inset-bottom, 0px)) calc(14px + var(--host-inset-left, 0px));
   color: var(--ink);
   background: linear-gradient(180deg, #fbfcfa 0%, var(--theme-bg, #f3f5f1) 100%);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  font-family: var(--memoly-font-family);
 }
 .child-edit-v2-screen .child-edit-v2-titlebar {
   display: grid;
@@ -1019,7 +1019,7 @@
 /* Host adaptations and canonical photo success state. */
 .child-photo-v2-screen,
 .child-photo-saved-v2-screen{
-  --ds-font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;
+  --ds-font:var(--memoly-font-family);
   --ds-fs-meta:11px;
   --ds-muted:var(--muted,#74838c);
   --ds-ink:var(--ink,#17375c);
