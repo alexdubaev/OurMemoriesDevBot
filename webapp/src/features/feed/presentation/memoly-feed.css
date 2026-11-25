@@ -25,7 +25,7 @@
   min-height: 100dvh;
   color: var(--memoly-ink);
   background: radial-gradient(ellipse at 10% 9%, var(--memoly-canvas-glow) 0, transparent 38%), radial-gradient(ellipse at 95% 35%, var(--memoly-canvas-warm) 0, transparent 40%), var(--memoly-canvas);
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--memoly-font-family);
   padding: 18px;
 }
 
@@ -100,7 +100,7 @@
     radial-gradient(circle at 12% 18%, rgba(255,255,255,.68), transparent 26%),
     radial-gradient(circle at 86% 76%, rgba(214,224,218,.42), transparent 30%),
     linear-gradient(180deg, var(--theme-bg-top, var(--memoly-canvas)) 0%, var(--theme-bg-bottom, var(--memoly-canvas)) 100%);
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--memoly-font-family);
 }
 
 [data-memoly-feed] .app {
@@ -114,7 +114,7 @@
 [data-memoly-feed] .feed-rest { padding-inline: max(16px, var(--host-inset-left, 0px)) max(16px, var(--host-inset-right, 0px)); }
 [data-memoly-feed] .feed-content { display: flex; min-width: 0; flex-direction: column; gap: 0; }
 [data-memoly-feed] .feed-unread-action,
-[data-memoly-feed] .feed-unread-mode { display: flex; min-height: 44px; align-items: center; justify-content: center; margin: 8px auto 12px; color: var(--memoly-ink); font: 500 14px/20px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+[data-memoly-feed] .feed-unread-mode { display: flex; min-height: 44px; align-items: center; justify-content: center; margin: 8px auto 12px; color: var(--memoly-ink); font: 500 14px/20px var(--memoly-font-family); }
 [data-memoly-feed] .feed-unread-label { color: inherit; font: inherit !important; }
 [data-memoly-feed] .feed-unread-action { min-width: 44px; padding: 0 8px; white-space: nowrap; }
 [data-memoly-feed] .feed-unread-mode { max-width: 100%; gap: 2px; }
@@ -301,7 +301,7 @@
   background-color: #f3effa;
   background-image: radial-gradient(ellipse at 5% 6%, rgb(231 245 255 / 72%), transparent 58%), linear-gradient(120deg, var(--note-gradient-start) 0%, var(--note-gradient-middle) 52%, var(--note-gradient-end) 100%);
   box-shadow: none;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-family: var(--memoly-font-family);
   font-size: 20px;
   font-weight: 400;
   line-height: 1.5;
